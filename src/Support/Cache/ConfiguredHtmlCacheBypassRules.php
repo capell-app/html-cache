@@ -22,6 +22,17 @@ final class ConfiguredHtmlCacheBypassRules
         return $this->headerMatches($request);
     }
 
+    public function shouldBypassUrl(string $url): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+
+        if (! is_string($path) || $path === '') {
+            return false;
+        }
+
+        return $this->pathMatches(Request::create($path));
+    }
+
     private function pathMatches(Request $request): bool
     {
         $path = $this->normalizedPath($request);

@@ -9,10 +9,12 @@ use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
@@ -45,6 +47,7 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $request = $this->requestForStaleCachedUrl($staleCachedUrl);
+        resolve(HtmlCachePublicationGuard::class)->capture($request);
         $previousRequest = resolve('request');
         app()->instance('request', $request);
 
@@ -60,7 +63,7 @@ final class RefreshCachedUrlAtomicallyAction
             $rejectionReason = $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
 
             if ($rejectionReason instanceof HtmlCacheEligibilityReason) {
-                throw new RuntimeException(sprintf(
+                $message = sprintf(
                     'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Reason: %s. Status: %d. Content-Type: %s. Cache-Control: %s. Vary: %s. Cookies: %d. Query count: %d.',
                     $staleCachedUrl->url,
                     $rejectionReason->value,
@@ -70,7 +73,13 @@ final class RefreshCachedUrlAtomicallyAction
                     json_encode($response->headers->all('Vary'), JSON_THROW_ON_ERROR),
                     count($response->headers->getCookies()),
                     $request->query->count(),
-                ));
+                );
+
+                if ($rejectionReason->isDeterministicForStaleRefresh()) {
+                    throw new StaleCachedUrlNotApplicableException($rejectionReason, $message);
+                }
+
+                throw new RuntimeException($message);
             }
 
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
@@ -133,6 +142,10 @@ final class RefreshCachedUrlAtomicallyAction
             return $packageReason;
         }
 
+        if ($response->isRedirection()) {
+            return HtmlCacheEligibilityReason::RedirectUrl;
+        }
+
         $pageCache = resolve(PageCache::class);
 
         if ($request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) === true
@@ -159,7 +172,9 @@ final class RefreshCachedUrlAtomicallyAction
             return $pageCacheReason;
         }
 
-        WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl);
+        if (! WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl, $request)) {
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; content was invalidated during rendering.', $staleCachedUrl->url));
+        }
         if (! $suppressInlineEdgePurge) {
             PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
         }

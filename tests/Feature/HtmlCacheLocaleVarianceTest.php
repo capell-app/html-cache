@@ -147,7 +147,7 @@ it('bypasses same host and path locale variants negotiated by configured headers
     $englishRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $englishRequest);
     config()->set('capell-html-cache.bypass.headers', []);
-    resolve(PageCache::class)->cache($englishRequest, response('english about page', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($englishRequest), response('english about page', 200, ['Content-Type' => 'text/html']));
     config()->set('capell-html-cache.bypass.headers', ['Accept-Language']);
 
     $frenchRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
@@ -182,11 +182,11 @@ it('serves a distinct cached file per host so distinct-host locales do not colli
 
     $englishRequest = Request::create('https://en.example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $englishRequest);
-    resolve(PageCache::class)->cache($englishRequest, response('english about page', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($englishRequest), response('english about page', 200, ['Content-Type' => 'text/html']));
 
     $frenchRequest = Request::create('https://fr.example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $frenchRequest);
-    resolve(PageCache::class)->cache($frenchRequest, response('french about page', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($frenchRequest), response('french about page', 200, ['Content-Type' => 'text/html']));
 
     expect(Storage::disk('page_cache')->exists('https.en.example.test/about.html'))->toBeTrue()
         ->and(Storage::disk('page_cache')->exists('https.fr.example.test/about.html'))->toBeTrue()

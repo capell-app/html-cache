@@ -60,7 +60,7 @@ final class BuildHtmlCacheEligibilityReportAction
             blockingPackages: resolve(ExtensionCacheSafetyResolver::class)->blockingPackageNames(),
             cacheTags: resolve(ExtensionCacheSafetyResolver::class)->cacheTags(),
             cacheState: $cacheState,
-            stale: $staleCachedUrl instanceof StaleCachedUrl && $staleCachedUrl->status !== StaleCachedUrl::STATUS_PROCESSED,
+            stale: $staleCachedUrl instanceof StaleCachedUrl && ! $staleCachedUrl->isTerminal(),
             lastCachedAt: $cachedUrl?->cached_at?->toIso8601String(),
             fragmented: $this->fragmentKeys() !== [],
             fragmentKeys: $this->fragmentKeys(),
@@ -316,7 +316,7 @@ final class BuildHtmlCacheEligibilityReportAction
             return 'unknown';
         }
 
-        if ($staleCachedUrl instanceof StaleCachedUrl && $staleCachedUrl->status !== StaleCachedUrl::STATUS_PROCESSED) {
+        if ($staleCachedUrl instanceof StaleCachedUrl && ! $staleCachedUrl->isTerminal()) {
             return 'stale';
         }
 

@@ -43,11 +43,14 @@ return [
     ],
     'origin_stale_while_revalidate' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
+        'connection' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR_CONNECTION'),
+        'dispatch_interval_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_SWR_DISPATCH_INTERVAL_SECONDS', 30),
     ],
     'request_coalescing' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_REQUEST_COALESCING', true),
         'lock_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_LOCK_SECONDS', 15),
         'wait_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_WAIT_SECONDS', 3),
+        'uncacheable_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_UNCACHEABLE_SECONDS', 5),
     ],
     'cache_vary_headers' => ['Accept-Encoding'],
     'stateless_pagination' => [
@@ -115,6 +118,9 @@ return [
         */
         'web_node_count' => max(1, $integerEnv('CAPELL_HTML_CACHE_WEB_NODE_COUNT', 1)),
         'shared_page_cache' => Env::get('CAPELL_HTML_CACHE_SHARED_PAGE_CACHE', false),
+        // Shared cache nodes must use the same persistent POSIX lock file,
+        // outside the page-cache tree so clearing pages never unlinks its inode.
+        'publication_lock_path' => Env::get('CAPELL_HTML_CACHE_PUBLICATION_LOCK_PATH'),
     ],
     'cache_skip_authenticated' => true,
     'anonymous_session_cookie' => [

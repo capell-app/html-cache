@@ -44,7 +44,7 @@ it('defensively rejects direct cache writes for non-cacheable extension error ou
     recordHtmlCacheExtensionContribution(cacheable: false);
 
     resolve(PageCache::class)->cache(
-        $request,
+        $this->beginCacheRender($request),
         response('unauthorized extension html', 401, ['Content-Type' => 'text/html']),
     );
 

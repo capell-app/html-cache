@@ -8,7 +8,6 @@ use Capell\Core\Models\Language;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -37,10 +36,6 @@ use Override;
  * @property-read Language|null $language
  * @property-read Site|null $site
  * @property-read SiteDomain|null $siteDomain
- *
- * @method static Builder<static>|CachedModelUrl newModelQuery()
- * @method static Builder<static>|CachedModelUrl newQuery()
- * @method static Builder<static>|CachedModelUrl query()
  */
 final class CachedModelUrl extends Model
 {

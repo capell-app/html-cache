@@ -172,6 +172,37 @@ it('marks manually requested cached URLs once per cache target and ignores empty
         ->and(StaleCachedUrl::query()->where('url', $url)->first()?->reason)->toBe('direct');
 });
 
+it('does not enqueue configured bypass URLs and retires already queued ones as not applicable', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $url = 'https://example.test/account/profile';
+
+    config()->set('capell-html-cache.bypass.paths', ['/account/*']);
+
+    expect(MarkCachedUrlStaleAction::run($url, 'manual'))->toBe(0)
+        ->and(StaleCachedUrl::query()->where('url', $url)->exists())->toBeFalse();
+
+    config()->set('capell-html-cache.bypass.paths', []);
+    expect(MarkCachedUrlStaleAction::run($url, 'manual'))->toBe(1);
+
+    config()->set('capell-html-cache.bypass.paths', ['/account/*']);
+    Route::get('/account/profile', fn (): mixed => response('private page', 200, ['Content-Type' => 'text/html']));
+
+    $staleCachedUrl = StaleCachedUrl::query()->where('url', $url)->firstOrFail();
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($staleCachedUrl->isTerminal())->toBeTrue()
+        ->and($staleCachedUrl->last_error)->toContain('Reason: configured_bypass_rule')
+        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
+});
+
 it('clears cached html immediately when a site domain changes in scheduled mode', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.invalidation.mode', 'scheduled');
@@ -282,6 +313,25 @@ it('atomically refreshes stale cached html and marks the stale row processed', f
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($staleCachedUrl->processed_at)->not->toBeNull();
+});
+
+it('retires redirect responses as not applicable instead of exhausting the stale row', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    Route::get('/renamed', fn (): mixed => redirect('/new-location', Response::HTTP_MOVED_PERMANENTLY));
+
+    $staleCachedUrl = staleCacheRowForCoverage($siteDomain, '/renamed', StaleCachedUrl::STATUS_PENDING);
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($staleCachedUrl->isTerminal())->toBeTrue()
+        ->and($staleCachedUrl->last_error)->toContain('Reason: redirect_url')
+        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
 });
 
 it('refreshes stale HTML through middleware with no configured Vary headers', function (): void {
@@ -546,7 +596,8 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
     ProcessStaleHtmlCacheAction::run(1);
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
-        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($staleCachedUrl->isTerminal())->toBeTrue()
         ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: package_cache_blocking');
 });
 
@@ -998,6 +1049,8 @@ it('marks repeatedly failing stale cache rows exhausted after the configured max
 
     expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_EXHAUSTED)
+        ->and($staleCachedUrl->isTerminal())->toBeFalse()
+        ->and(StaleCachedUrl::terminalStatuses())->not->toContain($staleCachedUrl->status)
         ->and($staleCachedUrl->attempts)->toBe(2)
         ->and($staleCachedUrl->claim_token)->toBeNull()
         ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);

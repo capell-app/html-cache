@@ -8,7 +8,6 @@ use Capell\Core\Models\Language;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -38,10 +37,6 @@ use Override;
  * @property-read Language|null $language
  * @property-read Site|null $site
  * @property-read SiteDomain|null $siteDomain
- *
- * @method static Builder<static>|StaleCachedUrl newModelQuery()
- * @method static Builder<static>|StaleCachedUrl newQuery()
- * @method static Builder<static>|StaleCachedUrl query()
  */
 final class StaleCachedUrl extends Model
 {
@@ -57,6 +52,8 @@ final class StaleCachedUrl extends Model
     public const string STATUS_FAILED = 'failed';
 
     public const string STATUS_EXHAUSTED = 'exhausted';
+
+    public const string STATUS_NOT_APPLICABLE = 'not_applicable';
 
     /** @var list<string> */
     protected $fillable = [
@@ -86,6 +83,17 @@ final class StaleCachedUrl extends Model
             $siteDomainId === null ? 'domain:any' : 'domain:' . $siteDomainId,
             $path,
         ]));
+    }
+
+    /** @return list<string> */
+    public static function terminalStatuses(): array
+    {
+        return [self::STATUS_PROCESSED, self::STATUS_NOT_APPLICABLE];
+    }
+
+    public function isTerminal(): bool
+    {
+        return in_array($this->status, self::terminalStatuses(), true);
     }
 
     /** @return BelongsTo<Language, $this> */

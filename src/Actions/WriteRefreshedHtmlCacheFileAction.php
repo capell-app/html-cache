@@ -6,7 +6,9 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -17,15 +19,17 @@ use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @method static void run(Response $response, StaleCachedUrl $staleCachedUrl)
+ * @method static bool run(Response $response, StaleCachedUrl $staleCachedUrl, Request $request)
  */
 final class WriteRefreshedHtmlCacheFileAction
 {
     use AsFake;
     use AsObject;
 
-    public function handle(Response $response, StaleCachedUrl $staleCachedUrl): void
+    public function handle(Response $response, StaleCachedUrl $staleCachedUrl, Request $request): bool
     {
+        $publication = resolve(HtmlCachePublicationGuard::class);
+        $token = $publication->token($request);
         $cachePath = $response->getStatusCode() === Response::HTTP_NOT_FOUND
             ? $staleCachedUrl->error_cache_path
             : $staleCachedUrl->cache_path;
@@ -50,12 +54,16 @@ final class WriteRefreshedHtmlCacheFileAction
             throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; stale row cache path was outside the cache disk.', $staleCachedUrl->url));
         }
 
-        File::ensureDirectoryExists(dirname($path), 0775, true);
-        $replaced = $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
+        return $publication->publish($token, function () use ($staleCachedUrl, $path, $content, $response, $disk, $safeCachePath): bool {
+            File::ensureDirectoryExists(dirname($path), 0775, true);
+            $replaced = $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
 
-        if ($replaced && $response->getStatusCode() !== Response::HTTP_NOT_FOUND) {
-            $disk->delete($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION);
-        }
+            if ($replaced && $response->getStatusCode() !== Response::HTTP_NOT_FOUND) {
+                $disk->delete($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION);
+            }
+
+            return $replaced;
+        });
     }
 
     private function safeCachePath(string $cachePath): string

@@ -17,6 +17,7 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Jobs\FlushHtmlCacheHitBatchJob;
+use Capell\HtmlCache\Jobs\RefreshOriginStaleCachedUrlJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
@@ -117,7 +118,7 @@ it('expires stale filesystem cache entries before serving them', function (): vo
     app()->instance('request', $request);
 
     $pageCache = resolve(PageCache::class);
-    $pageCache->cache($request, response('expired html', 200, ['Content-Type' => 'text/html']));
+    $pageCache->cache($this->beginCacheRender($request), response('expired html', 200, ['Content-Type' => 'text/html']));
 
     $cachePath = Storage::disk('page_cache')->path('https.example.test/expired.html');
     touch($cachePath, now()->subSeconds(61)->getTimestamp());
@@ -209,14 +210,14 @@ it('bounds cached not found pages and prunes the oldest entries', function (): v
     $firstRequest = Request::create('https://example.test/missing-one', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $firstRequest);
     $pageCache = resolve(PageCache::class);
-    $pageCache->cache($firstRequest, response('first missing', 404, ['Content-Type' => 'text/html']));
+    $pageCache->cache($this->beginCacheRender($firstRequest), response('first missing', 404, ['Content-Type' => 'text/html']));
 
     $firstPath = Storage::disk('page_cache')->path('https.example.test/missing-one.404.html');
     touch($firstPath, now()->subMinute()->getTimestamp());
 
     foreach (['missing-two', 'missing-three'] as $path) {
         $request = Request::create('https://example.test/' . $path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
-        $pageCache->cache($request, response($path, 404, ['Content-Type' => 'text/html']));
+        $pageCache->cache($this->beginCacheRender($request), response($path, 404, ['Content-Type' => 'text/html']));
     }
 
     $errorPages = collect(File::allFiles(Storage::disk('page_cache')->path('https.example.test')))
@@ -275,7 +276,7 @@ it('bypasses cached html for requests with a session cookie by default', functio
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
 
     $request->cookies->set('capell_session', 'session-value');
     $request->setUserResolver(fn (): User => User::factory()->create());
@@ -302,7 +303,7 @@ it('can serve cached html for requests with a session cookie when configured', f
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
 
     $request->cookies->set('capell_session', 'session-value');
     $request->setUserResolver(fn (): User => User::factory()->create());
@@ -329,7 +330,7 @@ it('serves a proved state-free shell to an anonymous session cookie while authen
     ]);
     $cacheRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $cacheRequest);
-    resolve(PageCache::class)->cache($cacheRequest, response('static shell', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($cacheRequest), response('static shell', 200, ['Content-Type' => 'text/html']));
 
     $anonymousRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $anonymousRequest->cookies->set('capell_session', 'anonymous-session');
@@ -386,7 +387,7 @@ it('uses configured public cache-control ages for cached responses', function ()
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
     $cachedModelUrl = CachedModelUrl::query()->create([
         'url' => 'https://example.test/about',
         'url_hash' => CachedModelUrl::hashUrl('https://example.test/about'),
@@ -426,7 +427,7 @@ it('refuses to read or write cache files for hostile request path segments', fun
     expect($pageCache->shouldCachePage($request, $response))->toBeFalse()
         ->and($pageCache->getCachePage($request))->toBeFalse();
 
-    $pageCache->cache($request, $response);
+    $pageCache->cache($this->beginCacheRender($request), $response);
 
     $cacheRoot = Storage::disk('page_cache')->path('');
     $cachedFiles = File::isDirectory($cacheRoot) ? Storage::disk('page_cache')->allFiles() : [];
@@ -537,7 +538,7 @@ it('bypasses cached html for authenticated requests without a session cookie by 
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
 
     $request->setUserResolver(fn (): User => User::factory()->create());
 
@@ -563,7 +564,7 @@ it('bypasses cached html for access gated protected requests', function (): void
     $request->attributes->set('access_gate.protected', true);
 
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
@@ -588,7 +589,7 @@ it('bypasses cached html for access gate browser token requests even when authen
     $request->cookies->set('capell_access_gate_browser_token', 'token-value');
 
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
@@ -612,7 +613,7 @@ it('bypasses cache reads and writes for configured path rules', function (): voi
     $request = Request::create('https://example.test/account/profile', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
     config()->set('capell-html-cache.bypass.paths', []);
-    resolve(PageCache::class)->cache($request, response('cached profile', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached profile', 200, ['Content-Type' => 'text/html']));
     config()->set('capell-html-cache.bypass.paths', ['/account/*']);
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
@@ -638,7 +639,7 @@ it('bypasses cache reads and writes for configured cookie rules', function (): v
     $request = Request::create('https://example.test/pricing', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
     config()->set('capell-html-cache.bypass.cookies', []);
-    resolve(PageCache::class)->cache($request, response('cached pricing', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached pricing', 200, ['Content-Type' => 'text/html']));
     config()->set('capell-html-cache.bypass.cookies', ['currency_*']);
 
     $request->headers->set('Cookie', 'currency_bucket=gbp');
@@ -816,7 +817,7 @@ it('rejects cache eligibility for configured bypass rules', function (): void {
     $cookieRequest->cookies->set('preview_segment', 'beta');
 
     app()->instance('request', $pathRequest);
-    $pageCache->cache($pathRequest, $htmlResponse);
+    $pageCache->cache($this->beginCacheRender($pathRequest), $htmlResponse);
 
     expect($pageCache->shouldCachePage($pathRequest, $htmlResponse))->toBeFalse()
         ->and($pageCache->shouldCachePage($cookieRequest, $htmlResponse))->toBeFalse()
@@ -829,7 +830,7 @@ it('writes and forgets error cache files using the public page cache API', funct
     $request = Request::create('https://example.test/');
     $pageCache = resolve(PageCache::class);
 
-    $pageCache->cache($request, response('not found', 404, ['Content-Type' => 'text/html']));
+    $pageCache->cache($this->beginCacheRender($request), response('not found', 404, ['Content-Type' => 'text/html']));
 
     expect($pageCache->getCacheErrorPage($request))->toBe('not found')
         ->and($pageCache->forget('pc__index__pc'))->toBeTrue()
@@ -855,7 +856,7 @@ it('atomically replaces cache files only for the current stale cache claim', fun
     $validRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $validStaleUrl->getKey());
     $validRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, 'valid-claim');
 
-    $pageCache->cache($validRequest, response('fresh about', 200, ['Content-Type' => 'text/html']));
+    $pageCache->cache($this->beginCacheRender($validRequest), response('fresh about', 200, ['Content-Type' => 'text/html']));
 
     $invalidRequest = Request::create('https://example.test/contact');
     $invalidStaleUrl = StaleCachedUrl::query()->create([
@@ -872,7 +873,7 @@ it('atomically replaces cache files only for the current stale cache claim', fun
     $invalidRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $invalidStaleUrl->getKey());
     $invalidRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, 'new-claim');
 
-    $pageCache->cache($invalidRequest, response('fresh contact', 200, ['Content-Type' => 'text/html']));
+    $pageCache->cache($this->beginCacheRender($invalidRequest), response('fresh contact', 200, ['Content-Type' => 'text/html']));
 
     expect(file_get_contents($pageCache->getCachePath('about.html')))->toBe('fresh about')
         ->and(file_exists($pageCache->getCachePath('contact.html')))->toBeFalse()
@@ -937,7 +938,7 @@ it('returns cached 404 html with a 404 status code', function (): void {
     ]);
     $request = Request::create('https://example.test/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('missing cached html', 404, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('missing cached html', 404, ['Content-Type' => 'text/html']));
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
@@ -1022,7 +1023,7 @@ it('can bypass cache reads for internal stale refresh requests while still allow
     $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
 
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('old cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('old cached html', 200, ['Content-Type' => 'text/html']));
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
@@ -1045,7 +1046,7 @@ it('strips configured cookies from anonymous cache hits', function (): void {
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
     $cachedModelUrl = CachedModelUrl::query()->create([
         'url' => 'https://example.test/about',
         'url_hash' => CachedModelUrl::hashUrl('https://example.test/about'),
@@ -1085,7 +1086,7 @@ it('keeps anonymous cache-hit middleware decisions inside a small query budget',
     ]);
     $request = Request::create('https://example.test/budget', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
-    resolve(PageCache::class)->cache($request, response('cached budget html', 200, ['Content-Type' => 'text/html']));
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached budget html', 200, ['Content-Type' => 'text/html']));
     $cachedModelUrl = CachedModelUrl::query()->create([
         'url' => 'https://example.test/budget',
         'url_hash' => CachedModelUrl::hashUrl('https://example.test/budget'),
@@ -1115,9 +1116,11 @@ it('keeps anonymous cache-hit middleware decisions inside a small query budget',
         ->and($queryCount)->toBeLessThanOrEqual(5);
 });
 
-it('serves stale cached html while refreshing the origin cache after response', function (): void {
+it('serves stale cached html until the queued origin refresh runs', function (): void {
     Storage::fake('page_cache');
+    Queue::fake([RefreshOriginStaleCachedUrlJob::class]);
     config()->set('capell-html-cache.origin_stale_while_revalidate.enabled', true);
+    config()->set('capell-html-cache.origin_stale_while_revalidate.connection', 'database');
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
@@ -1156,6 +1159,12 @@ it('serves stale cached html while refreshing the origin cache after response', 
         $request,
         fn (): Response => response('uncached fallback', 200, ['Content-Type' => 'text/html']),
     );
+
+    capell_expect($response->getContent())->toBe('old cached html')
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached html');
+    Queue::assertPushed(RefreshOriginStaleCachedUrlJob::class, 1);
+    (new RefreshOriginStaleCachedUrlJob($url))->handle();
 
     capell_expect($response->getContent())->toBe('old cached html')
         ->and($staleCachedUrl->refresh()->last_error)->toBeNull()

@@ -73,7 +73,7 @@ final class PageCache
         return $this->join([$base, ...$segments]);
     }
 
-    public function cache(SymfonyRequest $request, SymfonyResponse $response): void
+    public function cache(SymfonyRequest $request, SymfonyResponse $response): bool
     {
         /** @var Request $laravelRequest */
         $laravelRequest = $request;
@@ -85,17 +85,17 @@ final class PageCache
             SymfonyResponse::HTTP_OK,
             SymfonyResponse::HTTP_NOT_FOUND,
         ], true)) {
-            return;
+            return false;
         }
 
         if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($laravelRequest)) {
-            return;
+            return false;
         }
 
         $cacheLocation = $this->getDirectoryAndFileNames($laravelRequest, $laravelResponse);
 
         if ($cacheLocation === null) {
-            return;
+            return false;
         }
 
         [$path, $filename, $extension] = $cacheLocation;
@@ -110,75 +110,88 @@ final class PageCache
         }
 
         if ($extension === 'html' && $this->containsUnsafeSharedHtml($laravelRequest, $content)) {
-            return;
+            return false;
         }
 
-        if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
-            $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
+        $publication = resolve(HtmlCachePublicationGuard::class);
+        $token = $publication->token($laravelRequest);
 
-            if (! $this->reserveErrorPageSlot($errorPath)) {
-                return;
+        if ($response->getStatusCode() !== SymfonyResponse::HTTP_NOT_FOUND && $extension === 'html' && $fragmentCache === null && config('capell-html-cache.minify_html', true) === true) {
+            $content = resolve(HtmlMinifier::class)->minify($content);
+        }
+
+        $published = $publication->publish($token, function () use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
+            if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
+                $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
+
+                if (! $this->reserveErrorPageSlot($errorPath)) {
+                    return false;
+                }
+
+                $this->files->makeDirectory($path, 0775, true, true);
+                if (! $this->writeCacheFile(
+                    $laravelRequest,
+                    $errorPath,
+                    $content,
+                )) {
+                    return false;
+                }
+
+                $fragmentMetadataPath = $errorPath . self::FRAGMENT_METADATA_EXTENSION;
+
+                if ($fragmentCache instanceof RenderHookFragmentCacheData) {
+                    $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+                    if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
+                        throw new RuntimeException('Unable to publish render hook fragment metadata for the cached 404 page.');
+                    }
+
+                    return true;
+                }
+
+                $this->files->delete($fragmentMetadataPath);
+
+                return true;
             }
 
             $this->files->makeDirectory($path, 0775, true, true);
-            if (! $this->writeCacheFile(
-                $laravelRequest,
-                $errorPath,
-                $content,
-            )) {
-                return;
+
+            $targetPath = $this->join([$path, $filename . '.' . $extension]);
+
+            if (! $this->reserveVariantSlot($targetPath, StatelessPaginationRequest::cacheKeySuffix($laravelRequest))) {
+                return false;
             }
 
-            $fragmentMetadataPath = $errorPath . self::FRAGMENT_METADATA_EXTENSION;
+            if (! $this->writeCacheFile(
+                $laravelRequest,
+                $targetPath,
+                $content,
+            )) {
+                return false;
+            }
+
+            $fragmentMetadataPath = $targetPath . self::FRAGMENT_METADATA_EXTENSION;
 
             if ($fragmentCache instanceof RenderHookFragmentCacheData) {
                 $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
                 if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
-                    throw new RuntimeException('Unable to publish render hook fragment metadata for the cached 404 page.');
+                    throw new RuntimeException('Unable to publish render hook fragment metadata for the cached page.');
                 }
 
-                return;
+                return true;
             }
 
             $this->files->delete($fragmentMetadataPath);
 
-            return;
+            return true;
+        });
+
+        if (! $published) {
+            $laravelRequest->attributes->set(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE, true);
         }
 
-        $this->files->makeDirectory($path, 0775, true, true);
-
-        $targetPath = $this->join([$path, $filename . '.' . $extension]);
-
-        if (! $this->reserveVariantSlot($targetPath, StatelessPaginationRequest::cacheKeySuffix($laravelRequest))) {
-            return;
-        }
-
-        if ($extension === 'html' && $fragmentCache === null && config('capell-html-cache.minify_html', true) === true) {
-            $content = resolve(HtmlMinifier::class)->minify($content);
-        }
-
-        if (! $this->writeCacheFile(
-            $laravelRequest,
-            $targetPath,
-            $content,
-        )) {
-            return;
-        }
-
-        $fragmentMetadataPath = $targetPath . self::FRAGMENT_METADATA_EXTENSION;
-
-        if ($fragmentCache instanceof RenderHookFragmentCacheData) {
-            $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-
-            if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
-                throw new RuntimeException('Unable to publish render hook fragment metadata for the cached page.');
-            }
-
-            return;
-        }
-
-        $this->files->delete($fragmentMetadataPath);
+        return $published;
     }
 
     public function getCachePage(Request $request): bool|string
@@ -307,28 +320,30 @@ final class PageCache
 
     public function forget(string $slug): bool
     {
-        $deleted = false;
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($slug): bool {
+            $deleted = false;
 
-        foreach (['html', 'json', 'xml'] as $extension) {
-            $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
+            foreach (['html', 'json', 'xml'] as $extension) {
+                $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
 
-            if ($extension === 'html') {
-                $deleted = $this->files->delete($this->getCachePath($slug . '.html' . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
+                if ($extension === 'html') {
+                    $deleted = $this->files->delete($this->getCachePath($slug . '.html' . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
+                }
             }
-        }
 
-        if ($this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION))) {
-            $deleted = true;
-        }
+            if ($this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION))) {
+                $deleted = true;
+            }
 
-        $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
+            $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
 
-        return $deleted;
+            return $deleted;
+        });
     }
 
     public function clear(?string $path = null): bool
     {
-        return $this->files->deleteDirectory($this->getCachePath($path), preserve: true);
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(fn (): bool => $this->files->deleteDirectory($this->getCachePath($path), preserve: true));
     }
 
     /** @return array<string, mixed> */

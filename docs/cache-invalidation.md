@@ -23,9 +23,91 @@ Route/structure model creates and deletes still trigger broad invalidation becau
 
 If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete, deletes the old cache files, and removes matching `cached_model_urls` rows.
 
-Failed refreshes retry after the configured backoff until `max_attempts` is reached. Rows that keep failing are marked `exhausted` for diagnostics and manual follow-up instead of being retried forever.
+Failed refreshes retry after the configured backoff until `max_attempts` is reached. Rows that keep failing are marked `exhausted` for diagnostics and manual follow-up instead of being retried forever. Deterministic ineligibility discovered during a refresh — such as a configured bypass path, a package that blocks shared caching, or a redirect response — is marked `not_applicable` and is not retried. Transient failures remain `failed`/`exhausted` and continue to signal an unfinished refresh.
 
 Every successful URL clear or stale refresh also queues an edge purge. A full local clear and global maintenance transitions queue a complete edge purge. Purge failures retry independently, so a temporary CDN API failure does not roll back the origin cache operation.
+
+## Cold Requests And Origin Refreshes
+
+Cold requests coalesce behind a bounded cache-lock wait when cache writes are
+enabled. A contender rechecks eligible cached HTML after waiting; if none is
+available and a cache write is still expected, it receives a translated `503`
+response with `Retry-After` and `private, no-store`. A process-held render lock
+prevents overlapping renders when the cache lease expires. These persistent lock
+files sit beside the publication lock, outside the page-cache tree; do not unlink
+them while workers are running. Shared page-cache nodes must share this lock
+directory too. An unavailable render lock is reported and the request renders
+normally without coalescing; publication safety checks still apply.
+
+If the owner finishes without writing cacheable HTML, a short per-URL negative
+marker lets waiting and subsequent requests render normally. This covers private
+or cookie-bearing responses, redirects, server errors and rejected cache writes.
+`CAPELL_HTML_CACHE_COALESCING_UNCACHEABLE_SECONDS` controls the marker lifetime
+(default 5 seconds, minimum 1). After expiry, the next miss can try coalescing
+again. The marker stores no response bytes and does not change cache eligibility.
+
+PHP-served cache hits schedule a unique origin-refresh job, with at most one
+scheduling attempt per URL per cooldown (default 30 seconds). A continuously hot
+URL can therefore schedule one job every cooldown even when it is already fresh;
+the worker checks whether a stale row needs refreshing. No stale-row query or
+full render runs during request termination. Set
+`CAPELL_HTML_CACHE_ORIGIN_SWR_CONNECTION` to a
+durable `database`, `redis`, `sqs` or `beanstalkd` connection, or leave it unset to
+use the default queue connection. The worker must have access to the same
+page-cache files as the web node. Sync, deferred, background and failover
+connections leave regeneration to `capell:html-cache:process-stale`; they never
+run the refresh inline. `CAPELL_HTML_CACHE_ORIGIN_SWR_DISPATCH_INTERVAL_SECONDS`
+controls the scheduling interval.
+
+If a worker dies while holding the job's unique lock, new jobs for that URL can
+remain suppressed until the lock expires. Its lifetime is
+`invalidation.processing_timeout_minutes` (default 15 minutes), measured from
+lock acquisition. `capell:html-cache:process-stale` still covers the durable stale
+row independently of that job lock, subject to claim expiry and retry backoff.
+
+Broker failures retain the stale bytes, cooldown and unclaimed durable stale row
+for a later hit or the stale processor. Hit-telemetry delivery failures are also
+reported without interrupting stale serving. Claim expiry, retry backoff and
+publication fencing are applied by the existing refresh action in the queue worker.
+
+Hit-telemetry flush jobs now use `beforeCommit()` instead of `afterCommit()`.
+Their counters are buffered in cache and do not depend on an enclosing database
+transaction committing. Immediate dispatch keeps broker failures inside the
+telemetry Action's reporting boundary; a deferred after-commit dispatch could
+throw later, outside that boundary, and interrupt an otherwise valid cached
+response or its origin-refresh scheduling.
+
+## Preventing Publication After Invalidation
+
+Cache misses capture a publication generation before rendering. Hard URL,
+directory and full-cache deletions advance that generation under the same POSIX
+file lock used for publication. A render that started before deletion cannot
+restore the deleted HTML or its fragment metadata. Rendering and minification
+run outside the lock; only publication and deletion hold it. Existing cache
+hits do not acquire the publication lock.
+
+The generation is shared by the entire cache root, so an unrelated hard clear
+also rejects an in-flight miss. The completed response remains readable but is
+marked `private, no-store`; the next request can render and cache current data.
+Failure to read or acquire the publication guard also refuses the write and
+shared response caching. Invalidation failures throw rather than reporting a
+successful clear.
+
+The normal middleware and stale-refresh Action capture automatically. Custom
+renderers calling `PageCache::cache()` must call
+`HtmlCachePublicationGuard::capture($request)` **before rendering**, then pass
+that same request to the writer and check its boolean result. A missing or
+failed pre-render capture rejects publication; the writer never creates a
+replacement token after rendering. `WriteRefreshedHtmlCacheFileAction` likewise
+requires the original request as its third argument.
+
+The default lock file lives under `storage/framework/cache/html-cache-publication`,
+outside the page-cache tree, so clearing cached files cannot replace its inode.
+For shared page storage, configure `CAPELL_HTML_CACHE_PUBLICATION_LOCK_PATH` to
+the **same persistent, POSIX-lock-capable file on every web and queue node**,
+outside the page-cache directory. Setting `shared_page_cache=true` without this
+path refuses publication and raises an error on invalidation. A node-local
+lock path does not coordinate shared storage.
 
 ## Read-only Consequence Planning
 

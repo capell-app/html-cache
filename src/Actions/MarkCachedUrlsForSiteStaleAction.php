@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -41,6 +42,10 @@ final class MarkCachedUrlsForSiteStaleAction
             ->orderBy('cached_model_urls.id')
             ->lazyById(column: 'cached_model_urls.id', alias: 'id')
             ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, $reason, $pathResolver): void {
+                if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
+                    return;
+                }
+
                 $cachePath = $cachedModelUrl->siteDomain !== null
                     ? $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain)
                     : null;

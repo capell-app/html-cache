@@ -38,4 +38,15 @@ enum HtmlCacheEligibilityReason: string
     case MissingSiteDomain = 'missing_site_domain';
     case RedirectUrl = 'redirect_url';
     case UnpublishedPage = 'unpublished_page';
+
+    public function isDeterministicForStaleRefresh(): bool
+    {
+        return match ($this) {
+            self::ConfiguredBypassRule,
+            self::PackageCacheBlocking,
+            self::PackageSensitiveOutput,
+            self::RedirectUrl => true,
+            default => false,
+        };
+    }
 }

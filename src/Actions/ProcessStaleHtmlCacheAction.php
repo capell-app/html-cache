@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
@@ -99,6 +100,13 @@ final class ProcessStaleHtmlCacheAction
                 'processed_at' => CarbonImmutable::now(),
                 'failed_at' => null,
                 'last_error' => null,
+            ]);
+        } catch (StaleCachedUrlNotApplicableException $exception) {
+            $this->completeClaim($staleCachedUrl, [
+                'status' => StaleCachedUrl::STATUS_NOT_APPLICABLE,
+                'claim_token' => null,
+                'failed_at' => null,
+                'last_error' => Str::limit($exception->getMessage(), 2000, ''),
             ]);
         } catch (Throwable $throwable) {
             $this->completeClaim($staleCachedUrl, [

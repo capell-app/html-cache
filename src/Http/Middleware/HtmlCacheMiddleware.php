@@ -18,13 +18,16 @@ use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
-use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
+use Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction;
 use Capell\HtmlCache\Actions\ResolveEdgeCacheTagsAction;
+use Capell\HtmlCache\Actions\ScheduleOriginStaleCachedUrlRefreshAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Enums\HtmlCacheRenderLockStatus;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\PublicResponseCachePolicy;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
@@ -56,6 +59,8 @@ final class HtmlCacheMiddleware
 
     public const string FRAGMENT_RENDER_FAILED_ATTRIBUTE = 'capell.html_cache.fragment_render_failed';
 
+    public const string PRIVATE_RESPONSE_ATTRIBUTE = 'capell.html_cache.private_response';
+
     public const string SHELL_VERIFICATION_ATTRIBUTE = 'capell.html_cache.shell_verification';
 
     private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
@@ -65,11 +70,11 @@ final class HtmlCacheMiddleware
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
 
         if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
-            return $this->privateNoStore($next($request));
+            return $this->privateNoStore($next($request), $request);
         }
 
         if ($this->shouldBypassForAccessGate($request)) {
-            return $this->privateNoStore($next($request));
+            return $this->privateNoStore($next($request), $request);
         }
 
         if (resolve(CacheBypassResolver::class)->shouldBypass()) {
@@ -96,7 +101,7 @@ final class HtmlCacheMiddleware
             );
 
             if ($this->shouldBypassHttpCache($request, $response)) {
-                return $this->privateNoStore($response);
+                return $this->privateNoStore($response, $request);
             }
 
             return $this->applyCacheHeaders($request, $response);
@@ -110,7 +115,7 @@ final class HtmlCacheMiddleware
             if (is_string($cachedPage)) {
                 $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
                 RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
-                $this->refreshStaleCachedUrlAfterResponse($request);
+                ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
 
                 return $response;
             }
@@ -119,53 +124,134 @@ final class HtmlCacheMiddleware
 
             if (is_string($cachedErrorPage)) {
                 RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
-                $this->refreshStaleCachedUrlAfterResponse($request);
+                ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
 
                 return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, 404, PageCache::ERROR_EXTENSION);
             }
         }
 
-        if (! $forceCacheReadBypass && config('capell-html-cache.request_coalescing.enabled', true) === true) {
-            try {
-                $coalescedResponse = Cache::lock(
-                    'capell-html-cache:render:' . hash('sha256', $request->fullUrl()),
-                    $this->positiveConfigInteger('capell-html-cache.request_coalescing.lock_seconds', 15),
-                )->block(
-                    $this->positiveConfigInteger('capell-html-cache.request_coalescing.wait_seconds', 3),
-                    fn (): Response => $this->cachedResponseAfterWaiting($pageCache, $request)
-                        ?? $this->handleCacheMiss($pageCache, $request, $next),
-                );
+        if (! $forceCacheReadBypass && $this->shouldCoalesce($request)) {
+            $lock = Cache::lock(
+                'capell-html-cache:render:' . hash('sha256', $request->fullUrl()),
+                $this->positiveConfigInteger('capell-html-cache.request_coalescing.lock_seconds', 15),
+            );
+            $coalescedResponse = HtmlCacheRenderLockStatus::Contended;
+            $coalescingRequired = true;
 
-                if ($coalescedResponse instanceof Response) {
-                    return $coalescedResponse;
+            try {
+                $lock->block($this->positiveConfigInteger('capell-html-cache.request_coalescing.wait_seconds', 3));
+
+                try {
+                    // The owner may have marked this URL uncacheable while we waited.
+                    $coalescingRequired = $this->shouldCoalesce($request);
+
+                    if ($coalescingRequired) {
+                        $coalescedResponse = RenderCoalescedHtmlCacheMissAction::run(
+                            $request,
+                            fn (): Response => $this->handleCoalescedCacheMiss($pageCache, $request, $next),
+                        );
+                    }
+                } finally {
+                    $lock->release();
                 }
             } catch (LockTimeoutException) {
-                // Availability wins if a slow origin render outlives the short coalescing wait.
+                // Recheck both published bytes and the owner's negative marker.
             }
+
+            if ($coalescedResponse instanceof Response) {
+                return $coalescedResponse;
+            }
+
+            $cachedResponse = $this->cachedResponseAfterWaiting($pageCache, $request);
+
+            if ($cachedResponse instanceof Response) {
+                return $cachedResponse;
+            }
+
+            if (! $coalescingRequired || $coalescedResponse === HtmlCacheRenderLockStatus::Unavailable || ! $this->shouldCoalesce($request)) {
+                return $this->handleCacheMiss($pageCache, $request, $next);
+            }
+
+            return $this->coalescingRetryResponse($request);
         }
 
         return $this->handleCacheMiss($pageCache, $request, $next);
     }
 
+    /**
+     * The shared marker can change or expire while this request waits.
+     *
+     * @phpstan-impure
+     */
+    private function shouldCoalesce(Request $request): bool
+    {
+        if (config('capell-html-cache.request_coalescing.enabled', true) !== true
+            || config('capell-html-cache.write_enabled', true) !== true) {
+            return false;
+        }
+
+        try {
+            return Cache::get($this->uncacheableMarkerKey($request)) !== true;
+        } catch (Throwable $throwable) {
+            report($throwable);
+
+            return false;
+        }
+    }
+
+    private function uncacheableMarkerKey(Request $request): string
+    {
+        return 'capell-html-cache:render:uncacheable:' . hash('sha256', $request->fullUrl());
+    }
+
+    private function handleCoalescedCacheMiss(PageCache $pageCache, Request $request, Closure $next): Response
+    {
+        $cachedResponse = $this->cachedResponseAfterWaiting($pageCache, $request);
+
+        if ($cachedResponse instanceof Response) {
+            return $cachedResponse;
+        }
+
+        try {
+            return $this->handleCacheMiss($pageCache, $request, $next);
+        } finally {
+            if ($request->attributes->get(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) !== true) {
+                try {
+                    Cache::put(
+                        $this->uncacheableMarkerKey($request),
+                        true,
+                        $this->positiveConfigInteger('capell-html-cache.request_coalescing.uncacheable_seconds', 5),
+                    );
+                } catch (Throwable $throwable) {
+                    report($throwable);
+                }
+            }
+        }
+    }
+
     private function handleCacheMiss(PageCache $pageCache, Request $request, Closure $next): Response
     {
+        resolve(HtmlCachePublicationGuard::class)->capture($request);
         $response = $this->renderWithFragmentCapture($request, $next);
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $response);
 
         if ($this->containsUnsafeSharedHtml($request, $response)) {
             $response->headers->set('X-Frontend-Cache', 'BYPASS');
 
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         $cached = $this->cacheResponse($pageCache, $request, $response);
         $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, $cached);
+        $response->headers->set('X-Frontend-Cache', 'MISS');
+
+        if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
+            return $this->privateNoStore($response, $request);
+        }
 
         if ($cached) {
             $this->stripConfiguredCookies($response);
         }
-
-        $response->headers->set('X-Frontend-Cache', 'MISS');
 
         return $this->applyCacheHeaders(
             $request,
@@ -181,6 +267,7 @@ final class HtmlCacheMiddleware
         if (is_string($cachedPage)) {
             $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
             RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
+            ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
 
             return $response;
         }
@@ -189,6 +276,7 @@ final class HtmlCacheMiddleware
 
         if (is_string($cachedErrorPage)) {
             RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
+            ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
 
             return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, Response::HTTP_NOT_FOUND, PageCache::ERROR_EXTENSION);
         }
@@ -225,8 +313,9 @@ final class HtmlCacheMiddleware
             && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
-    private function privateNoStore(Response $response): Response
+    private function privateNoStore(Response $response, Request $request): Response
     {
+        $request->attributes->set(self::PRIVATE_RESPONSE_ATTRIBUTE, true);
         $response->headers->set('Cache-Control', 'private, no-store');
         $response->headers->set('Pragma', 'no-cache');
         $response->headers->set('Expires', '0');
@@ -361,14 +450,12 @@ final class HtmlCacheMiddleware
         }
 
         try {
-            $pageCache->cache($request, $response);
+            return $pageCache->cache($request, $response);
         } catch (Throwable $throwable) {
             report($throwable);
 
             return false;
         }
-
-        return true;
     }
 
     private function renderWithFragmentCapture(Request $request, Closure $next): Response
@@ -461,11 +548,11 @@ final class HtmlCacheMiddleware
         $fragmentCache = $pageCache->getCacheFragmentData($request, $extension);
 
         if (! $fragmentCache instanceof RenderHookFragmentCacheData) {
-            return $this->cacheHitResponse($content, $statusCode);
+            return $this->cacheHitResponse($request, $content, $statusCode);
         }
 
         if ($request->attributes->get(self::SHELL_VERIFICATION_ATTRIBUTE) === true) {
-            return $this->cacheHitResponse($fragmentCache->shell, $statusCode, fragmented: true);
+            return $this->cacheHitResponse($request, $fragmentCache->shell, $statusCode, fragmented: true);
         }
 
         try {
@@ -486,35 +573,32 @@ final class HtmlCacheMiddleware
             $content = $fragmentCache->shell;
         }
 
-        return $this->cacheHitResponse($content, $statusCode, fragmented: true);
+        return $this->cacheHitResponse($request, $content, $statusCode, fragmented: true);
     }
 
-    private function cacheHitResponse(string $content, int $statusCode, bool $fragmented = false): Response
+    private function cacheHitResponse(Request $request, string $content, int $statusCode, bool $fragmented = false): Response
     {
         $response = $this->stripConfiguredCookies(response($content, $statusCode));
         $response->headers->set('Content-Type', 'text/html');
         $response->headers->set('X-Frontend-Cache', 'HIT');
 
         if ($fragmented) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
-        return $this->applyCacheHeaders(request(), $response, forcePublic: true);
+        return $this->applyCacheHeaders($request, $response, forcePublic: true);
     }
 
-    private function refreshStaleCachedUrlAfterResponse(Request $request): void
+    private function coalescingRetryResponse(Request $request): Response
     {
-        if (config('capell-html-cache.origin_stale_while_revalidate.enabled', true) !== true) {
-            return;
-        }
-
-        if (app()->runningUnitTests() || app()->runningInConsole()) {
-            RefreshOriginStaleCachedUrlAction::dispatchSync($request->fullUrl());
-
-            return;
-        }
-
-        RefreshOriginStaleCachedUrlAction::dispatchAfterResponse($request->fullUrl());
+        return $this->privateNoStore(response(
+            __('capell-html-cache::cache.retry'),
+            Response::HTTP_SERVICE_UNAVAILABLE,
+            [
+                'Content-Type' => 'text/plain; charset=UTF-8',
+                'Retry-After' => $this->positiveConfigInteger('capell-html-cache.request_coalescing.wait_seconds', 3),
+            ],
+        ), $request);
     }
 
     private function applyCacheHeaders(
@@ -524,23 +608,23 @@ final class HtmlCacheMiddleware
         bool $forcePublic = false,
     ): Response {
         if (! $forcePublic && $request->attributes->get(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && $this->hasFragmentCacheData($request)) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && $this->shouldBypassHttpCache($request, $response)) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && $this->eligibilityReport($request)->hasReason(HtmlCacheEligibilityReason::PackageCacheBlocking)) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && $this->eligibilityReport($request)->hasReason(HtmlCacheEligibilityReason::PackageSensitiveOutput)) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && (
@@ -548,9 +632,7 @@ final class HtmlCacheMiddleware
             || $this->sessionCookieRequiresPrivateResponse($request)
             || $request->headers->has('Authorization')
         )) {
-            $response->headers->set('Cache-Control', 'private, no-store');
-
-            return $response;
+            return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && str_contains((string) $response->headers->get('Cache-Control'), 'public')) {
@@ -558,7 +640,7 @@ final class HtmlCacheMiddleware
         }
 
         if (! $forcePublic) {
-            return $this->privateNoStore($response);
+            return $this->privateNoStore($response, $request);
         }
 
         $response->headers->set('Cache-Control', sprintf(

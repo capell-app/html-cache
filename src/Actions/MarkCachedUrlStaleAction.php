@@ -8,6 +8,7 @@ use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
@@ -27,7 +28,15 @@ final class MarkCachedUrlStaleAction
     public function handle(string|CachedModelUrl $url, string $reason = 'manual', ?SiteDomain $cachePathSiteDomain = null): int
     {
         if ($url instanceof CachedModelUrl) {
+            if ($this->shouldSkipEnqueue($url->url)) {
+                return 0;
+            }
+
             return $this->markCachedModelUrl($url, $reason, $cachePathSiteDomain) ? 1 : 0;
+        }
+
+        if ($this->shouldSkipEnqueue($url)) {
+            return 0;
         }
 
         $cachedModelUrls = $this->cachedModelUrls($url);
@@ -112,6 +121,11 @@ final class MarkCachedUrlStaleAction
         );
 
         return true;
+    }
+
+    private function shouldSkipEnqueue(string $url): bool
+    {
+        return resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($url);
     }
 
     private function markUrl(string $url, string $reason): bool

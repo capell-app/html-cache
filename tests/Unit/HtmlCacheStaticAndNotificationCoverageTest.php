@@ -1121,13 +1121,13 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
 
     expect($cache->shouldCachePage($request, new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeTrue();
 
-    $cache->cache($request, new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html']));
-    $cache->cache(Request::create('/feed', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('<xml />', Response::HTTP_OK, ['Content-Type' => 'text/xml']));
-    $cache->cache(Request::create('/data', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('{"ok":true}', Response::HTTP_OK, ['Content-Type' => 'application/json']));
-    $cache->cache(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('missing', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']));
+    $cache->cache($this->beginCacheRender($request), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html']));
+    $cache->cache($this->beginCacheRender(Request::create('/feed', Symfony\Component\HttpFoundation\Request::METHOD_GET)), new Response('<xml />', Response::HTTP_OK, ['Content-Type' => 'text/xml']));
+    $cache->cache($this->beginCacheRender(Request::create('/data', Symfony\Component\HttpFoundation\Request::METHOD_GET)), new Response('{"ok":true}', Response::HTTP_OK, ['Content-Type' => 'application/json']));
+    $cache->cache($this->beginCacheRender(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET)), new Response('missing', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']));
 
     $invalidRequest = Request::create('/unsafe/..', Symfony\Component\HttpFoundation\Request::METHOD_GET);
-    $cache->cache($invalidRequest, new Response('invalid', Response::HTTP_OK, ['Content-Type' => 'text/html']));
+    $cache->cache($this->beginCacheRender($invalidRequest), new Response('invalid', Response::HTTP_OK, ['Content-Type' => 'text/html']));
 
     expect($cache->getCachePage($request))->toBe('<html><body>Safe</body></html>')
         ->and($cache->getCacheErrorPage(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET)))->toBe('missing')
@@ -1161,7 +1161,7 @@ it('skips page cache reads and writes for oversized hostile request paths', func
         ->and($cache->getCacheErrorPage($request))->toBeFalse()
         ->and($cache->shouldCachePage($request, $response))->toBeFalse();
 
-    $cache->cache($request, $response);
+    $cache->cache($this->beginCacheRender($request), $response);
 
     expect(File::exists($cachePath))->toBeFalse();
 });
@@ -1214,7 +1214,7 @@ it('skips page cache reads and writes for encoded hostile request paths', functi
         ->and($cache->getCacheErrorPage($request))->toBeFalse()
         ->and($cache->shouldCachePage($request, $response))->toBeFalse();
 
-    $cache->cache($request, $response);
+    $cache->cache($this->beginCacheRender($request), $response);
 
     expect(File::exists($cachePath))->toBeFalse();
 })->with([

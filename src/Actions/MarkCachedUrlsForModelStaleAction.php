@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
@@ -41,6 +42,10 @@ final class MarkCachedUrlsForModelStaleAction
         $pathResolver = resolve(HtmlCachePathResolver::class);
 
         foreach ($cachedModelUrls as $cachedModelUrl) {
+            if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
+                continue;
+            }
+
             $staleKey = StaleCachedUrl::staleKey(
                 $cachedModelUrl->url_hash,
                 $cachedModelUrl->site_id,

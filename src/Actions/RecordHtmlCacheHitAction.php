@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Lottery;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
+use Throwable;
 
 /**
  * @method static void run(Request $request, int $bytesServed)
@@ -36,15 +37,21 @@ final class RecordHtmlCacheHitAction
             return;
         }
 
-        if (! resolve(HtmlCacheHitBuffer::class)->record($urlHash, $bytesServed, $sampleRate)) {
-            return;
+        try {
+            if (! resolve(HtmlCacheHitBuffer::class)->record($urlHash, $bytesServed, $sampleRate)) {
+                return;
+            }
+
+            $configuredDelay = config('capell-html-cache.hit_recording.flush_delay_seconds', 30);
+            $delay = is_numeric($configuredDelay) ? max(1, (int) $configuredDelay) : 30;
+
+            FlushHtmlCacheHitBatchJob::dispatch($urlHash)
+                ->delay($delay)
+                ->beforeCommit();
+        } catch (Throwable $throwable) {
+            // Telemetry delivery must not interrupt a cached response or its
+            // durable stale-refresh scheduling, including at transaction commit.
+            report($throwable);
         }
-
-        $configuredDelay = config('capell-html-cache.hit_recording.flush_delay_seconds', 30);
-        $delay = is_numeric($configuredDelay) ? max(1, (int) $configuredDelay) : 30;
-
-        FlushHtmlCacheHitBatchJob::dispatch($urlHash)
-            ->delay($delay)
-            ->afterCommit();
     }
 }

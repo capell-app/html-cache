@@ -14,6 +14,7 @@ use Capell\Core\Macros\BlueprintMacros;
 use Capell\Core\Models\Media;
 use Capell\Frontend\Providers\FrontendServiceProvider;
 use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\Tests\AbstractTestCase;
 use Filament\Actions\ActionsServiceProvider;
 use Filament\FilamentServiceProvider;
@@ -23,12 +24,20 @@ use Filament\Support\SupportServiceProvider;
 use Filament\Tables\TablesServiceProvider;
 use Filament\Widgets\WidgetsServiceProvider;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\Request;
 use Livewire\LivewireServiceProvider;
 use MichalOravec\PaginateRoute\PaginateRouteServiceProvider;
 use Override;
 
 abstract class HtmlCacheTestCase extends AbstractTestCase
 {
+    protected function beginCacheRender(Request $request): Request
+    {
+        resolve(HtmlCachePublicationGuard::class)->capture($request);
+
+        return $request;
+    }
+
     protected function getPackageServiceName(): string
     {
         return 'capell-html-cache';

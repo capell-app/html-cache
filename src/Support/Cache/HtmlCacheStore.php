@@ -42,18 +42,23 @@ final class HtmlCacheStore
 
     public function delete(string $file): bool
     {
-        return $this->disk->delete(str_replace(['../', '..\\'], '', $file));
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(
+            fn (): bool => $this->disk->delete(str_replace(['../', '..\\'], '', $file)),
+        );
     }
 
     public function deletePage(string $file): bool
     {
-        $deleted = $this->delete($file);
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($file): bool {
+            $safeFile = str_replace(['../', '..\\'], '', $file);
+            $deleted = $this->disk->delete($safeFile);
 
-        if (str_ends_with($file, '.html')) {
-            $deleted = $this->delete($file . PageCache::FRAGMENT_METADATA_EXTENSION) || $deleted;
-        }
+            if (str_ends_with($safeFile, '.html')) {
+                $deleted = $this->disk->delete($safeFile . PageCache::FRAGMENT_METADATA_EXTENSION) || $deleted;
+            }
 
-        return $deleted;
+            return $deleted;
+        });
     }
 
     public function put(string $file, string $contents): void
@@ -129,10 +134,15 @@ final class HtmlCacheStore
 
     public function deleteDirectory(string $directory): bool
     {
-        return $this->disk->deleteDirectory($directory);
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(fn (): bool => $this->disk->deleteDirectory($directory));
     }
 
     public function deleteAll(): HtmlCacheClearResult
+    {
+        return resolve(HtmlCachePublicationGuard::class)->invalidate($this->deleteAllFiles(...));
+    }
+
+    private function deleteAllFiles(): HtmlCacheClearResult
     {
         $deletedDirectories = [];
         $deletedFiles = [];
@@ -141,7 +151,7 @@ final class HtmlCacheStore
 
         foreach ($this->directories() as $directory) {
             try {
-                if ($this->deleteDirectory($directory)) {
+                if ($this->disk->deleteDirectory($directory)) {
                     $deletedDirectories[] = $directory;
                 } else {
                     $failedDirectories[] = $directory;
@@ -153,7 +163,7 @@ final class HtmlCacheStore
 
         foreach ($this->files() as $file) {
             try {
-                if ($this->delete($file)) {
+                if ($this->disk->delete($file)) {
                     $deletedFiles[] = $file;
                 } else {
                     $failedFiles[] = $file;

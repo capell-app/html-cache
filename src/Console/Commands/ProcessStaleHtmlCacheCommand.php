@@ -16,11 +16,18 @@ final class ProcessStaleHtmlCacheCommand extends Command
     public function handle(): int
     {
         $limit = $this->limit();
-        $processed = ProcessStaleHtmlCacheAction::run($limit, (bool) $this->option('suppress-inline-edge-purge'));
+        $result = ProcessStaleHtmlCacheAction::run($limit, (bool) $this->option('suppress-inline-edge-purge'));
 
-        $this->info(sprintf('Processed %d stale HTML cache URL(s).', $processed));
+        $summary = (string) __('capell-html-cache::cache.refresh_summary', [
+            'attempted' => $result->attempted,
+            'succeeded' => $result->succeeded,
+            'failed' => $result->failed,
+            'deferred' => $result->deferred,
+            'not_applicable' => $result->notApplicable,
+        ]);
+        $result->successful() ? $this->info($summary) : $this->error($summary);
 
-        return Command::SUCCESS;
+        return $result->successful() ? Command::SUCCESS : Command::FAILURE;
     }
 
     private function limit(): ?int

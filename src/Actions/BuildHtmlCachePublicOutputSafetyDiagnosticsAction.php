@@ -263,14 +263,10 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
         }
 
         if ($siteId === null && count($files) < $limit) {
-            try {
-                $files = [
-                    ...$files,
-                    ...array_slice($store->files(), 0, $limit - count($files)),
-                ];
-            } catch (Throwable) {
-                // Keep diagnostics best-effort when legacy root-level cache files are unreadable.
-            }
+            $files = [
+                ...$files,
+                ...array_slice($store->files(), 0, $limit - count($files)),
+            ];
         }
 
         return array_values(collect($files)
@@ -304,11 +300,7 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
 
         $siteRootDirectory = $this->siteDomainCacheRootDirectory($siteDomain);
 
-        try {
-            $domainFiles = $store->allFiles($siteRootDirectory);
-        } catch (Throwable) {
-            $domainFiles = [];
-        }
+        $domainFiles = $store->allFiles($siteRootDirectory);
 
         return [
             ...$files,

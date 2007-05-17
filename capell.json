@@ -78,6 +78,24 @@
             "frequencyConfig": "capell-html-cache.invalidation.schedule",
             "defaultFrequency": "everyFiveMinutes",
             "enabledWhen": "capell-html-cache.invalidation.mode=scheduled"
+        },
+        {
+            "type": "console-command",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheConsoleCommandsContribution",
+            "commands": [
+                "capell:html-cache:clear",
+                "capell:html-cache:diagnose",
+                "capell:html-cache:edge-purge:verify",
+                "capell:html-cache:process-stale",
+                "capell:static-site"
+            ],
+            "commandClasses": [
+                "Capell\\HtmlCache\\Console\\Commands\\ClearHtmlCacheCommand",
+                "Capell\\HtmlCache\\Console\\Commands\\DiagnoseHtmlCacheCommand",
+                "Capell\\HtmlCache\\Console\\Commands\\VerifyEdgeCachePurgeCommand",
+                "Capell\\HtmlCache\\Console\\Commands\\ProcessStaleHtmlCacheCommand",
+                "Capell\\HtmlCache\\Console\\Commands\\StaticSiteCommand"
+            ]
         }
     ],
     "database": {
@@ -93,7 +111,12 @@
         "install": null,
         "setup": null,
         "demo": null,
-        "doctor": null
+        "doctor": null,
+        "clear": "capell:html-cache:clear",
+        "diagnose": "capell:html-cache:diagnose",
+        "processStale": "capell:html-cache:process-stale",
+        "staticSite": "capell:static-site",
+        "verifyEdgePurge": "capell:html-cache:edge-purge:verify"
     },
     "settings": [],
     "permissions": [

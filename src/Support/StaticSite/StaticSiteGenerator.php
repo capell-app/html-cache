@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\StaticSite;
 
+use Capell\Core\Actions\SiteDomains\ResolveSiteDomainUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
+use Capell\Core\Exceptions\UrlVisitFailedException;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
@@ -77,7 +79,8 @@ final class StaticSiteGenerator
         $extraTotals = 0;
 
         foreach (resolve(StaticSiteExtensionRegistry::class)->all() as $handler) {
-            $handler($this->site, $siteDomain, function (string $url) use ($checkpoint, &$extraTotals): void {
+            $handler($this->site, $siteDomain, function (string $url) use ($siteDomain, $checkpoint, &$extraTotals): void {
+                $url = $this->resolveExtensionUrl($url, $siteDomain);
                 $this->visitUrl($url);
                 $extraTotals++;
                 $checkpoint?->__invoke($url);
@@ -85,6 +88,27 @@ final class StaticSiteGenerator
         }
 
         return $extraTotals;
+    }
+
+    private function resolveExtensionUrl(string $url, SiteDomain $siteDomain): string
+    {
+        $components = parse_url($url);
+
+        if ($components === false || $url === '' || preg_match('/[\\x00-\\x20\\x7f\\\\\\\\]/', $url) === 1) {
+            throw UrlVisitFailedException::forUrl($url, __('capell::message.visit_requires_http'));
+        }
+
+        if (! isset($components['scheme']) && ! isset($components['host']) && isset($components['path'])) {
+            return ResolveSiteDomainUrlAction::run($siteDomain, $url);
+        }
+
+        if (in_array($components['scheme'] ?? null, ['http', 'https'], true)
+            && is_string($components['host'] ?? null)
+            && $components['host'] !== '') {
+            return $url;
+        }
+
+        throw UrlVisitFailedException::forUrl($url, __('capell::message.visit_requires_http'));
     }
 
     private function visitAllUrls(SiteDomain $siteDomain, ?Closure $checkpoint): void
@@ -120,7 +144,16 @@ final class StaticSiteGenerator
             return;
         }
 
-        VisitUrlAction::run($url);
+        // The visitor can reject a destination without sending a request.
+        $status = resolve(StaticSiteRequestObserver::class)->statusFor($url, function () use ($url): void {
+            VisitUrlAction::run($url);
+        });
+
+        if ($status !== 200) {
+            throw new RuntimeException($status === null
+                ? 'Static generation did not receive a response for a required URL.'
+                : sprintf('Static generation request returned HTTP %d.', $status));
+        }
     }
 
     private function refreshPageCache(PageUrl $pageUrl, SiteDomain $siteDomain): void
@@ -140,15 +173,15 @@ final class StaticSiteGenerator
     {
         $components = parse_url($url);
 
-        $host = $components['host'] ?? null;
-        $path = $components['path'] ?? '/';
-        $query = $components['query'] ?? null;
-        $scheme = $components['scheme'] ?? 'https';
+        $host = is_array($components) ? ($components['host'] ?? null) : null;
+        $path = is_array($components) ? ($components['path'] ?? '/') : null;
+        $query = is_array($components) ? ($components['query'] ?? null) : null;
+        $scheme = is_array($components) ? ($components['scheme'] ?? null) : null;
 
-        if (! is_string($host) || $host === '' || ! is_string($path)) {
+        if (! in_array($scheme, ['http', 'https'], true) || ! is_string($host) || $host === '' || ! is_string($path)) {
             Log::warning('StaticSiteGenerator: rejected invalid internal url', ['url' => $url]);
 
-            return;
+            throw UrlVisitFailedException::forUrl($url, __('capell::message.visit_requires_http'));
         }
 
         $uri = $query === null ? $path : $path . '?' . $query;

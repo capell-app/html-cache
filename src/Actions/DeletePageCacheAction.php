@@ -9,6 +9,7 @@ use Capell\Core\Models\PageUrl;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
+use RuntimeException;
 
 /**
  * @method static bool run(Pageable|PageUrl $record, ?bool $refresh = null)
@@ -27,7 +28,9 @@ final class DeletePageCacheAction
 
         foreach ($pageUrls as $pageUrl) {
             if ($pageUrl instanceof PageUrl) {
-                ClearCachedUrlAction::run($pageUrl->full_url, refresh: $refresh);
+                if (! ClearCachedUrlAction::run($pageUrl->full_url, refresh: $refresh)) {
+                    throw new RuntimeException(sprintf('Unable to clear HTML cache for "%s".', $pageUrl->full_url));
+                }
             }
         }
 

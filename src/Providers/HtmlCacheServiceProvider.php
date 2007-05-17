@@ -74,11 +74,13 @@ use Capell\HtmlCache\Support\ModelServing\ModelEventRegistrar;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
+use Capell\HtmlCache\Support\StaticSite\StaticSiteRequestObserver;
 use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Http\Client\Events\ResponseReceived;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -117,6 +119,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasMigration('2026_07_18_000001_create_html_cache_generation_runs_table');
     }
 
+    #[Override]
     public function registeringPackage(): void
     {
         parent::registeringPackage();
@@ -138,6 +141,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class);
+        $this->app->singleton(StaticSiteRequestObserver::class);
+        $this->app->tag([StaticSiteRequestObserver::class], Resettable::TAG);
+        Event::listen(ResponseReceived::class, [StaticSiteRequestObserver::class, 'record']);
         $this->app->singleton(ModelEventRegistrar::class);
         $this->app->singleton(HtmlCacheModelInvalidationObserver::class);
         $this->app->tag([HtmlCacheModelInvalidationObserver::class], Resettable::TAG);

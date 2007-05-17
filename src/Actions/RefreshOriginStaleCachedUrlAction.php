@@ -66,6 +66,8 @@ final class RefreshOriginStaleCachedUrlAction
                 'failed_at' => CarbonImmutable::now(),
                 'last_error' => Str::limit($throwable->getMessage(), 2000, ''),
             ]);
+
+            throw $throwable;
         }
 
         return true;

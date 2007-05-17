@@ -10,6 +10,10 @@ Full-page static HTML cache for Capell with dependency-indexed invalidation, sch
 
 Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.
 
+Cache invalidation preserves dependency tracking until every existing page artefact has been removed. Missing files are harmless; inaccessible directories and failed deletions raise an error so the same URL can be retried. Safety diagnostics report an incomplete inspection when a directory cannot be enumerated.
+
+`capell:html-cache:process-stale` and `capell:html-cache:clear --process` report attempted, refreshed, failed, deferred and not-applicable counts, and return a nonzero exit code when any attempted refresh fails. Failed refreshes retain their old HTML and retry state. `ProcessStaleHtmlCacheAction::run()` returns these counts in `StaleHtmlCacheProcessResultData`; callers should check `successful()` before reporting completion. External static generation requires a confirmed HTTP 200 response for every required URL, including URLs supplied by extensions.
+
 Evidence: [`capell.json`](capell.json), [`src/Http/Middleware/HtmlCacheMiddleware.php`](src/Http/Middleware/HtmlCacheMiddleware.php), [`src/Models/CachedModelUrl.php`](src/Models/CachedModelUrl.php), [`src/Models/StaleCachedUrl.php`](src/Models/StaleCachedUrl.php), [`docs/overview.admin.md`](docs/overview.admin.md), [`docs/screenshots.json`](docs/screenshots.json), [`src/Filament/Pages/MaintenanceCachePage.php`](src/Filament/Pages/MaintenanceCachePage.php), [`tests/Feature/HtmlCacheMiddlewareTest.php`](tests/Feature/HtmlCacheMiddlewareTest.php).
 
 Status details:
@@ -136,9 +140,11 @@ Screenshot contract: `docs/screenshots.json`.
 - `RecordHtmlCacheHitAction`
 - `RefreshCachedUrlAtomicallyAction`
 - `RefreshOriginStaleCachedUrlAction`
+- `RenderCoalescedHtmlCacheMissAction`
 - `ResolveCachedUrlsForModelAction`
 - `ResolveCachedUrlsForSurrogateKeysAction`
 - `ResolveEdgeCacheTagsAction`
+- `ScheduleOriginStaleCachedUrlRefreshAction`
 - `SelectStaleHtmlCacheCandidatesAction`
 - `WriteRefreshedHtmlCacheFileAction`
 
@@ -161,7 +167,16 @@ Screenshot contract: `docs/screenshots.json`.
 
 - `FlushHtmlCacheHitBatchJob`
 - `GenerateMaintenancePagesJob`
+- `RefreshOriginStaleCachedUrlJob`
 - `RegisterCachedModelUrlsJob`
+
+### Command signatures
+
+- `capell:html-cache:clear`
+- `capell:html-cache:diagnose`
+- `capell:html-cache:edge-purge:verify`
+- `capell:html-cache:process-stale`
+- `capell:static-site`
 
 ### Scheduled commands
 
@@ -178,6 +193,7 @@ Screenshot contract: `docs/screenshots.json`.
 ### Manifest contributions
 
 - `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`
+- `console-command: Capell\HtmlCache\Manifest\HtmlCacheConsoleCommandsContribution`
 - `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`
 - `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`
 - `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`
@@ -216,9 +232,9 @@ Screenshot contract: `docs/screenshots.json`.
 - Database changes: package migrations are declared.
 - Config: `config/capell-html-cache.php`.
 - Settings: no package settings declared.
-- Queues or schedules: scheduled commands `capell:html-cache:process-stale (package registered)`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
+- Queues or schedules: scheduled commands `capell:html-cache:process-stale (package registered)`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RefreshOriginStaleCachedUrlJob`, `RegisterCachedModelUrlsJob`.
 - Cache tags: `html-cache`.
-- Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`, `VerifyEdgeCachePurgeCommand`.
+- Commands: `capell:html-cache:clear`, `capell:html-cache:diagnose`, `capell:html-cache:edge-purge:verify`, `capell:html-cache:process-stale`, `capell:static-site`.
 
 ## Common Pitfalls
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\Admin\Contracts\Cache\StaticSiteGenerationDispatcher;
 use Capell\Core\Contracts\Themes\ThemePreviewRendererInterface;
+use Capell\Core\Exceptions\UrlVisitFailedException;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Blueprint;
 use Capell\Core\Models\Language;
@@ -44,6 +45,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\ModelEventRegistrar;
@@ -327,22 +329,28 @@ it('fails internal static generation when a public URL does not render successfu
     'server error' => Response::HTTP_INTERNAL_SERVER_ERROR,
 ]);
 
-it('logs invalid internal static urls instead of dispatching them', function (): void {
+it('rejects invalid internal static urls instead of dispatching them', function (): void {
     Log::shouldReceive('warning')
         ->once()
         ->with('StaticSiteGenerator: rejected invalid internal url', ['url' => '/relative-only']);
 
     $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
 
-    $method->invoke(new StaticSiteGenerator(new Site), '/relative-only');
+    expect(fn (): mixed => $method->invoke(new StaticSiteGenerator(new Site), '/relative-only'))
+        ->toThrow(UrlVisitFailedException::class);
 });
 
 it('notifies or clears cached page urls for changed models', function (): void {
-    $page = htmlCacheResidualCoveragePage(htmlCacheResidualCoverageSiteDomain('notify.test'));
+    Storage::fake('page_cache');
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('notify.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $cachePath = 'https.notify.test/one.html';
+    Storage::disk('page_cache')->put($cachePath, 'cached page');
     CachedModelUrl::query()->create([
-        'url' => 'https://example.test/one',
-        'url_hash' => CachedModelUrl::hashUrl('https://example.test/one'),
+        'url' => 'https://notify.test/one',
+        'url_hash' => CachedModelUrl::hashUrl('https://notify.test/one'),
         'path' => '/one',
+        'site_domain_id' => $siteDomain->getKey(),
         'cacheable_type' => $page->getMorphClass(),
         'cacheable_id' => $page->getKey(),
     ]);
@@ -351,7 +359,8 @@ it('notifies or clears cached page urls for changed models', function (): void {
 
     NotifyClearCachedPagesAction::run(collect([$page, 'ignored']));
 
-    expect(CachedModelUrl::query()->where('cacheable_id', $page->getKey())->exists())->toBeFalse();
+    expect(CachedModelUrl::query()->where('cacheable_id', $page->getKey())->exists())->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse();
 });
 
 it('sends a clear-cache notification when automatic cache clearing is disabled', function (): void {
@@ -895,6 +904,22 @@ it('reports html cache files and directories that could not be deleted', functio
     expect($result->successful())->toBeFalse()
         ->and($result->failedDirectories)->toBe(['http.example.test'])
         ->and($result->failedFiles)->toBe(['orphan.html']);
+});
+
+it('fails output cache invalidation when any html cache artifact survives', function (): void {
+    $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('path')->andReturn('/tmp');
+    $disk->shouldReceive('directories')->once()->withNoArgs()->andReturn(['http.example.test']);
+    $disk->shouldReceive('deleteDirectory')->once()->with('http.example.test')->andReturnFalse();
+    $disk->shouldReceive('files')->once()->withNoArgs()->andReturn(['orphan.html']);
+    $disk->shouldReceive('delete')->once()->with('orphan.html')->andReturnFalse();
+
+    $manager = Mockery::mock(FilesystemManager::class);
+    $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
+    app()->instance(HtmlCacheStore::class, new HtmlCacheStore($manager));
+
+    expect(fn () => (new HtmlFrontendOutputCacheInvalidator)->invalidateAll())
+        ->toThrow(RuntimeException::class, 'http.example.test, orphan.html');
 });
 
 it('returns a clear console failure when the html cache root cannot be inspected', function (): void {

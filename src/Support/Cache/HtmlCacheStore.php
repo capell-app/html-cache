@@ -51,10 +51,26 @@ final class HtmlCacheStore
     {
         return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($file): bool {
             $safeFile = str_replace(['../', '..\\'], '', $file);
-            $deleted = $this->disk->delete($safeFile);
+            $files = [$safeFile];
 
             if (str_ends_with($safeFile, '.html')) {
-                $deleted = $this->disk->delete($safeFile . PageCache::FRAGMENT_METADATA_EXTENSION) || $deleted;
+                $files[] = $safeFile . PageCache::FRAGMENT_METADATA_EXTENSION;
+            }
+
+            $deleted = false;
+
+            foreach ($files as $artifact) {
+                $this->directoryExists(dirname($artifact));
+
+                if (! $this->disk->exists($artifact)) {
+                    continue;
+                }
+
+                if (! $this->disk->delete($artifact)) {
+                    throw new RuntimeException(sprintf('Unable to delete HTML cache artefact "%s".', $artifact));
+                }
+
+                $deleted = true;
             }
 
             return $deleted;
@@ -100,6 +116,10 @@ final class HtmlCacheStore
     public function allDirectories(string $path): array
     {
         try {
+            if (! $this->directoryExists($path)) {
+                return [];
+            }
+
             return $this->disk->allDirectories($path);
         } catch (Throwable $throwable) {
             throw new RuntimeException(sprintf('Unable to list all HTML cache directories under "%s". Original error: %s', $path, $throwable->getMessage()), 0, $throwable);
@@ -126,6 +146,10 @@ final class HtmlCacheStore
     public function allFiles(string $path): array
     {
         try {
+            if (! $this->directoryExists($path)) {
+                return [];
+            }
+
             return $this->disk->allFiles($path);
         } catch (Throwable $throwable) {
             throw new RuntimeException(sprintf('Unable to list all HTML cache files under "%s". Original error: %s', $path, $throwable->getMessage()), 0, $throwable);
@@ -192,10 +216,6 @@ final class HtmlCacheStore
 
     private function directoryExists(?string $path): bool
     {
-        try {
-            return File::isDirectory($this->disk->path($path ?? ''));
-        } catch (PathTraversalDetected) {
-            return false;
-        }
+        return HtmlCacheFilesystem::directoryExists($this->disk->path($path ?? ''));
     }
 }

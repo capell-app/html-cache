@@ -175,6 +175,7 @@ final class RefreshCachedUrlAtomicallyAction
         if (! WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl, $request)) {
             throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; content was invalidated during rendering.', $staleCachedUrl->url));
         }
+
         if (! $suppressInlineEdgePurge) {
             PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
         }
@@ -219,15 +220,17 @@ final class RefreshCachedUrlAtomicallyAction
 
     private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): void
     {
+        if (! is_string($staleCachedUrl->cache_path) || $staleCachedUrl->cache_path === ''
+            || ! is_string($staleCachedUrl->error_cache_path) || $staleCachedUrl->error_cache_path === '') {
+            throw new RuntimeException(sprintf(
+                'Unable to resolve historical cache paths for "%s"; its cache tracking has been retained.',
+                $staleCachedUrl->url,
+            ));
+        }
+
         $store = resolve(HtmlCacheStore::class);
-
-        if (is_string($staleCachedUrl->cache_path) && $staleCachedUrl->cache_path !== '') {
-            $store->deletePage($staleCachedUrl->cache_path);
-        }
-
-        if (is_string($staleCachedUrl->error_cache_path) && $staleCachedUrl->error_cache_path !== '') {
-            $store->deletePage($staleCachedUrl->error_cache_path);
-        }
+        $store->deletePage($staleCachedUrl->cache_path);
+        $store->deletePage($staleCachedUrl->error_cache_path);
 
         $query = CachedModelUrl::query()->where('url_hash', $staleCachedUrl->url_hash);
 

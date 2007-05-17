@@ -116,7 +116,7 @@ final class PageCache
         $publication = resolve(HtmlCachePublicationGuard::class);
         $token = $publication->token($laravelRequest);
 
-        if ($response->getStatusCode() !== SymfonyResponse::HTTP_NOT_FOUND && $extension === 'html' && $fragmentCache === null && config('capell-html-cache.minify_html', true) === true) {
+        if ($response->getStatusCode() !== SymfonyResponse::HTTP_NOT_FOUND && $extension === 'html' && ! $fragmentCache instanceof RenderHookFragmentCacheData && config('capell-html-cache.minify_html', true) === true) {
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
@@ -322,20 +322,22 @@ final class PageCache
     {
         return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($slug): bool {
             $deleted = false;
+            $extensions = ['.html', '.html' . self::FRAGMENT_METADATA_EXTENSION, '.json', '.xml', self::ERROR_EXTENSION, self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION];
 
-            foreach (['html', 'json', 'xml'] as $extension) {
-                $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
+            foreach ($extensions as $extension) {
+                $path = $this->getCachePath($slug . $extension);
+                HtmlCacheFilesystem::directoryExists(dirname($path));
 
-                if ($extension === 'html') {
-                    $deleted = $this->files->delete($this->getCachePath($slug . '.html' . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
+                if (! $this->files->exists($path)) {
+                    continue;
                 }
-            }
 
-            if ($this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION))) {
+                if (! $this->files->delete($path)) {
+                    throw new RuntimeException(sprintf('Unable to delete HTML cache artefact "%s".', $path));
+                }
+
                 $deleted = true;
             }
-
-            $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
 
             return $deleted;
         });
@@ -343,7 +345,21 @@ final class PageCache
 
     public function clear(?string $path = null): bool
     {
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(fn (): bool => $this->files->deleteDirectory($this->getCachePath($path), preserve: true));
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($path): bool {
+            $directory = $this->getCachePath($path);
+
+            if (! HtmlCacheFilesystem::directoryExists($directory)) {
+                return false;
+            }
+
+            if (! $this->files->deleteDirectory($directory, preserve: true)
+                || $this->files->allFiles($directory, hidden: true) !== []
+                || $this->files->directories($directory) !== []) {
+                throw new RuntimeException(sprintf('Unable to delete HTML cache directory "%s".', $directory));
+            }
+
+            return true;
+        });
     }
 
     /** @return array<string, mixed> */

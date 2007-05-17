@@ -14,10 +14,12 @@ use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
+use RuntimeException;
 
 /**
  * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
@@ -40,7 +42,10 @@ final class ClearCachedUrlAction
             $path = null;
         }
 
-        $selectedCachedModelUrl?->loadMissing('siteDomain', 'language');
+        $selectedCachedModelUrl?->load([
+            'siteDomain' => static fn (BuilderContract $query): BuilderContract => $query->withTrashed(),
+            'language',
+        ]);
         $path ??= resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($urlString);
         $cachedModelUrls = $this->cachedModelUrls($urlString, $selectedCachedModelUrl);
         $siteDomain ??= $selectedCachedModelUrl?->siteDomain;
@@ -63,13 +68,13 @@ final class ClearCachedUrlAction
         }
 
         $this->deleteFilesFromCachedRows($cachedModelUrls);
-        $this->purgeEdgeCache($cachedModelUrls, $urlString);
 
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
         $store->deletePage($pathResolver->pathForRequestUrl($urlString, $siteDomain));
         $store->deletePage($pathResolver->pathForRequestUrl($urlString, $siteDomain, error: true));
 
+        $this->purgeEdgeCache($cachedModelUrls, $urlString);
         $cachedModelUrls->each->delete();
 
         if ($refresh) {
@@ -85,7 +90,11 @@ final class ClearCachedUrlAction
     private function cachedModelUrls(string $url, ?CachedModelUrl $selectedCachedModelUrl): Collection
     {
         $query = CachedModelUrl::query()
-            ->with('siteDomain', 'language')
+            ->with([
+                // Deleted domains still identify the historical artefacts that must be removed.
+                'siteDomain' => static fn (BuilderContract $query): BuilderContract => $query->withTrashed(),
+                'language',
+            ])
             ->where('url_hash', CachedModelUrl::hashUrl($url));
 
         if (! $selectedCachedModelUrl instanceof CachedModelUrl) {
@@ -114,7 +123,10 @@ final class ClearCachedUrlAction
 
         foreach ($cachedModelUrls as $cachedModelUrl) {
             if (! $cachedModelUrl->siteDomain instanceof SiteDomain) {
-                continue;
+                throw new RuntimeException(sprintf(
+                    'Unable to resolve the site domain for cached URL "%s"; its cache tracking has been retained.',
+                    $cachedModelUrl->url,
+                ));
             }
 
             $files[] = $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain);

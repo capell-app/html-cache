@@ -45,9 +45,9 @@ final class PageCachedIconColumn extends IconColumn
         $count = $record instanceof Pageable ? $record->pageUrls()->count() : 1;
 
         if ($count !== 0) {
-            Notification::make('page_cache_deleted')
-                ->title(__('capell-admin::message.page_cache_deleted', ['count' => $count]))
-                ->success()
+            Notification::make('page-cache-clear-queued')
+                ->title(__('capell-html-cache::admin.clear_queued'))
+                ->info()
                 ->send();
         }
     }

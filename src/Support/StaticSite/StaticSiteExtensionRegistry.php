@@ -14,6 +14,9 @@ final class StaticSiteExtensionRegistry
     private array $handlers = [];
 
     /**
+     * Visitors accept absolute HTTP(S) URLs or paths relative to the supplied
+     * site's domain base, including its path prefix. Rejected visits throw.
+     *
      * @param  callable(Site, SiteDomain, Closure(string): void): void  $handler
      */
     public function register(string $key, callable $handler): void

@@ -13,6 +13,8 @@ use Filament\Resources\Pages\EditRecord;
 use Filament\Resources\RelationManagers\RelationManager;
 use Illuminate\Database\Eloquent\Model;
 use Livewire\Attributes\On;
+use RuntimeException;
+use Throwable;
 
 /**
  * @mixin EditRecord
@@ -26,17 +28,28 @@ trait HasPageCacheNotification
     #[On('refresh-cache')]
     public function refreshPageCache(?array $urls = null): void
     {
-        if ($urls !== null && $urls !== []) {
-            foreach ($urls as $url) {
-                if (is_string($url)) {
-                    ClearCachedUrlAction::dispatchAfterResponse($url);
+        try {
+            if ($urls !== null && $urls !== []) {
+                foreach ($urls as $url) {
+                    if (! is_string($url) || ! ClearCachedUrlAction::run($url)) {
+                        throw new RuntimeException('Unable to clear a requested HTML cache URL.');
+                    }
                 }
+            } else {
+                ClearAllHtmlCacheAction::run();
             }
-        } else {
-            ClearAllHtmlCacheAction::run();
-        }
 
-        CapellCore::flushCache();
+            CapellCore::flushCache();
+        } catch (Throwable $throwable) {
+            report($throwable);
+
+            Notification::make('page-cache-refresh-failed')
+                ->title(__('capell-html-cache::admin.clear_failed'))
+                ->danger()
+                ->send();
+
+            return;
+        }
 
         Notification::make('page-cache-refreshed')
             ->title(__('capell-admin::notification.page_cache_refreshed'))

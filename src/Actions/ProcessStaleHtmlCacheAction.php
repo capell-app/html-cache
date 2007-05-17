@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Data\StaleHtmlCacheProcessResultData;
 use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
@@ -11,10 +12,11 @@ use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
+use RuntimeException;
 use Throwable;
 
 /**
- * @method static int run(?int $limit = null, bool $suppressInlineEdgePurge = false)
+ * @method static StaleHtmlCacheProcessResultData run(?int $limit = null, bool $suppressInlineEdgePurge = false)
  */
 final class ProcessStaleHtmlCacheAction
 {
@@ -22,36 +24,59 @@ final class ProcessStaleHtmlCacheAction
     use AsJob;
     use AsObject;
 
-    public function handle(?int $limit = null, bool $suppressInlineEdgePurge = false): int
+    public function asJob(?int $limit = null, bool $suppressInlineEdgePurge = false): void
+    {
+        $result = $this->handle($limit, $suppressInlineEdgePurge);
+
+        if (! $result->successful()) {
+            throw new RuntimeException(sprintf(
+                'Failed to refresh %d of %d attempted HTML cache URLs.',
+                $result->failed,
+                $result->attempted,
+            ));
+        }
+    }
+
+    public function handle(?int $limit = null, bool $suppressInlineEdgePurge = false): StaleHtmlCacheProcessResultData
     {
         PruneHtmlCacheMetadataAction::run();
 
         $batchSize = max(1, $limit ?? $this->configuredBatchSize(config('capell-html-cache.invalidation.batch_size', 100)));
-        $processed = 0;
+        $result = new StaleHtmlCacheProcessResultData;
         $emptyPasses = 0;
+        $deferredIds = [];
 
-        while ($processed < $batchSize && $emptyPasses < 2) {
-            $candidates = SelectStaleHtmlCacheCandidatesAction::run($batchSize - $processed);
+        while ($result->attempted < $batchSize && $emptyPasses < 2) {
+            $candidates = SelectStaleHtmlCacheCandidatesAction::run($batchSize - $result->attempted);
 
             if ($candidates->isEmpty()) {
                 break;
             }
 
-            $processedThisPass = 0;
+            $attemptedBefore = $result->attempted;
 
-            $candidates->each(function (StaleCachedUrl $staleCachedUrl) use (&$processed, &$processedThisPass, $suppressInlineEdgePurge): void {
-                if ($this->processStaleCachedUrl($staleCachedUrl, $suppressInlineEdgePurge)) {
-                    $processed++;
-                    $processedThisPass++;
+            foreach ($candidates as $staleCachedUrl) {
+                if (isset($deferredIds[$staleCachedUrl->id])) {
+                    continue;
                 }
-            });
 
-            if ($processedThisPass === 0) {
+                if (! ClaimStaleCachedUrlAction::run($staleCachedUrl)) {
+                    $deferredIds[$staleCachedUrl->id] = true;
+                    $result->deferred++;
+
+                    continue;
+                }
+
+                $result->attempted++;
+                $this->processStaleCachedUrl($staleCachedUrl, $suppressInlineEdgePurge, $result);
+            }
+
+            if ($result->attempted === $attemptedBefore) {
                 $emptyPasses++;
             }
         }
 
-        return $processed;
+        return $result;
     }
 
     private function configuredBatchSize(mixed $configuredLimit): int
@@ -82,18 +107,14 @@ final class ProcessStaleHtmlCacheAction
         return 5;
     }
 
-    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): bool
+    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge, StaleHtmlCacheProcessResultData $result): void
     {
-        if (! ClaimStaleCachedUrlAction::run($staleCachedUrl)) {
-            return false;
-        }
-
         $staleCachedUrl->refresh();
 
         try {
             RefreshCachedUrlAtomicallyAction::run($staleCachedUrl, $suppressInlineEdgePurge);
 
-            $this->completeClaim($staleCachedUrl, [
+            $completed = $this->completeClaim($staleCachedUrl, [
                 'status' => StaleCachedUrl::STATUS_PROCESSED,
                 'claim_token' => null,
                 'attempts' => 0,
@@ -101,14 +122,19 @@ final class ProcessStaleHtmlCacheAction
                 'failed_at' => null,
                 'last_error' => null,
             ]);
+
+            $completed ? $result->succeeded++ : $result->deferred++;
         } catch (StaleCachedUrlNotApplicableException $exception) {
-            $this->completeClaim($staleCachedUrl, [
+            $completed = $this->completeClaim($staleCachedUrl, [
                 'status' => StaleCachedUrl::STATUS_NOT_APPLICABLE,
                 'claim_token' => null,
                 'failed_at' => null,
                 'last_error' => Str::limit($exception->getMessage(), 2000, ''),
             ]);
+
+            $completed ? $result->notApplicable++ : $result->deferred++;
         } catch (Throwable $throwable) {
+            $result->failed++;
             $this->completeClaim($staleCachedUrl, [
                 'status' => $staleCachedUrl->attempts >= $this->configuredMaxAttempts()
                     ? StaleCachedUrl::STATUS_EXHAUSTED
@@ -118,8 +144,6 @@ final class ProcessStaleHtmlCacheAction
                 'last_error' => Str::limit($throwable->getMessage(), 2000, ''),
             ]);
         }
-
-        return true;
     }
 
     /**

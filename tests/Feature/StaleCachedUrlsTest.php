@@ -31,7 +31,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
-require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -78,7 +78,7 @@ it('processes the stale queue only when explicitly requested', function (): void
 
     capell_artisan('capell:html-cache:clear', ['--process' => true])
         ->expectsOutput('Marked 0 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
-        ->expectsOutput('Processed 0 stale HTML cache URL(s).')
+        ->expectsOutput('Refreshed 0 stale HTML cache URL(s); 0 failed, 0 deferred, 0 not applicable (0 attempted).')
         ->doesntExpectOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')
         ->assertSuccessful();
 });
@@ -196,11 +196,11 @@ it('does not enqueue configured bypass URLs and retires already queued ones as n
 
     $staleCachedUrl = StaleCachedUrl::query()->where('url', $url)->firstOrFail();
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1))->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 0, 'notApplicable' => 1])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
         ->and($staleCachedUrl->isTerminal())->toBeTrue()
         ->and($staleCachedUrl->last_error)->toContain('Reason: configured_bypass_rule')
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0);
 });
 
 it('clears cached html immediately when a site domain changes in scheduled mode', function (): void {
@@ -309,7 +309,7 @@ it('atomically refreshes stale cached html and marks the stale row processed', f
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($staleCachedUrl->processed_at)->not->toBeNull();
@@ -327,11 +327,11 @@ it('retires redirect responses as not applicable instead of exhausting the stale
 
     $staleCachedUrl = staleCacheRowForCoverage($siteDomain, '/renamed', StaleCachedUrl::STATUS_PENDING);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1))->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 0, 'notApplicable' => 1])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
         ->and($staleCachedUrl->isTerminal())->toBeTrue()
         ->and($staleCachedUrl->last_error)->toContain('Reason: redirect_url')
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0);
 });
 
 it('refreshes stale HTML through middleware with no configured Vary headers', function (): void {
@@ -371,7 +371,7 @@ it('refreshes stale HTML through middleware with no configured Vary headers', fu
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
         ->and($staleCachedUrl->refresh()->last_error)->toBeNull()
         ->and($staleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
@@ -406,7 +406,7 @@ it('keeps the previous cached html when stale refresh fails', function (): void 
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('response status was 500');
@@ -443,7 +443,7 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(resolve(HtmlCacheStore::class)->path('../outside.html'))->toBeNull()
         ->and(Storage::disk('page_cache')->allFiles())->toBe([])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
@@ -619,7 +619,10 @@ it('publishes a fragmented stale refresh without treating the assembled response
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
 
-    $registry = resolve(RenderHookRegistry::class);
+    /** @var RenderHookRegistry<RenderHookContext> $registry */
+    $registry = new RenderHookRegistry(app());
+    app()->instance(RenderHookRegistry::class, $registry);
+
     $registry->contribute(RenderHookContributionData::extension(
         location: RenderHookLocation::BodyEnd,
         extension: new class implements RenderHookExtensionInterface
@@ -655,7 +658,7 @@ it('publishes a fragmented stale refresh without treating the assembled response
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1, suppressInlineEdgePurge: true))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1, suppressInlineEdgePurge: true)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('<main>fresh shell</main>')
         ->and(Storage::disk('page_cache')->exists($cachePath . '.fragments.json'))->toBeTrue()
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
@@ -749,7 +752,7 @@ it('refreshes missing pages into the error cache', function (): void {
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($errorCachePath))->toBe('fresh missing page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED);
 });
@@ -832,7 +835,7 @@ it('retries failed stale cache rows after the retry backoff', function (): void 
         'last_error' => 'temporary failure',
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($staleCachedUrl->attempts)->toBe(0);
@@ -872,7 +875,7 @@ it('does not claim actively processing stale cache rows', function (): void {
         'attempts' => 1,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(0)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSING)
         ->and($staleCachedUrl->attempts)->toBe(1);
@@ -915,7 +918,7 @@ it('keeps a new stale mark pending when a model changes during stale refresh', f
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
         ->and($staleCachedUrl->claim_token)->toBeNull()
@@ -1047,13 +1050,13 @@ it('marks repeatedly failing stale cache rows exhausted after the configured max
         'failed_at' => now()->subMinutes(6),
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_EXHAUSTED)
         ->and($staleCachedUrl->isTerminal())->toBeFalse()
         ->and(StaleCachedUrl::terminalStatuses())->not->toContain($staleCachedUrl->status)
         ->and($staleCachedUrl->attempts)->toBe(2)
         ->and($staleCachedUrl->claim_token)->toBeNull()
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0);
 });
 
 it('resets the retry budget when a failing stale url is marked stale again', function (): void {
@@ -1090,7 +1093,7 @@ it('resets the retry budget when a failing stale url is marked stale again', fun
     MarkCachedUrlStaleAction::run($url, 'changed_again');
 
     expect($staleCachedUrl->refresh()->attempts)->toBe(0)
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->attempts)->toBe(1);
 });
@@ -1166,11 +1169,11 @@ it('processes fresh pending stale urls before retrying older failed rows', funct
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($newPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($oldFailedStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($secondPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($oldFailedStaleCachedUrl->refresh()->attempts)->toBe(2)
         ->and($oldFailedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($secondPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING);
@@ -1245,7 +1248,7 @@ it('processes retryable stale urls alongside pending batch capacity', function (
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
-    expect(ProcessStaleHtmlCacheAction::run(2))->toBe(2)
+    expect(ProcessStaleHtmlCacheAction::run(2)->attempted)->toBe(2)
         ->and($firstPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($oldFailedStaleCachedUrl->refresh()->attempts)->toBe(2)
         ->and($oldFailedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
@@ -1289,11 +1292,11 @@ it('fills stale cache batches with timed out processing rows when pending capaci
     ]);
     $timedOut->forceFill(['updated_at' => now()->subMinutes(16)])->save();
 
-    expect(ProcessStaleHtmlCacheAction::run())->toBe(3)
+    expect(ProcessStaleHtmlCacheAction::run()->attempted)->toBe(3)
         ->and($pending->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($failed->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and($timedOut->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
-        ->and(ProcessStaleHtmlCacheAction::run(2))->toBe(0);
+        ->and(ProcessStaleHtmlCacheAction::run(2)->attempted)->toBe(0);
 });
 
 it('alternates failed and timed out processing rows in single item retry batches', function (): void {
@@ -1356,11 +1359,11 @@ it('alternates failed and timed out processing rows in single item retry batches
     ]);
     $timedOutStaleCachedUrl->forceFill(['updated_at' => now()->subMinutes(16)])->save();
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($failedStaleCachedUrl->refresh()->attempts)->toBe(2)
         ->and($failedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($timedOutStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSING)
-        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($timedOutStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
         ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForUrl('/timed-out', $siteDomain)))->toBe('fresh timed out page');
 });
@@ -1408,7 +1411,7 @@ it('processes stale cache command with the requested limit and optional edge pur
     }
 
     $this->artisan('capell:html-cache:process-stale', $options)
-        ->expectsOutput('Processed 1 stale HTML cache URL(s).')
+        ->expectsOutput('Refreshed 1 stale HTML cache URL(s); 0 failed, 0 deferred, 0 not applicable (1 attempted).')
         ->assertSuccessful();
 
     expect(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PROCESSED)->count())->toBe(1)

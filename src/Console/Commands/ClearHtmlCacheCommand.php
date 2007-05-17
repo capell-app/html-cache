@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Console\Commands;
 
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
-use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Console\Command;
 use Throwable;
@@ -39,16 +38,21 @@ final class ClearHtmlCacheCommand extends Command
             ));
 
             if ($this->option('process') === true) {
-                $processed = ProcessStaleHtmlCacheAction::run();
-                $this->info(sprintf('Processed %d stale HTML cache URL(s).', $processed));
-            } else {
-                $this->line('Run capell:html-cache:process-stale (or pass --process) to regenerate them.');
+                return $this->call('capell:html-cache:process-stale');
             }
+
+            $this->line('Run capell:html-cache:process-stale (or pass --process) to regenerate them.');
 
             return Command::SUCCESS;
         }
 
-        $cleared = $this->option('recursive') === true ? $cache->clear($slug) : $cache->forget($slug);
+        try {
+            $cleared = $this->option('recursive') === true ? $cache->clear($slug) : $cache->forget($slug);
+        } catch (Throwable $throwable) {
+            $this->error((string) __('capell-html-cache::cache.clear_failed', ['error' => $throwable->getMessage()]));
+
+            return Command::FAILURE;
+        }
 
         $cleared
             ? $this->info(sprintf('HTML cache cleared for "%s".', $slug))

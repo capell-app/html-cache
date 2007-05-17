@@ -27,7 +27,7 @@ use Illuminate\Support\Testing\Fakes\QueueFake;
 use PHPUnit\Framework\Assert;
 use Symfony\Component\HttpFoundation\Response;
 
-require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -109,7 +109,7 @@ it('queues one origin refresh across hits and performs no full render at termina
     Bus::swap(Mockery::mock($dispatcher));
     Bus::shouldReceive('dispatch')->with(Mockery::type(RefreshOriginStaleCachedUrlJob::class))
         ->andReturnUsing(static function (RefreshOriginStaleCachedUrlJob $job) use ($dispatcher): mixed {
-            if (Fiber::getCurrent() !== null) {
+            if (Fiber::getCurrent() instanceof Fiber) {
                 Fiber::suspend();
             }
 
@@ -132,6 +132,7 @@ it('queues one origin refresh across hits and performs no full render at termina
 
         Bus::swap($dispatcher);
     }
+
     app()->terminate();
 
     expect($renders)->toBe(0)
@@ -143,6 +144,7 @@ it('queues one origin refresh across hits and performs no full render at termina
 
     $job = queuedOriginRefreshJob();
     $job->handle();
+
     resolve(UniqueLock::class)->release($job);
 
     expect($renders)->toBe(1)
@@ -200,7 +202,7 @@ it('preserves stale serving and durable retry when the queue broker fails', func
         ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
         ->and($row->claim_token)->toBeNull()
         ->and($row->attempts)->toBe(0);
-    expect(ProcessStaleHtmlCacheAction::run(1, suppressInlineEdgePurge: true))->toBe(1)
+    expect(ProcessStaleHtmlCacheAction::run(1, suppressInlineEdgePurge: true)->attempted)->toBe(1)
         ->and($renders)->toBe(1)
         ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED);
 })->with(['without telemetry' => false, 'with telemetry' => true]);
@@ -230,7 +232,13 @@ it('preserves stale claim recovery backoff and publication fencing in queued ref
     queuedOriginCacheHit($row->url);
     Queue::assertPushed(RefreshOriginStaleCachedUrlJob::class, 1);
     $job = queuedOriginRefreshJob();
-    $job->handle();
+
+    if (in_array($state, ['reclaimed during render', 'invalidated during render'], true)) {
+        expect(fn () => $job->handle())->toThrow(RuntimeException::class);
+    } else {
+        $job->handle();
+    }
+
     $row->refresh();
 
     if (in_array($state, ['active claim', 'retry backoff'], true)) {
@@ -254,7 +262,7 @@ it('records exhausted refresh attempts without logging the raw URL', function ()
     $log = Log::spy();
     $url = 'https://example.test/private-path?token=secret';
 
-    (new RefreshOriginStaleCachedUrlJob($url))->failed(new RuntimeException('render failed'));
+    new RefreshOriginStaleCachedUrlJob($url)->failed(new RuntimeException('render failed'));
 
     $log->shouldHaveReceived('warning')->once()->withArgs(
         fn (string $message, array $context): bool => $context === [

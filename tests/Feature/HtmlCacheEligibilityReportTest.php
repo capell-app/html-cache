@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Models\Language;
+use Capell\Core\Models\PageUrl;
+use Capell\Core\Models\SiteDomain;
 use Capell\FormBuilder\Livewire\FormElementComponent;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
+use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
@@ -11,9 +15,14 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
 use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Contracts\Session\Session;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Testing\AssertableJsonString;
+use Illuminate\Testing\Fluent\AssertableJson;
 use Symfony\Component\HttpFoundation\Cookie;
 
 uses(HtmlCacheTestCase::class);
@@ -202,6 +211,7 @@ it('never writes authenticated responses even when authenticated cache reads are
     $request = Request::create('https://example.test/account', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->cookies->set('capell_session', 'session-value');
     $request->setUserResolver(fn (): User => User::factory()->create());
+
     app()->instance('request', $request);
 
     $report = BuildHtmlCacheEligibilityReportAction::run(
@@ -235,4 +245,184 @@ it('can diagnose the rendered response contract', function (): void {
     ])
         ->expectsOutputToContain('"response": {')
         ->assertSuccessful();
+});
+
+it('reports synthetic render blockers and restores the original request', function (): void {
+    $originalRequest = Request::create('https://example.test/original-request');
+    app()->instance('request', $originalRequest);
+
+    Route::get('/diagnostic-contribution', function (): Response {
+        RecordExtensionRenderContributionAction::run(
+            packageName: 'vendor/synthetic-only',
+            surface: 'frontend',
+            contributionType: 'frontend-component',
+            contributionClass: 'Vendor\\SyntheticOnly\\Widget',
+            elapsedMilliseconds: 1,
+            frontendRenderBudgetMs: 10,
+            cacheTags: ['synthetic-only'],
+            cacheable: false,
+            sensitiveOutput: false,
+            variesBy: [],
+        );
+
+        return response('<main>Synthetic contribution</main>', 200, ['Content-Type' => 'text/html']);
+    });
+
+    $exitCode = Artisan::call('capell:html-cache:diagnose', [
+        'url' => '/diagnostic-contribution',
+        '--render' => true,
+        '--json' => true,
+    ]);
+
+    $report = AssertableJson::fromAssertableJsonString(new AssertableJsonString(Artisan::output()));
+
+    $report->where('reasons', ['package_cache_blocking'])
+        ->where('blockingPackages', ['vendor/synthetic-only'])
+        ->where('cacheTags', ['synthetic-only'])
+        ->where('eligible', false)
+        ->etc();
+
+    expect($exitCode)->toBe(0)
+        ->and(resolve('request'))->toBe($originalRequest);
+});
+
+it('ignores empty Vary list elements without accepting unsupported variance', function (array $vary, bool $eligible): void {
+    config()->set('capell-html-cache.cache_vary_headers', ['Accept-Encoding']);
+    $request = Request::create('https://example.test/pricing');
+    $response = response('<main>Pricing</main>', 200, [
+        'Content-Type' => 'text/html; charset=utf-8',
+        'Cache-Control' => 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400',
+    ]);
+    $response->headers->set('Vary', $vary);
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->eligible)->toBe($eligible)
+        ->and($report->hasReason(HtmlCacheEligibilityReason::UnsupportedVaryHeader))->toBe(! $eligible);
+})->with([
+    'absent' => [[], true],
+    'empty' => [[''], true],
+    'whitespace' => [['  '], true],
+    'empty list elements' => [[', Accept-Encoding, ', ''], true],
+    'unsupported after empty' => [['', 'Accept-Language'], false],
+    'wildcard after empty' => [[', *'], false],
+]);
+
+it('reports the actual hidden rejection instead of inventing a no-store directive', function (string $condition, string $reason): void {
+    config()->set('capell-html-cache.cache_vary_headers', ['Accept-Encoding']);
+    $request = Request::create('https://example.test/pricing');
+    $response = response('<main>Pricing</main>', 200, [
+        'Content-Type' => 'text/html; charset=utf-8',
+        'Cache-Control' => 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400',
+    ]);
+
+    if ($condition === 'resolver') {
+        app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
+        {
+            public function shouldBypass(): bool
+            {
+                return true;
+            }
+        });
+    } elseif ($condition === 'session') {
+        $request->setLaravelSession(resolve(Session::class));
+        $request->session()->put('status', 'visitor-specific status');
+    } else {
+        $request->merge(['without_html_cache' => true]);
+    }
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->reasonCodes())->toContain($reason)
+        ->not->toContain('response_no_store')
+        ->and($response->headers->has('Vary'))->toBeFalse()
+        ->and($response->headers->hasCacheControlDirective('public'))->toBeTrue();
+})->with([
+    'resolver' => ['resolver', 'cache_bypass_resolver'],
+    'session state' => ['session', 'session_user_state'],
+    'explicit bypass' => ['request', 'explicit_cache_bypass'],
+]);
+
+it('diagnoses the enabled URL for the requested site and language rather than an older redirect', function (string $path, string $unrelated): void {
+    $domain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $otherDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'other.test',
+        'path' => null,
+    ]);
+    $otherLanguage = Language::factory()->create();
+
+    $activePageUrl = Model::withoutEvents(function () use ($domain, $otherDomain, $otherLanguage, $path, $unrelated): PageUrl {
+        PageUrl::factory()->manualRedirect()->create([
+            'site_id' => $unrelated === 'site' ? $otherDomain->site_id : $domain->site_id,
+            'language_id' => $unrelated === 'language' ? $otherLanguage->getKey() : $domain->language_id,
+            'url' => $path,
+            'status' => $unrelated !== 'disabled',
+        ]);
+
+        return PageUrl::factory()->create([
+            'site_id' => $domain->site_id,
+            'language_id' => $domain->language_id,
+            'url' => $path,
+            'status' => true,
+        ]);
+    });
+    Route::get($path, fn (): Response => response('<main>Canonical public page</main>', 200, ['Content-Type' => 'text/html']));
+
+    Artisan::call('capell:html-cache:diagnose', [
+        'url' => 'https://example.test' . $path,
+        '--render' => true,
+        '--json' => true,
+    ]);
+    $report = AssertableJson::fromAssertableJsonString(new AssertableJsonString(Artisan::output()));
+
+    $report->where('page_url.id', $activePageUrl->getKey())
+        ->where('reasons', [])
+        ->where('eligible', true)
+        ->where('response.status', 200)
+        ->etc();
+})->with(['/pricing', '/roadmap', '/demo', '/start'])->with(['site', 'language', 'disabled']);
+
+it('keeps real redirect metadata and resolves domain mount paths in diagnostics', function (): void {
+    $domain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'mounted.test',
+        'path' => '/marketing',
+    ]);
+    $redirect = Model::withoutEvents(fn (): PageUrl => PageUrl::factory()->manualRedirect()->create([
+        'site_id' => $domain->site_id,
+        'language_id' => $domain->language_id,
+        'url' => '/pricing',
+        'status' => true,
+    ]));
+
+    Artisan::call('capell:html-cache:diagnose', [
+        'url' => 'https://mounted.test/marketing/pricing',
+        '--site' => $domain->site_id,
+        '--json' => true,
+    ]);
+    $report = AssertableJson::fromAssertableJsonString(new AssertableJsonString(Artisan::output()));
+
+    $report->where('page_url.id', $redirect->getKey())
+        ->where('reasons', ['redirect_url', 'unpublished_page'])
+        ->where('eligible', false)
+        ->etc();
+});
+
+it('does not attach unrelated CMS records when the requested host cannot resolve', function (): void {
+    PageUrl::factory()->manualRedirect()->create(['url' => '/pricing']);
+
+    Artisan::call('capell:html-cache:diagnose', [
+        'url' => 'https://unmapped.test/pricing',
+        '--json' => true,
+    ]);
+    $report = AssertableJson::fromAssertableJsonString(new AssertableJsonString(Artisan::output()));
+
+    $report->where('page_url', null)
+        ->where('reasons', [])
+        ->etc();
 });

@@ -210,8 +210,10 @@ final class BuildHtmlCacheEligibilityReportAction
             $reasons[] = HtmlCacheEligibilityReason::FrontendContextNotCacheable;
         }
 
-        if (! resolve(PageCache::class)->shouldCachePage($request, $response) && $reasons === []) {
-            $reasons[] = HtmlCacheEligibilityReason::ResponseNoStore;
+        $pageCacheReason = resolve(PageCache::class)->rejectionReason($request, $response);
+
+        if ($pageCacheReason instanceof HtmlCacheEligibilityReason) {
+            $reasons[] = $pageCacheReason;
         }
 
         return $reasons;
@@ -374,12 +376,6 @@ final class BuildHtmlCacheEligibilityReportAction
 
     private function isInertiaRequest(Request $request): bool
     {
-        foreach (['X-Inertia', 'X-Inertia-Version', 'X-Inertia-Partial-Component', 'X-Inertia-Partial-Data', 'X-Inertia-Reset'] as $header) {
-            if ($request->headers->has($header)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any(['X-Inertia', 'X-Inertia-Version', 'X-Inertia-Partial-Component', 'X-Inertia-Partial-Data', 'X-Inertia-Reset'], fn (string $header): bool => $request->headers->has($header));
     }
 }

@@ -14,6 +14,11 @@ enum HtmlCacheEligibilityReason: string
     case InertiaRequest = 'inertia_request';
     case AuthorizationHeaderPresent = 'authorization_header_present';
     case ConfiguredBypassRule = 'configured_bypass_rule';
+    case CacheBypassResolver = 'cache_bypass_resolver';
+    case ExplicitCacheBypass = 'explicit_cache_bypass';
+    case UnsafeRequestPath = 'unsafe_request_path';
+    case SessionUserState = 'session_user_state';
+    case PublicHtmlInspectionFailed = 'public_html_inspection_failed';
     case CacheDisabled = 'cache_disabled';
     case CacheWriteDisabled = 'cache_write_disabled';
     case UnsafePublicOutput = 'unsafe_public_output';

@@ -180,7 +180,7 @@ final class HtmlCacheMiddleware
 
     private function containsUnsafeSharedHtml(Request $request, Response $response): bool
     {
-        if (mb_strpos((string) $response->headers->get('Content-Type'), 'text/html') === false) {
+        if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
             return false;
         }
 
@@ -403,7 +403,14 @@ final class HtmlCacheMiddleware
             $this->browserMaxAge(),
             $this->staleWhileRevalidateSeconds(),
         ));
-        $response->headers->set('Vary', implode(', ', config('capell-html-cache.cache_vary_headers', ['Accept-Encoding'])));
+        $vary = implode(', ', config('capell-html-cache.cache_vary_headers', ['Accept-Encoding']));
+
+        // Stale refresh validates this response again after middleware has written it.
+        if (trim($vary) === '') {
+            $response->headers->remove('Vary');
+        } else {
+            $response->headers->set('Vary', $vary);
+        }
 
         if ($applySurrogateKey) {
             $this->applySurrogateKey($request, $response);

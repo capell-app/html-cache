@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Actions;
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -55,14 +56,17 @@ final class RefreshCachedUrlAtomicallyAction
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
-            if (! $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge)) {
+            $rejectionReason = $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
+
+            if ($rejectionReason instanceof HtmlCacheEligibilityReason) {
                 throw new RuntimeException(sprintf(
-                    'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Status: %d. Content-Type: %s. Cache-Control: %s. Vary: %s. Cookies: %d. Query count: %d.',
+                    'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Reason: %s. Status: %d. Content-Type: %s. Cache-Control: %s. Vary: %s. Cookies: %d. Query count: %d.',
                     $staleCachedUrl->url,
+                    $rejectionReason->value,
                     $response->getStatusCode(),
                     (string) $response->headers->get('Content-Type'),
                     (string) $response->headers->get('Cache-Control'),
-                    (string) $response->headers->get('Vary'),
+                    json_encode($response->headers->all('Vary'), JSON_THROW_ON_ERROR),
                     count($response->headers->getCookies()),
                     $request->query->count(),
                 ));
@@ -106,26 +110,30 @@ final class RefreshCachedUrlAtomicallyAction
         return $request;
     }
 
-    private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): bool
+    private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): ?HtmlCacheEligibilityReason
     {
         $response = CacheableResponseCookieStripper::strip($response);
 
         if (config('capell-html-cache.write_enabled', true) !== true) {
-            return false;
+            return HtmlCacheEligibilityReason::CacheWriteDisabled;
         }
 
         if (! $this->staleRefreshClaimIsCurrent($request)) {
-            return false;
+            return HtmlCacheEligibilityReason::StaleClaimInvalid;
         }
 
-        if (! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
-            return false;
+        $packageReason = resolve(ExtensionCacheSafetyResolver::class)->blockingReasonCodes()[0] ?? null;
+
+        if ($packageReason instanceof HtmlCacheEligibilityReason) {
+            return $packageReason;
         }
 
         $pageCache = resolve(PageCache::class);
 
-        if (! $pageCache->shouldCachePage($request, $response)) {
-            return false;
+        $pageCacheReason = $pageCache->rejectionReason($request, $response);
+
+        if ($pageCacheReason instanceof HtmlCacheEligibilityReason) {
+            return $pageCacheReason;
         }
 
         WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl);
@@ -133,7 +141,7 @@ final class RefreshCachedUrlAtomicallyAction
             PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
         }
 
-        return true;
+        return null;
     }
 
     private function staleRefreshClaimIsCurrent(Request $request): bool

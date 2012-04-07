@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Console\Commands;
 
+use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -27,12 +30,20 @@ final class DiagnoseHtmlCacheCommand extends Command
         $url = $this->url();
         $request = Request::create($url, \Symfony\Component\HttpFoundation\Request::METHOD_GET);
         $pageUrl = $this->pageUrl($request);
-        $response = $this->option('render') === true ? $this->renderResponse($request) : null;
-        $report = BuildHtmlCacheEligibilityReportAction::run($request, response: $response, pageUrl: $pageUrl);
+
+        if ($this->option('render') === true) {
+            $rendered = $this->renderResponseAndBuildReport($request, $pageUrl);
+            $response = $rendered['response'];
+            $report = $rendered['report'];
+        } else {
+            $response = null;
+            $report = BuildHtmlCacheEligibilityReportAction::run($request, pageUrl: $pageUrl);
+        }
 
         if ($this->option('json') === true) {
             $this->line(json_encode([
                 ...$report->toArray(),
+                'page_url' => $pageUrl?->only(['id', 'site_id', 'language_id', 'url', 'type', 'status', 'pageable_type', 'pageable_id']),
                 'response' => $response instanceof Response ? $this->responseMetadata($response) : null,
             ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 
@@ -65,7 +76,10 @@ final class DiagnoseHtmlCacheCommand extends Command
         return Command::SUCCESS;
     }
 
-    private function renderResponse(Request $request): Response
+    /**
+     * @return array{response: Response, report: HtmlCacheEligibilityReportData}
+     */
+    private function renderResponseAndBuildReport(Request $request, ?PageUrl $pageUrl): array
     {
         $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
         $previousRequest = resolve('request');
@@ -78,7 +92,14 @@ final class DiagnoseHtmlCacheCommand extends Command
             $response = $kernel->handle($request);
             $kernel->terminate($request, $response);
 
-            return $response;
+            // The report must inspect contributions recorded on the synthetic
+            // request before the original request is restored below.
+            config()->set('capell-html-cache.enabled', $cacheEnabled);
+
+            return [
+                'response' => $response,
+                'report' => BuildHtmlCacheEligibilityReportAction::run($request, response: $response, pageUrl: $pageUrl),
+            ];
         } finally {
             config()->set('capell-html-cache.enabled', $cacheEnabled);
             app()->instance('request', $previousRequest);
@@ -115,12 +136,23 @@ final class DiagnoseHtmlCacheCommand extends Command
     private function pageUrl(Request $request): ?PageUrl
     {
         $site = $this->option('site');
-        $path = '/' . ltrim($request->getPathInfo(), '/');
+        $resolved = LoadSiteDomainFromUrlAction::run($request->getUri());
+        $siteDomain = is_array($resolved) ? $resolved[0] : null;
 
-        return PageUrl::query()
-            ->with(['siteDomain', 'pageable'])
-            ->when(is_numeric($site), fn ($query) => $query->where('site_id', (int) $site))
-            ->where('url', $path)
+        if (! $siteDomain instanceof SiteDomain || (is_numeric($site) && (int) $site !== $siteDomain->site_id)) {
+            return null;
+        }
+
+        // Match public routing: retired redirects and another site's URLs are not this page.
+        $pageUrl = PageUrl::query()
+            ->with('pageable')
+            ->where('site_id', $siteDomain->site_id)
+            ->where('language_id', $siteDomain->language_id)
+            ->where('url', '/' . trim($resolved[1], '/'))
+            ->enabled()
             ->first();
+        $pageUrl?->setRelation('siteDomain', $siteDomain);
+
+        return $pageUrl;
     }
 }

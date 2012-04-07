@@ -8,6 +8,7 @@ use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Contracts\Container\Container;
@@ -161,59 +162,69 @@ final class PageCache
 
     public function shouldCachePage(Request $request, SymfonyResponse $response): bool
     {
+        return ! $this->rejectionReason($request, $response) instanceof HtmlCacheEligibilityReason;
+    }
+
+    /** Return the actual first blocker so diagnostics cannot invent a response directive. */
+    public function rejectionReason(Request $request, SymfonyResponse $response): ?HtmlCacheEligibilityReason
+    {
         if (resolve(CacheBypassResolver::class)->shouldBypass()) {
-            return false;
+            return HtmlCacheEligibilityReason::CacheBypassResolver;
         }
 
         if (config('capell-html-cache.enabled', true) !== true) {
-            return false;
+            return HtmlCacheEligibilityReason::CacheDisabled;
         }
 
         if ($request->has('without_html_cache')) {
-            return false;
+            return HtmlCacheEligibilityReason::ExplicitCacheBypass;
         }
 
         if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
-            return false;
+            return HtmlCacheEligibilityReason::QueryStringPresent;
         }
 
         if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
-            return false;
+            return HtmlCacheEligibilityReason::ConfiguredBypassRule;
         }
 
         if ($this->isInertiaRequest($request)) {
-            return false;
+            return HtmlCacheEligibilityReason::InertiaRequest;
         }
 
         if (! $request->isMethod('GET')) {
-            return false;
+            return HtmlCacheEligibilityReason::NonGetRequest;
         }
 
         if ($this->safeRequestSegments($request) === null) {
-            return false;
+            return HtmlCacheEligibilityReason::UnsafeRequestPath;
         }
 
         if ($this->sessionHasUserState($request)) {
-            return false;
+            return HtmlCacheEligibilityReason::SessionUserState;
         }
 
-        if (! resolve(PublicResponseCachePolicy::class)->isCacheable($response)) {
-            return false;
+        $responseReason = resolve(PublicResponseCachePolicy::class)->reasons($response)[0] ?? null;
+
+        if ($responseReason instanceof HtmlCacheEligibilityReason) {
+            return $responseReason;
         }
 
         if (! in_array($response->getStatusCode(), [200, 404], true)) {
-            return false;
+            return HtmlCacheEligibilityReason::UncacheableResponseStatus;
         }
 
-        if (mb_strpos((string) $response->headers->get('Content-Type'), 'text/html') === false) {
-            return false;
+        if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
+            return HtmlCacheEligibilityReason::NonHtmlResponse;
         }
 
-        if ($this->containsUnsafeSharedHtml($request, (string) $response->getContent())) {
-            return false;
+        $htmlReason = $this->unsafeSharedHtmlReason($request, (string) $response->getContent());
+
+        if ($htmlReason instanceof HtmlCacheEligibilityReason) {
+            return $htmlReason;
         }
 
-        return ! $request->headers->has('x-livewire');
+        return $request->headers->has('x-livewire') ? HtmlCacheEligibilityReason::LivewireRequest : null;
     }
 
     public function forget(string $slug): bool
@@ -265,14 +276,14 @@ final class PageCache
 
         try {
             return $this->files->get($path);
-        } catch (Throwable $exception) {
+        } catch (Throwable $throwable) {
             clearstatcache(true, $path);
 
             if (! is_file($path)) {
                 return false;
             }
 
-            throw $exception;
+            throw $throwable;
         }
     }
 
@@ -312,6 +323,7 @@ final class PageCache
         $configuredRetained = config('capell-html-cache.error_pages.retain_after_prune', 450);
         $retained = is_numeric($configuredRetained) ? max(0, (int) $configuredRetained) : 450;
         $retained = min($retained, max(0, $maximum - 1));
+
         $deleteCount = max(1, count($errorPages) - $retained);
         $deleted = 0;
 
@@ -538,18 +550,26 @@ final class PageCache
 
     private function containsUnsafeSharedHtml(Request $request, string $content): bool
     {
+        return $this->unsafeSharedHtmlReason($request, $content) instanceof HtmlCacheEligibilityReason;
+    }
+
+    private function unsafeSharedHtmlReason(Request $request, string $content): ?HtmlCacheEligibilityReason
+    {
         try {
             $inspector = resolve(PublicHtmlSafetyInspector::class);
 
             if (! $this->hasMatchingSafeInspection($request, $content)
                 && $inspector->containsAuthoringSurface($content)) {
-                return true;
+                return HtmlCacheEligibilityReason::UnsafePublicOutput;
             }
 
-            return ! method_exists($inspector, 'containsBakedCsrfToken')
-                || $inspector->containsBakedCsrfToken($content);
+            if (! method_exists($inspector, 'containsBakedCsrfToken')) {
+                return HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable;
+            }
+
+            return $inspector->containsBakedCsrfToken($content) ? HtmlCacheEligibilityReason::BakedSessionToken : null;
         } catch (Throwable) {
-            return true;
+            return HtmlCacheEligibilityReason::PublicHtmlInspectionFailed;
         }
     }
 

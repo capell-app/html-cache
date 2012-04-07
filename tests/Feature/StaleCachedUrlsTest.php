@@ -10,16 +10,21 @@ use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 
 require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
@@ -274,6 +279,50 @@ it('atomically refreshes stale cached html and marks the stale row processed', f
         ->and($staleCachedUrl->processed_at)->not->toBeNull();
 });
 
+it('refreshes stale HTML through middleware with no configured Vary headers', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.http_cache.browser_max_age', 300);
+    config()->set('capell-html-cache.http_cache.shared_max_age', 1800);
+    config()->set('capell-html-cache.cache_vary_headers', []);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    bindHtmlCacheFrontendContext($page);
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html; charset=utf-8']))
+        ->middleware(HtmlCacheMiddleware::class);
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
+        ->and($staleCachedUrl->refresh()->last_error)->toBeNull()
+        ->and($staleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($staleCachedUrl->processed_at)->not->toBeNull();
+});
+
 it('keeps the previous cached html when stale refresh fails', function (): void {
     Storage::fake('page_cache');
 
@@ -348,6 +397,7 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
 
 it('blocks unsafe public html during stale refresh and keeps the old cache file', function (): void {
     Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
@@ -378,8 +428,67 @@ it('blocks unsafe public html during stale refresh and keeps the old cache file'
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
-        ->and($staleCachedUrl->last_error)->toContain('not cacheable');
+        ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: unsafe_public_output');
 });
+
+it('records the exact rejected check when response headers look publicly cacheable', function (string $condition, string $expectedReason): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+    config()->set('capell-html-cache.cache_vary_headers', ['Accept-Encoding']);
+    config()->set('capell-html-cache.write_enabled', $condition !== 'writes_disabled');
+    config()->set('capell-html-cache.enabled', $condition !== 'disabled');
+
+    $kernel = Mockery::mock(Kernel::class);
+    $kernel->shouldReceive('handle')->once()->andReturnUsing(function (Request $request) use ($condition): Response {
+        if ($condition === 'session') {
+            $request->setLaravelSession(resolve(Session::class));
+            $request->session()->put('status', 'private visitor status');
+        }
+
+        return response($condition === 'token' ? '<input name="_token" value="private-token">' : '<main>Pricing</main>', 200, [
+            'Content-Type' => 'text/html; charset=utf-8',
+            'Cache-Control' => 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400',
+        ]);
+    });
+    $kernel->shouldReceive('terminate')->once();
+    app()->instance(Kernel::class, $kernel);
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    ProcessStaleHtmlCacheAction::run(1);
+
+    expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: ' . $expectedReason, 'Vary: [].', 'Cookies: 0.', 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400')
+        ->not->toContain('private visitor status', 'private-token');
+})->with([
+    'writes disabled' => ['writes_disabled', 'cache_write_disabled'],
+    'cache disabled' => ['disabled', 'cache_disabled'],
+    'visitor session state' => ['session', 'session_user_state'],
+    'baked session token' => ['token', 'baked_session_token'],
+]);
 
 it('uses middleware cacheability rules during stale refresh', function (): void {
     Storage::fake('page_cache');
@@ -433,7 +542,7 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
-        ->and($staleCachedUrl->last_error)->toContain('not cacheable');
+        ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: package_cache_blocking');
 });
 
 it('deletes obsolete stale cache files and indexed urls when the domain no longer resolves', function (bool $suppressInlineEdgePurge): void {

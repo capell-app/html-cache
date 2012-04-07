@@ -182,7 +182,7 @@ it('batches html cache hit telemetry off the request path', function (): void {
     expect($cachedModelUrl->refresh()->hit_count)->toBe(0)
         ->and($cachedModelUrl->bytes_served)->toBe(0);
 
-    (new FlushHtmlCacheHitBatchJob(CachedModelUrl::hashUrl($url)))->handle();
+    new FlushHtmlCacheHitBatchJob(CachedModelUrl::hashUrl($url))->handle();
 
     expect($cachedModelUrl->refresh()->hit_count)->toBe(2)
         ->and($cachedModelUrl->bytes_served)->toBe(30)
@@ -258,6 +258,7 @@ it('serves a proved state-free shell to an anonymous session cookie while authen
 
     $anonymousRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $anonymousRequest->cookies->set('capell_session', 'anonymous-session');
+
     $anonymousResponse = resolve(HtmlCacheMiddleware::class)->handle(
         $anonymousRequest,
         fn (): Response => response('unexpected origin', 200, ['Content-Type' => 'text/html']),
@@ -270,6 +271,7 @@ it('serves a proved state-free shell to an anonymous session cookie while authen
     $authenticatedRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $authenticatedRequest->cookies->set('capell_session', 'authenticated-session');
     $authenticatedRequest->setUserResolver(fn (): User => User::factory()->create());
+
     $authenticatedResponse = resolve(HtmlCacheMiddleware::class)->handle(
         $authenticatedRequest,
         fn (): Response => response('private origin', 200, ['Content-Type' => 'text/html']),
@@ -1044,4 +1046,20 @@ it('wraps web middleware before stripping cacheable response cookies', function 
         ->toBeLessThan($webPosition)
         ->and($frontendCachePosition)
         ->toBeGreaterThan($webPosition);
+});
+
+it('omits Vary when no cache variance is configured', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.cache_vary_headers', []);
+    $request = Request::create('https://example.test/pricing');
+    app()->instance('request', $request);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('<main>Pricing</main>', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect($response->headers->has('Vary'))->toBeFalse()
+        ->and($response->headers->hasCacheControlDirective('public'))->toBeTrue()
+        ->and(resolve(PageCache::class)->shouldCachePage($request, $response))->toBeTrue();
 });

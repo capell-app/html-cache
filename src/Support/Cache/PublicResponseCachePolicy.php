@@ -79,7 +79,14 @@ final class PublicResponseCachePolicy
             }
 
             foreach (explode(',', $line) as $header) {
-                if (! in_array(strtolower(trim($header)), $supportedHeaders, true)) {
+                $header = strtolower(trim($header));
+
+                // Empty HTTP list elements do not name a response variant.
+                if ($header === '') {
+                    continue;
+                }
+
+                if (! in_array($header, $supportedHeaders, true)) {
                     return false;
                 }
             }

@@ -67,8 +67,8 @@ final class ClearCachedUrlAction
 
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
-        $store->delete($pathResolver->pathForRequestUrl($urlString, $siteDomain));
-        $store->delete($pathResolver->pathForRequestUrl($urlString, $siteDomain, error: true));
+        $store->deletePage($pathResolver->pathForRequestUrl($urlString, $siteDomain));
+        $store->deletePage($pathResolver->pathForRequestUrl($urlString, $siteDomain, error: true));
 
         $cachedModelUrls->each->delete();
 
@@ -122,7 +122,7 @@ final class ClearCachedUrlAction
         }
 
         foreach (array_unique($files) as $file) {
-            $store->delete($file);
+            $store->deletePage($file);
         }
     }
 

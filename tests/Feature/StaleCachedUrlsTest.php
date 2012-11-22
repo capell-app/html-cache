@@ -6,6 +6,11 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
+use Capell\Frontend\Contracts\RenderHookExtensionInterface;
+use Capell\Frontend\Data\RenderHookContext;
+use Capell\Frontend\Data\RenderHookContributionData;
+use Capell\Frontend\Enums\RenderHookLocation;
+use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
@@ -543,6 +548,67 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: package_cache_blocking');
+});
+
+it('publishes a fragmented stale refresh without treating the assembled response as public', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    bindHtmlCacheFrontendContext($page);
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+
+    $registry = resolve(RenderHookRegistry::class);
+    $registry->contribute(RenderHookContributionData::extension(
+        location: RenderHookLocation::BodyEnd,
+        extension: new class implements RenderHookExtensionInterface
+        {
+            public function render(RenderHookContext $context): string
+            {
+                return '<aside>fresh fragment</aside>';
+            }
+        },
+        owner: 'vendor/stale-fragment',
+        key: 'fresh-fragment',
+        cacheSafe: false,
+        fragment: true,
+    ));
+
+    Route::get('/about', fn (): Response => response(
+        '<main>fresh shell' . resolve(RenderHookRegistry::class)->renderAll(RenderHookLocation::BodyEnd) . '</main>',
+        200,
+        ['Content-Type' => 'text/html; charset=utf-8'],
+    ))->middleware(HtmlCacheMiddleware::class);
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(1, suppressInlineEdgePurge: true))->toBe(1)
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('<main>fresh shell</main>')
+        ->and(Storage::disk('page_cache')->exists($cachePath . '.fragments.json'))->toBeTrue()
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($staleCachedUrl->last_error)->toBeNull();
 });
 
 it('deletes obsolete stale cache files and indexed urls when the domain no longer resolves', function (bool $suppressInlineEdgePurge): void {

@@ -45,6 +45,17 @@ final class HtmlCacheStore
         return $this->disk->delete(str_replace(['../', '..\\'], '', $file));
     }
 
+    public function deletePage(string $file): bool
+    {
+        $deleted = $this->delete($file);
+
+        if (str_ends_with($file, '.html')) {
+            $deleted = $this->delete($file . PageCache::FRAGMENT_METADATA_EXTENSION) || $deleted;
+        }
+
+        return $deleted;
+    }
+
     public function put(string $file, string $contents): void
     {
         $this->disk->put(str_replace(['../', '..\\'], '', $file), $contents);

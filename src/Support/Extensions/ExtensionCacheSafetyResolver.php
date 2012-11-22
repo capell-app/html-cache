@@ -21,7 +21,8 @@ final class ExtensionCacheSafetyResolver
     public function blockingContributions(): array
     {
         return array_values(collect($this->contributions())
-            ->filter(fn (ExtensionRenderContributionData $contribution): bool => ! $contribution->cacheable || $contribution->sensitiveOutput)
+            ->filter(fn (ExtensionRenderContributionData $contribution): bool => ! $contribution->fragment
+                && (! $contribution->cacheable || $contribution->sensitiveOutput))
             ->values()
             ->all());
     }

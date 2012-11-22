@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -50,7 +51,11 @@ final class WriteRefreshedHtmlCacheFileAction
         }
 
         File::ensureDirectoryExists(dirname($path), 0775, true);
-        $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
+        $replaced = $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
+
+        if ($replaced && $response->getStatusCode() !== Response::HTTP_NOT_FOUND) {
+            $disk->delete($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION);
+        }
     }
 
     private function safeCachePath(string $cachePath): string
@@ -68,7 +73,7 @@ final class WriteRefreshedHtmlCacheFileAction
         return implode('/', $segments);
     }
 
-    private function replaceCacheFileForCurrentStaleClaim(StaleCachedUrl $staleCachedUrl, string $path, string $content): void
+    private function replaceCacheFileForCurrentStaleClaim(StaleCachedUrl $staleCachedUrl, string $path, string $content): bool
     {
         $claimToken = $staleCachedUrl->claim_token;
 
@@ -83,8 +88,10 @@ final class WriteRefreshedHtmlCacheFileAction
             throw new RuntimeException(sprintf('Unable to write temporary cache file for "%s".', $path));
         }
 
+        $replaced = false;
+
         try {
-            DB::transaction(function () use ($staleCachedUrl, $claimToken, $path, $temporaryPath): void {
+            DB::transaction(function () use ($staleCachedUrl, $claimToken, $path, $temporaryPath, &$replaced): void {
                 $currentStaleCachedUrl = StaleCachedUrl::query()
                     ->whereKey($staleCachedUrl->getKey())
                     ->lockForUpdate()
@@ -101,12 +108,16 @@ final class WriteRefreshedHtmlCacheFileAction
                 if (! File::move($temporaryPath, $path)) {
                     throw new RuntimeException(sprintf('Unable to replace cache file for "%s".', $path));
                 }
+
+                $replaced = true;
             });
         } finally {
             if (File::exists($temporaryPath)) {
                 File::delete($temporaryPath);
             }
         }
+
+        return $replaced;
     }
 
     private function temporaryPathForAtomicReplace(string $path): string

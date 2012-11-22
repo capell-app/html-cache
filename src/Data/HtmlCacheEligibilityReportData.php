@@ -14,6 +14,7 @@ final class HtmlCacheEligibilityReportData extends Data
      * @param  list<HtmlCacheEligibilityReason>  $reasons
      * @param  list<string>  $blockingPackages
      * @param  list<string>  $cacheTags
+     * @param  list<string>  $fragmentKeys
      */
     public function __construct(
         public readonly string $url,
@@ -24,6 +25,8 @@ final class HtmlCacheEligibilityReportData extends Data
         public readonly string $cacheState = 'unknown',
         public readonly bool $stale = false,
         public readonly ?string $lastCachedAt = null,
+        public readonly bool $fragmented = false,
+        public readonly array $fragmentKeys = [],
     ) {}
 
     public function hasReason(HtmlCacheEligibilityReason $reason): bool
@@ -55,6 +58,8 @@ final class HtmlCacheEligibilityReportData extends Data
             'cacheState' => $this->cacheState,
             'stale' => $this->stale,
             'lastCachedAt' => $this->lastCachedAt,
+            'fragmented' => $this->fragmented,
+            'fragmentKeys' => $this->fragmentKeys,
         ];
     }
 }

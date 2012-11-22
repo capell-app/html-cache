@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Support\Cache;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
+use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -29,6 +30,8 @@ final class PageCache
     public const string ERROR_EXTENSION = '.404.html';
 
     public const string ERROR_PAGE = '404-error.html';
+
+    public const string FRAGMENT_METADATA_EXTENSION = '.fragments.json';
 
     private const int MAX_PATH_SEGMENT_LENGTH = 255;
 
@@ -97,6 +100,14 @@ final class PageCache
 
         [$path, $filename, $extension] = $cacheLocation;
         $content = (string) $response->getContent();
+        $fragmentCache = $extension === 'html'
+            ? $laravelRequest->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE)
+            : null;
+        $fragmentCache = $fragmentCache instanceof RenderHookFragmentCacheData ? $fragmentCache : null;
+
+        if ($fragmentCache instanceof RenderHookFragmentCacheData) {
+            $content = $fragmentCache->shell;
+        }
 
         if ($extension === 'html' && $this->containsUnsafeSharedHtml($laravelRequest, $content)) {
             return;
@@ -110,11 +121,27 @@ final class PageCache
             }
 
             $this->files->makeDirectory($path, 0775, true, true);
-            $this->writeCacheFile(
+            if (! $this->writeCacheFile(
                 $laravelRequest,
                 $errorPath,
-                (string) $laravelResponse->getContent(),
-            );
+                $content,
+            )) {
+                return;
+            }
+
+            $fragmentMetadataPath = $errorPath . self::FRAGMENT_METADATA_EXTENSION;
+
+            if ($fragmentCache instanceof RenderHookFragmentCacheData) {
+                $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+                if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
+                    throw new RuntimeException('Unable to publish render hook fragment metadata for the cached 404 page.');
+                }
+
+                return;
+            }
+
+            $this->files->delete($fragmentMetadataPath);
 
             return;
         }
@@ -127,15 +154,31 @@ final class PageCache
             return;
         }
 
-        if ($extension === 'html' && config('capell-html-cache.minify_html', true) === true) {
+        if ($extension === 'html' && $fragmentCache === null && config('capell-html-cache.minify_html', true) === true) {
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
-        $this->writeCacheFile(
+        if (! $this->writeCacheFile(
             $laravelRequest,
             $targetPath,
             $content,
-        );
+        )) {
+            return;
+        }
+
+        $fragmentMetadataPath = $targetPath . self::FRAGMENT_METADATA_EXTENSION;
+
+        if ($fragmentCache instanceof RenderHookFragmentCacheData) {
+            $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+            if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
+                throw new RuntimeException('Unable to publish render hook fragment metadata for the cached page.');
+            }
+
+            return;
+        }
+
+        $this->files->delete($fragmentMetadataPath);
     }
 
     public function getCachePage(Request $request): bool|string
@@ -158,6 +201,37 @@ final class PageCache
         }
 
         return $this->readCacheFile($path);
+    }
+
+    public function getCacheFragmentData(Request $request, string $extension = '.html'): ?RenderHookFragmentCacheData
+    {
+        $path = $this->getFileFromRequest($request, $extension);
+
+        if ($path === null) {
+            return null;
+        }
+
+        $shell = $this->readCacheFile($path);
+        $metadataPath = $path . self::FRAGMENT_METADATA_EXTENSION;
+
+        if (! is_string($shell)) {
+            $this->files->delete($metadataPath);
+
+            return null;
+        }
+
+        if (! $this->files->exists($metadataPath)) {
+            return null;
+        }
+
+        try {
+            return RenderHookFragmentCacheData::fromMetadata($shell, $this->decodeFragmentMetadata($metadataPath));
+        } catch (Throwable $throwable) {
+            report($throwable);
+            $this->files->delete($metadataPath);
+
+            return null;
+        }
     }
 
     public function shouldCachePage(Request $request, SymfonyResponse $response): bool
@@ -218,7 +292,11 @@ final class PageCache
             return HtmlCacheEligibilityReason::NonHtmlResponse;
         }
 
-        $htmlReason = $this->unsafeSharedHtmlReason($request, (string) $response->getContent());
+        $fragmentCache = $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE);
+        $content = $fragmentCache instanceof RenderHookFragmentCacheData
+            ? $fragmentCache->shell
+            : (string) $response->getContent();
+        $htmlReason = $this->unsafeSharedHtmlReason($request, $content);
 
         if ($htmlReason instanceof HtmlCacheEligibilityReason) {
             return $htmlReason;
@@ -233,11 +311,17 @@ final class PageCache
 
         foreach (['html', 'json', 'xml'] as $extension) {
             $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
+
+            if ($extension === 'html') {
+                $deleted = $this->files->delete($this->getCachePath($slug . '.html' . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
+            }
         }
 
         if ($this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION))) {
-            return true;
+            $deleted = true;
         }
+
+        $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION)) || $deleted;
 
         return $deleted;
     }
@@ -245,6 +329,28 @@ final class PageCache
     public function clear(?string $path = null): bool
     {
         return $this->files->deleteDirectory($this->getCachePath($path), preserve: true);
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeFragmentMetadata(string $path): array
+    {
+        $decoded = json_decode($this->files->get($path), true, 512, JSON_THROW_ON_ERROR);
+
+        if (! is_array($decoded) || array_is_list($decoded)) {
+            throw new RuntimeException('Fragment metadata root must be an object.');
+        }
+
+        $metadata = [];
+
+        foreach ($decoded as $key => $value) {
+            if (! is_string($key)) {
+                throw new RuntimeException('Fragment metadata object keys must be strings.');
+            }
+
+            $metadata[$key] = $value;
+        }
+
+        return $metadata;
     }
 
     private function aliasFilename(?string $filename): string
@@ -270,6 +376,10 @@ final class PageCache
 
         if ($timeToLive > 0 && $this->files->lastModified($path) <= now()->subSeconds($timeToLive)->timestamp) {
             $this->files->delete($path);
+
+            if (str_ends_with($path, '.html')) {
+                $this->files->delete($path . self::FRAGMENT_METADATA_EXTENSION);
+            }
 
             return false;
         }
@@ -371,7 +481,13 @@ final class PageCache
 
         usort($variants, static fn (SplFileInfo $first, SplFileInfo $second): int => $first->getMTime() <=> $second->getMTime());
 
-        return $this->files->delete($variants[0]->getPathname());
+        $deleted = $this->files->delete($variants[0]->getPathname());
+
+        if ($deleted && $extension === 'html') {
+            $this->files->delete($variants[0]->getPathname() . self::FRAGMENT_METADATA_EXTENSION);
+        }
+
+        return $deleted;
     }
 
     /**
@@ -579,7 +695,7 @@ final class PageCache
             && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
-    private function writeCacheFile(Request $request, string $path, string $content): void
+    private function writeCacheFile(Request $request, string $path, string $content): bool
     {
         $staleCachedUrlId = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE);
         $claimToken = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
@@ -587,16 +703,16 @@ final class PageCache
         if ($staleCachedUrlId === null && $claimToken === null) {
             $this->files->replace($path, $content);
 
-            return;
+            return true;
         }
 
-        $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrlId, $claimToken, $path, $content);
+        return $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrlId, $claimToken, $path, $content);
     }
 
-    private function replaceCacheFileForCurrentStaleClaim(mixed $staleCachedUrlId, mixed $claimToken, string $path, string $content): void
+    private function replaceCacheFileForCurrentStaleClaim(mixed $staleCachedUrlId, mixed $claimToken, string $path, string $content): bool
     {
         if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
-            return;
+            return false;
         }
 
         $temporaryPath = $this->temporaryPathForAtomicReplace($path);
@@ -606,8 +722,10 @@ final class PageCache
             throw new RuntimeException(sprintf('Unable to write temporary cache file for "%s".', $path));
         }
 
+        $replaced = false;
+
         try {
-            DB::transaction(function () use ($staleCachedUrlId, $claimToken, $path, $temporaryPath): void {
+            DB::transaction(function () use ($staleCachedUrlId, $claimToken, $path, $temporaryPath, &$replaced): void {
                 $staleCachedUrl = StaleCachedUrl::query()
                     ->whereKey((int) $staleCachedUrlId)
                     ->lockForUpdate()
@@ -624,12 +742,16 @@ final class PageCache
                 if (! $this->files->move($temporaryPath, $path)) {
                     throw new RuntimeException(sprintf('Unable to replace cache file for "%s".', $path));
                 }
+
+                $replaced = true;
             });
         } finally {
             if ($this->files->exists($temporaryPath)) {
                 $this->files->delete($temporaryPath);
             }
         }
+
+        return $replaced;
     }
 
     private function temporaryPathForAtomicReplace(string $path): string

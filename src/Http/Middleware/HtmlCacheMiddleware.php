@@ -10,7 +10,11 @@ use Capell\Core\Models\Site;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\FrontendContextReader;
+use Capell\Frontend\Contracts\HtmlMinifier;
+use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
+use Capell\Frontend\Support\Render\RenderHookFragmentRegistry;
+use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
@@ -30,6 +34,7 @@ use Exception;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -46,6 +51,12 @@ final class HtmlCacheMiddleware
     public const string SYNTHETIC_RENDER_ATTRIBUTE = 'capell.html_cache.synthetic_render';
 
     public const string ELIGIBILITY_REPORT_ATTRIBUTE = 'capell.html_cache.eligibility_report';
+
+    public const string FRAGMENT_CACHE_DATA_ATTRIBUTE = 'capell.html_cache.fragment_cache_data';
+
+    public const string FRAGMENT_RENDER_FAILED_ATTRIBUTE = 'capell.html_cache.fragment_render_failed';
+
+    public const string SHELL_VERIFICATION_ATTRIBUTE = 'capell.html_cache.shell_verification';
 
     private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
@@ -97,10 +108,11 @@ final class HtmlCacheMiddleware
             $cachedPage = $pageCache->getCachePage($request);
 
             if (is_string($cachedPage)) {
-                RecordHtmlCacheHitAction::run($request, strlen($cachedPage));
+                $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
+                RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
                 $this->refreshStaleCachedUrlAfterResponse($request);
 
-                return $this->cacheHitResponse($cachedPage, 200);
+                return $response;
             }
 
             $cachedErrorPage = $pageCache->getCacheErrorPage($request);
@@ -109,7 +121,7 @@ final class HtmlCacheMiddleware
                 RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
                 $this->refreshStaleCachedUrlAfterResponse($request);
 
-                return $this->cacheHitResponse($cachedErrorPage, 404);
+                return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, 404, PageCache::ERROR_EXTENSION);
             }
         }
 
@@ -137,7 +149,8 @@ final class HtmlCacheMiddleware
 
     private function handleCacheMiss(PageCache $pageCache, Request $request, Closure $next): Response
     {
-        $response = $this->stripCookiesForCacheableAnonymousRequest($request, $next($request));
+        $response = $this->renderWithFragmentCapture($request, $next);
+        $response = $this->stripCookiesForCacheableAnonymousRequest($request, $response);
 
         if ($this->containsUnsafeSharedHtml($request, $response)) {
             $response->headers->set('X-Frontend-Cache', 'BYPASS');
@@ -154,7 +167,11 @@ final class HtmlCacheMiddleware
 
         $response->headers->set('X-Frontend-Cache', 'MISS');
 
-        return $this->applyCacheHeaders($request, $response, forcePublic: $cached);
+        return $this->applyCacheHeaders(
+            $request,
+            $response,
+            forcePublic: $cached && ! $this->hasFragmentCacheData($request),
+        );
     }
 
     private function cachedResponseAfterWaiting(PageCache $pageCache, Request $request): ?Response
@@ -162,9 +179,10 @@ final class HtmlCacheMiddleware
         $cachedPage = $pageCache->getCachePage($request);
 
         if (is_string($cachedPage)) {
-            RecordHtmlCacheHitAction::run($request, strlen($cachedPage));
+            $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
+            RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
 
-            return $this->cacheHitResponse($cachedPage, Response::HTTP_OK);
+            return $response;
         }
 
         $cachedErrorPage = $pageCache->getCacheErrorPage($request);
@@ -172,7 +190,7 @@ final class HtmlCacheMiddleware
         if (is_string($cachedErrorPage)) {
             RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
 
-            return $this->cacheHitResponse($cachedErrorPage, Response::HTTP_NOT_FOUND);
+            return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, Response::HTTP_NOT_FOUND, PageCache::ERROR_EXTENSION);
         }
 
         return null;
@@ -184,7 +202,7 @@ final class HtmlCacheMiddleware
             return false;
         }
 
-        $content = (string) $response->getContent();
+        $content = $this->sharedContent($request, $response);
 
         try {
             $inspector = resolve(PublicHtmlSafetyInspector::class);
@@ -319,6 +337,22 @@ final class HtmlCacheMiddleware
 
     private function cacheResponse(PageCache $pageCache, Request $request, Response $response): bool
     {
+        if ($request->attributes->get(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true) {
+            return false;
+        }
+
+        $fragmentRegistry = $this->fragmentRegistry();
+
+        if ($fragmentRegistry?->references() !== []) {
+            if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
+                return false;
+            }
+
+            if (! $this->hasFragmentCacheData($request)) {
+                return false;
+            }
+        }
+
         $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
         $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
 
@@ -337,11 +371,133 @@ final class HtmlCacheMiddleware
         return true;
     }
 
-    private function cacheHitResponse(string $content, int $statusCode): Response
+    private function renderWithFragmentCapture(Request $request, Closure $next): Response
+    {
+        $fragmentRegistry = $this->fragmentRegistry();
+
+        if (! $fragmentRegistry instanceof RenderHookFragmentRegistry) {
+            return $next($request);
+        }
+
+        $fragmentRegistry->beginCapture();
+
+        try {
+            $response = $next($request);
+            $captured = (string) $response->getContent();
+
+            if ($fragmentRegistry->references() === []) {
+                return $response;
+            }
+
+            try {
+                $response->setContent($fragmentRegistry->renderLive(
+                    $captured,
+                    resolve(RenderHookRegistry::class),
+                    static fn (): string => '',
+                ));
+            } catch (Throwable $throwable) {
+                report($throwable);
+                $request->attributes->set(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE, true);
+                $response->setContent($this->removeFragmentTokens($captured, $fragmentRegistry));
+
+                return $response;
+            }
+
+            if ($fragmentRegistry->hasFailures()) {
+                $request->attributes->set(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE, true);
+
+                return $response;
+            }
+
+            try {
+                $fragmentCache = $fragmentRegistry->prepareCache(
+                    $captured,
+                    static fn (string $html): string => resolve(HtmlMinifier::class)->minify($html),
+                );
+                $request->attributes->set(self::FRAGMENT_CACHE_DATA_ATTRIBUTE, $fragmentCache);
+            } catch (Throwable $throwable) {
+                report($throwable);
+                $request->attributes->set(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE, true);
+            }
+
+            return $response;
+        } finally {
+            $fragmentRegistry->endCapture();
+        }
+    }
+
+    private function fragmentRegistry(): ?RenderHookFragmentRegistry
+    {
+        return app()->bound(RenderHookFragmentRegistry::class)
+            ? resolve(RenderHookFragmentRegistry::class)
+            : null;
+    }
+
+    private function hasFragmentCacheData(Request $request): bool
+    {
+        return $request->attributes->get(self::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData;
+    }
+
+    private function sharedContent(Request $request, Response $response): string
+    {
+        $fragmentCache = $request->attributes->get(self::FRAGMENT_CACHE_DATA_ATTRIBUTE);
+
+        return $fragmentCache instanceof RenderHookFragmentCacheData
+            ? $fragmentCache->shell
+            : (string) $response->getContent();
+    }
+
+    private function removeFragmentTokens(string $content, RenderHookFragmentRegistry $fragmentRegistry): string
+    {
+        foreach ($fragmentRegistry->references() as $reference) {
+            $content = str_replace($reference->token, '', $content);
+        }
+
+        return $content;
+    }
+
+    private function cachedPageResponse(PageCache $pageCache, Request $request, string $content, int $statusCode, string $extension = '.html'): Response
+    {
+        $fragmentCache = $pageCache->getCacheFragmentData($request, $extension);
+
+        if (! $fragmentCache instanceof RenderHookFragmentCacheData) {
+            return $this->cacheHitResponse($content, $statusCode);
+        }
+
+        if ($request->attributes->get(self::SHELL_VERIFICATION_ATTRIBUTE) === true) {
+            return $this->cacheHitResponse($fragmentCache->shell, $statusCode, fragmented: true);
+        }
+
+        try {
+            $fragmentRegistry = $this->fragmentRegistry();
+            $renderHookRegistry = app()->bound(RenderHookRegistry::class) ? resolve(RenderHookRegistry::class) : null;
+
+            if (! $fragmentRegistry instanceof RenderHookFragmentRegistry || ! $renderHookRegistry instanceof RenderHookRegistry) {
+                throw new RuntimeException('Render hook fragment services are unavailable for a fragmented cache hit.');
+            }
+
+            $content = $fragmentRegistry->renderCached(
+                $fragmentCache,
+                $renderHookRegistry,
+                static fn (): string => '',
+            );
+        } catch (Throwable $throwable) {
+            report($throwable);
+            $content = $fragmentCache->shell;
+        }
+
+        return $this->cacheHitResponse($content, $statusCode, fragmented: true);
+    }
+
+    private function cacheHitResponse(string $content, int $statusCode, bool $fragmented = false): Response
     {
         $response = $this->stripConfiguredCookies(response($content, $statusCode));
         $response->headers->set('Content-Type', 'text/html');
         $response->headers->set('X-Frontend-Cache', 'HIT');
+
+        if ($fragmented) {
+            return $this->privateNoStore($response);
+        }
 
         return $this->applyCacheHeaders(request(), $response, forcePublic: true);
     }
@@ -367,6 +523,14 @@ final class HtmlCacheMiddleware
         bool $applySurrogateKey = true,
         bool $forcePublic = false,
     ): Response {
+        if (! $forcePublic && $request->attributes->get(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true) {
+            return $this->privateNoStore($response);
+        }
+
+        if (! $forcePublic && $this->hasFragmentCacheData($request)) {
+            return $this->privateNoStore($response);
+        }
+
         if (! $forcePublic && $this->shouldBypassHttpCache($request, $response)) {
             return $this->privateNoStore($response);
         }

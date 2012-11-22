@@ -6,6 +6,12 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
+use Capell\Frontend\Contracts\RenderHookExtensionInterface;
+use Capell\Frontend\Data\RenderHookContext;
+use Capell\Frontend\Data\RenderHookContributionData;
+use Capell\Frontend\Enums\RenderHookLocation;
+use Capell\Frontend\Support\Render\RenderHookFragmentRegistry;
+use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
@@ -118,6 +124,75 @@ it('expires stale filesystem cache entries before serving them', function (): vo
 
     expect($pageCache->getCachePage($request))->toBeFalse()
         ->and(File::exists($cachePath))->toBeFalse();
+});
+
+it('reconstructs the same cached shell for two request-specific fragment states', function (): void {
+    Storage::fake('page_cache');
+
+    $fragments = new RenderHookFragmentRegistry;
+    app()->instance(RenderHookFragmentRegistry::class, $fragments);
+    $registry = new RenderHookRegistry;
+    app()->instance(RenderHookRegistry::class, $registry);
+    $registry->contribute(RenderHookContributionData::extension(
+        location: RenderHookLocation::BodyEnd,
+        extension: new class implements RenderHookExtensionInterface
+        {
+            public function render(RenderHookContext $context): string
+            {
+                return request()->headers->get('X-Test-Region') === 'uk'
+                    ? '<aside data-consent-required="true">consent required</aside>'
+                    : '<aside data-consent-required="false">consent not required</aside>';
+            }
+        },
+        owner: 'vendor/request-fragment',
+        key: 'request-state',
+        cacheSafe: false,
+        fragment: true,
+    ));
+
+    $url = 'https://example.test/fragment';
+    $firstRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $firstRequest->headers->set('X-Test-Region', 'uk');
+    app()->instance('request', $firstRequest);
+
+    $firstResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $firstRequest,
+        fn (): Response => response(
+            '<main>shared shell' . $registry->renderAll(RenderHookLocation::BodyEnd) . '</main>',
+            200,
+            ['Content-Type' => 'text/html', 'Cache-Control' => 'public'],
+        ),
+    );
+
+    $pageCache = resolve(PageCache::class);
+    $shell = $pageCache->getCachePage($firstRequest);
+    $fragmentMetadata = $pageCache->getCacheFragmentData($firstRequest);
+    $shellHash = is_string($shell) ? hash('sha256', $shell) : null;
+
+    capell_expect($firstResponse->getContent())
+        ->toContain('data-consent-required="true"')
+        ->and((string) $firstResponse->headers->get('Cache-Control'))->toContain('private')
+        ->and((string) $firstResponse->headers->get('Cache-Control'))->toContain('no-store')
+        ->and($shell)->toBe('<main>shared shell</main>')
+        ->and($fragmentMetadata)->not->toBeNull()
+        ->and($shell)->not->toContain('CAPELL_FRAGMENT_');
+
+    $secondRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $secondRequest->headers->set('X-Test-Region', 'outside');
+    app()->instance('request', $secondRequest);
+
+    $secondResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $secondRequest,
+        fn (): Response => throw new RuntimeException('fragment cache hit unexpectedly reached the origin'),
+    );
+
+    capell_expect($secondResponse->getContent())
+        ->toContain('data-consent-required="false"')
+        ->not->toContain('data-consent-required="true"')
+        ->and($secondResponse->headers->get('X-Frontend-Cache'))->toBe('HIT')
+        ->and((string) $secondResponse->headers->get('Cache-Control'))->toContain('private')
+        ->toContain('no-store')
+        ->and(hash('sha256', (string) $pageCache->getCachePage($secondRequest)))->toBe($shellHash);
 });
 
 it('bounds cached not found pages and prunes the oldest entries', function (): void {
@@ -872,6 +947,68 @@ it('returns cached 404 html with a 404 status code', function (): void {
     capell_expect($response->getStatusCode())->toBe(404)
         ->and($response->getContent())->toBe('missing cached html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT');
+});
+
+it('reconstructs marked fragments in cached 404 html', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $fragmentRegistry = new RenderHookFragmentRegistry;
+    app()->instance(RenderHookFragmentRegistry::class, $fragmentRegistry);
+    $renderHookRegistry = new RenderHookRegistry;
+    app()->instance(RenderHookRegistry::class, $renderHookRegistry);
+    $renderHookRegistry->contribute(RenderHookContributionData::extension(
+        location: RenderHookLocation::BodyEnd,
+        extension: new class implements RenderHookExtensionInterface
+        {
+            public function render(RenderHookContext $context): string
+            {
+                return '<aside>' . e((string) request()->headers->get('X-Test-Region')) . '</aside>';
+            }
+        },
+        owner: 'vendor/request-fragment-404',
+        key: 'request-state',
+        cacheSafe: false,
+        fragment: true,
+    ));
+
+    $url = 'https://example.test/missing-fragment';
+    $firstRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $firstRequest->headers->set('X-Test-Region', 'uk');
+    app()->instance('request', $firstRequest);
+
+    $firstResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $firstRequest,
+        fn (): Response => response(
+            '<main>shared shell' . $renderHookRegistry->renderAll(RenderHookLocation::BodyEnd) . '</main>',
+            404,
+            ['Content-Type' => 'text/html'],
+        ),
+    );
+
+    capell_expect($firstResponse->getStatusCode())->toBe(404)
+        ->and($firstResponse->getContent())->toContain('<aside>uk</aside>')
+        ->and(Storage::disk('page_cache')->get('https.example.test/missing-fragment.404.html'))->toBe('<main>shared shell</main>')
+        ->and(Storage::disk('page_cache')->exists('https.example.test/missing-fragment.404.html.fragments.json'))->toBeTrue();
+
+    $secondRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $secondRequest->headers->set('X-Test-Region', 'outside');
+    app()->instance('request', $secondRequest);
+
+    $secondResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $secondRequest,
+        fn (): Response => throw new RuntimeException('fragment cache hit unexpectedly reached the origin'),
+    );
+
+    capell_expect($secondResponse->getStatusCode())->toBe(404)
+        ->and($secondResponse->getContent())->toContain('<aside>outside</aside>')
+        ->and($secondResponse->getContent())->not->toContain('CAPELL_FRAGMENT_')
+        ->and((string) $secondResponse->headers->get('Cache-Control'))->toContain('private')
+        ->toContain('no-store');
 });
 
 it('can bypass cache reads for internal stale refresh requests while still allowing writes', function (): void {

@@ -8,6 +8,8 @@ use Capell\Core\Contracts\Pageable;
 use Capell\Core\Enums\UrlTypeEnum;
 use Capell\Core\Models\PageUrl;
 use Capell\Frontend\Actions\AssertPublicRenderContractAction;
+use Capell\Frontend\Data\RenderHookFragmentCacheData;
+use Capell\Frontend\Support\Render\RenderHookFragmentRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
@@ -60,6 +62,8 @@ final class BuildHtmlCacheEligibilityReportAction
             cacheState: $cacheState,
             stale: $staleCachedUrl instanceof StaleCachedUrl && $staleCachedUrl->status !== StaleCachedUrl::STATUS_PROCESSED,
             lastCachedAt: $cachedUrl?->cached_at?->toIso8601String(),
+            fragmented: $this->fragmentKeys() !== [],
+            fragmentKeys: $this->fragmentKeys(),
         );
     }
 
@@ -196,11 +200,11 @@ final class BuildHtmlCacheEligibilityReportAction
 
         $reasons = [...$reasons, ...resolve(PublicResponseCachePolicy::class)->reasons($response)];
 
-        if ($this->containsAuthoringSurface($response)) {
+        if ($this->containsAuthoringSurface($request, $response)) {
             $reasons[] = HtmlCacheEligibilityReason::UnsafePublicOutput;
         }
 
-        $bakedSessionTokenReason = $this->bakedSessionTokenReason($response);
+        $bakedSessionTokenReason = $this->bakedSessionTokenReason($request, $response);
 
         if ($bakedSessionTokenReason instanceof HtmlCacheEligibilityReason) {
             $reasons[] = $bakedSessionTokenReason;
@@ -242,14 +246,14 @@ final class BuildHtmlCacheEligibilityReportAction
         return $deduplicated;
     }
 
-    private function containsAuthoringSurface(Response $response): bool
+    private function containsAuthoringSurface(Request $request, Response $response): bool
     {
         if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
             return false;
         }
 
         try {
-            AssertPublicRenderContractAction::run($response);
+            AssertPublicRenderContractAction::run($this->sharedContentResponse($request, $response));
 
             return false;
         } catch (Throwable) {
@@ -279,7 +283,7 @@ final class BuildHtmlCacheEligibilityReportAction
      * a cross-visitor token leak or a public-response fatal. The explicit
      * reason code keeps the version/configuration fault diagnosable.
      */
-    private function bakedSessionTokenReason(Response $response): ?HtmlCacheEligibilityReason
+    private function bakedSessionTokenReason(Request $request, Response $response): ?HtmlCacheEligibilityReason
     {
         if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
             return null;
@@ -292,7 +296,7 @@ final class BuildHtmlCacheEligibilityReportAction
                 return HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable;
             }
 
-            return $inspector->containsBakedCsrfToken((string) $response->getContent())
+            return $inspector->containsBakedCsrfToken($this->sharedContent($request, $response))
                 ? HtmlCacheEligibilityReason::BakedSessionToken
                 : null;
         } catch (Throwable) {
@@ -377,5 +381,35 @@ final class BuildHtmlCacheEligibilityReportAction
     private function isInertiaRequest(Request $request): bool
     {
         return array_any(['X-Inertia', 'X-Inertia-Version', 'X-Inertia-Partial-Component', 'X-Inertia-Partial-Data', 'X-Inertia-Reset'], fn (string $header): bool => $request->headers->has($header));
+    }
+
+    /** @return list<string> */
+    private function fragmentKeys(): array
+    {
+        if (! app()->bound(RenderHookFragmentRegistry::class)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn (object $reference): string => $reference->stableKey,
+            resolve(RenderHookFragmentRegistry::class)->references(),
+        ));
+    }
+
+    private function sharedContent(Request $request, Response $response): string
+    {
+        $fragmentCache = $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE);
+
+        return $fragmentCache instanceof RenderHookFragmentCacheData
+            ? $fragmentCache->shell
+            : (string) $response->getContent();
+    }
+
+    private function sharedContentResponse(Request $request, Response $response): Response
+    {
+        $sharedResponse = clone $response;
+        $sharedResponse->setContent($this->sharedContent($request, $response));
+
+        return $sharedResponse;
     }
 }

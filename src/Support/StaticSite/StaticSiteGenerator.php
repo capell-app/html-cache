@@ -132,8 +132,8 @@ final class StaticSiteGenerator
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
 
-        $store->delete($pathResolver->pathForUrl($pageUrl->url, $siteDomain));
-        $store->delete($pathResolver->pathForUrl($pageUrl->url, $siteDomain, error: true));
+        $store->deletePage($pathResolver->pathForUrl($pageUrl->url, $siteDomain));
+        $store->deletePage($pathResolver->pathForUrl($pageUrl->url, $siteDomain, error: true));
     }
 
     private function visitUrlInternally(string $url): void

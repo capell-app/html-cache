@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
+use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -122,6 +123,10 @@ final class RefreshCachedUrlAtomicallyAction
             return HtmlCacheEligibilityReason::StaleClaimInvalid;
         }
 
+        if ($request->attributes->get(HtmlCacheMiddleware::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true) {
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; a marked render fragment failed.', $staleCachedUrl->url));
+        }
+
         $packageReason = resolve(ExtensionCacheSafetyResolver::class)->blockingReasonCodes()[0] ?? null;
 
         if ($packageReason instanceof HtmlCacheEligibilityReason) {
@@ -129,6 +134,24 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $pageCache = resolve(PageCache::class);
+
+        if ($request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) === true
+            && $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData) {
+            throw_unless(
+                $pageCache->getCacheFragmentData(
+                    $request,
+                    $response->getStatusCode() === Response::HTTP_NOT_FOUND ? PageCache::ERROR_EXTENSION : '.html',
+                ) instanceof RenderHookFragmentCacheData,
+                RuntimeException::class,
+                sprintf('Unable to refresh stale HTML cache for "%s"; fragmented cache metadata was not published.', $staleCachedUrl->url),
+            );
+
+            if (! $suppressInlineEdgePurge) {
+                PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
+            }
+
+            return null;
+        }
 
         $pageCacheReason = $pageCache->rejectionReason($request, $response);
 
@@ -184,11 +207,11 @@ final class RefreshCachedUrlAtomicallyAction
         $store = resolve(HtmlCacheStore::class);
 
         if (is_string($staleCachedUrl->cache_path) && $staleCachedUrl->cache_path !== '') {
-            $store->delete($staleCachedUrl->cache_path);
+            $store->deletePage($staleCachedUrl->cache_path);
         }
 
         if (is_string($staleCachedUrl->error_cache_path) && $staleCachedUrl->error_cache_path !== '') {
-            $store->delete($staleCachedUrl->error_cache_path);
+            $store->deletePage($staleCachedUrl->error_cache_path);
         }
 
         $query = CachedModelUrl::query()->where('url_hash', $staleCachedUrl->url_hash);
@@ -213,14 +236,14 @@ final class RefreshCachedUrlAtomicallyAction
 
         if ($response->getStatusCode() === Response::HTTP_NOT_FOUND) {
             if (is_string($staleCachedUrl->cache_path) && $staleCachedUrl->cache_path !== '') {
-                $store->delete($staleCachedUrl->cache_path);
+                $store->deletePage($staleCachedUrl->cache_path);
             }
 
             return;
         }
 
         if (is_string($staleCachedUrl->error_cache_path) && $staleCachedUrl->error_cache_path !== '') {
-            $store->delete($staleCachedUrl->error_cache_path);
+            $store->deletePage($staleCachedUrl->error_cache_path);
         }
     }
 }

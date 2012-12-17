@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
-use Capell\Core\Models\Page;
-use Capell\Core\Models\PageUrl;
-use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Model;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
@@ -25,32 +22,12 @@ final class ClearCachedUrlsForModelAction
 
     public function handle(Model|string $model, int|string|null $modelKey = null, bool $refresh = false): int
     {
-        [$morphClass, $key] = $this->modelIdentifier($model, $modelKey);
-
-        $urls = CachedModelUrl::query()
-            ->where('cacheable_type', $morphClass)
-            ->where('cacheable_id', $key)
-            ->pluck('url')
-            ->unique()
-            ->values();
-
-        if ($morphClass === (new Page)->getMorphClass()) {
-            $pageUrls = PageUrl::query()
-                ->where('pageable_type', $morphClass)
-                ->where('pageable_id', $key)
-                ->get()
-                ->map(fn (PageUrl $pageUrl): string => $pageUrl->fullUrl());
-
-            $urls = $urls
-                ->merge($pageUrls)
-                ->unique()
-                ->values();
-        }
+        $urls = ResolveCachedUrlsForModelAction::run($model, $modelKey);
 
         $cleared = 0;
 
         foreach ($urls as $url) {
-            if (is_string($url) && ClearCachedUrlAction::run($url, refresh: $refresh)) {
+            if (ClearCachedUrlAction::run($url, refresh: $refresh)) {
                 $cleared++;
             }
         }

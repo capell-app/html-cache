@@ -23,21 +23,21 @@ use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @method static void run(StaleCachedUrl $staleCachedUrl)
+ * @method static void run(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge = false)
  */
 final class RefreshCachedUrlAtomicallyAction
 {
     use AsFake;
     use AsObject;
 
-    public function handle(StaleCachedUrl $staleCachedUrl): void
+    public function handle(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge = false): void
     {
         $resolved = LoadSiteDomainFromUrlAction::run($staleCachedUrl->url);
         $siteDomain = is_array($resolved) ? $resolved[0] : null;
 
         if (! $siteDomain instanceof SiteDomain) {
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
-            $this->deleteConfirmedObsoleteCache($staleCachedUrl);
+            $this->deleteConfirmedObsoleteCache($staleCachedUrl, $suppressInlineEdgePurge);
 
             return;
         }
@@ -55,7 +55,7 @@ final class RefreshCachedUrlAtomicallyAction
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
-            if (! $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl)) {
+            if (! $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge)) {
                 throw new RuntimeException(sprintf(
                     'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Status: %d. Content-Type: %s. Cache-Control: %s. Vary: %s. Cookies: %d. Query count: %d.',
                     $staleCachedUrl->url,
@@ -106,7 +106,7 @@ final class RefreshCachedUrlAtomicallyAction
         return $request;
     }
 
-    private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl): bool
+    private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): bool
     {
         $response = CacheableResponseCookieStripper::strip($response);
 
@@ -129,7 +129,9 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl);
-        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
+        if (! $suppressInlineEdgePurge) {
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
+        }
 
         return true;
     }
@@ -169,7 +171,7 @@ final class RefreshCachedUrlAtomicallyAction
         }
     }
 
-    private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl): void
+    private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): void
     {
         $store = resolve(HtmlCacheStore::class);
 
@@ -192,7 +194,9 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $query->delete();
-        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
+        if (! $suppressInlineEdgePurge) {
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
+        }
     }
 
     private function deleteAlternateStatusFile(StaleCachedUrl $staleCachedUrl, Response $response): void

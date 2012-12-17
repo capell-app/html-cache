@@ -27,6 +27,14 @@ Failed refreshes retry after the configured backoff until `max_attempts` is reac
 
 Every successful URL clear or stale refresh also queues an edge purge. A full local clear and global maintenance transitions queue a complete edge purge. Purge failures retry independently, so a temporary CDN API failure does not roll back the origin cache operation.
 
+## Read-only Consequence Planning
+
+`ResolveCachedUrlsForModelAction::run($model)` returns distinct tracked URLs plus a page's current `PageUrl` URLs, matching instant model invalidation. It also accepts a morph class and model key. For scheduled model invalidation, pass `includePageUrls: false`: that path marks only already-tracked URLs stale, so including untracked page URLs would overstate the planned work.
+
+`ResolveCachedUrlsForSurrogateKeysAction::run($keys)` returns the distinct union selected by page and site surrogate keys, including page URL fallbacks. Use this separately when the save emits surrogate-key invalidation; that path still clears immediately in scheduled mode. Its `pageIds()` and `siteCachedUrls()` methods let the clearing Action retain its existing page-first execution and subsequent site-row lookup.
+
+Both resolvers only read the current dependency index and page routes. They do not delete cache files, write stale rows, queue refreshes, or enact invalidation. Callers should resolve an explicit preview on demand and apply the save path's actual invalidation mode; URL selection alone does not imply that regeneration is scheduled.
+
 ## Deployment Topology And Purge Reach
 
 HTML Cache supports three production topologies:

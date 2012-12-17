@@ -13,7 +13,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
 use Throwable;
 
 /**
- * @method static int run(?int $limit = null)
+ * @method static int run(?int $limit = null, bool $suppressInlineEdgePurge = false)
  */
 final class ProcessStaleHtmlCacheAction
 {
@@ -21,7 +21,7 @@ final class ProcessStaleHtmlCacheAction
     use AsJob;
     use AsObject;
 
-    public function handle(?int $limit = null): int
+    public function handle(?int $limit = null, bool $suppressInlineEdgePurge = false): int
     {
         PruneHtmlCacheMetadataAction::run();
 
@@ -38,8 +38,8 @@ final class ProcessStaleHtmlCacheAction
 
             $processedThisPass = 0;
 
-            $candidates->each(function (StaleCachedUrl $staleCachedUrl) use (&$processed, &$processedThisPass): void {
-                if ($this->processStaleCachedUrl($staleCachedUrl)) {
+            $candidates->each(function (StaleCachedUrl $staleCachedUrl) use (&$processed, &$processedThisPass, $suppressInlineEdgePurge): void {
+                if ($this->processStaleCachedUrl($staleCachedUrl, $suppressInlineEdgePurge)) {
                     $processed++;
                     $processedThisPass++;
                 }
@@ -81,7 +81,7 @@ final class ProcessStaleHtmlCacheAction
         return 5;
     }
 
-    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl): bool
+    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): bool
     {
         if (! ClaimStaleCachedUrlAction::run($staleCachedUrl)) {
             return false;
@@ -90,7 +90,7 @@ final class ProcessStaleHtmlCacheAction
         $staleCachedUrl->refresh();
 
         try {
-            RefreshCachedUrlAtomicallyAction::run($staleCachedUrl);
+            RefreshCachedUrlAtomicallyAction::run($staleCachedUrl, $suppressInlineEdgePurge);
 
             $this->completeClaim($staleCachedUrl, [
                 'status' => StaleCachedUrl::STATUS_PROCESSED,

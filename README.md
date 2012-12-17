@@ -48,22 +48,154 @@ Screenshot contract: `docs/screenshots.json`.
 
 ## Technical Shape
 
-- Service providers: `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`.
-- Config files: `packages/html-cache/config/capell-html-cache.php`.
-- Migrations: `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`, `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`, `packages/html-cache/database/migrations/2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`.
-- Models: `CachedModelUrl`, `HtmlCacheGenerationRun`, `StaleCachedUrl`.
-- Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsFilamentWidget`, `HtmlCacheOverviewFilamentWidget`, `HtmlCacheStaleQueueFilamentWidget`.
-- Livewire components: `SiteHealthCacheMap`.
-- Extension contracts: `CachePurger`, `PageCacheNotifiable`.
-- Actions: `AssertHtmlCacheInvalidationTopologyAction`, `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `BuildMaintenanceCacheOverviewAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `and 31 more`.
-- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `EdgeCachePurgeReadinessData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`, `MaintenanceCacheDomainData`, `MaintenanceCacheOverviewData`, `MaintenanceSiteStatusData`.
-- Jobs: `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
-- Scheduled commands: `capell:html-cache:process-stale (package registered)`.
-- Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`, `VerifyEdgeCachePurgeCommand`.
-- Manifest contributions: `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`, `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`, `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`, `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`, `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`.
-- Health checks: `Capell\HtmlCache\Health\HtmlCacheHealthCheck`.
-- Blade views: `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`, `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`.
-- Cache tags: `html-cache`.
+### Service providers
+
+- `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`
+
+### Config files
+
+- `packages/html-cache/config/capell-html-cache.php`
+
+### Migrations
+
+- `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`
+- `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`
+- `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`
+- `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`
+- `packages/html-cache/database/migrations/2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`
+
+### Models
+
+- `CachedModelUrl`
+- `HtmlCacheGenerationRun`
+- `StaleCachedUrl`
+
+### Filament classes
+
+- `PageCachedIconColumn`
+- `HasPageCacheNotification`
+- `PageCachePageTableExtender`
+- `MaintenanceSiteHeaderActionExtender`
+- `MaintenanceCachePage`
+- `CachedModelUrlResource`
+- `ListCachedModelUrls`
+- `CachedModelUrlsTable`
+- `HtmlCacheDashboardSettingsContributor`
+- `CacheCoverageUrlsFilamentWidget`
+- `HtmlCacheOverviewFilamentWidget`
+- `HtmlCacheStaleQueueFilamentWidget`
+
+### Livewire components
+
+- `SiteHealthCacheMap`
+
+### Extension contracts
+
+- `CachePurger`
+- `PageCacheNotifiable`
+
+### Actions
+
+- `AssertHtmlCacheInvalidationTopologyAction`
+- `BuildCacheMapOverviewAction`
+- `BuildCachedModelUrlDiagnosticsAction`
+- `BuildHtmlCacheEligibilityReportAction`
+- `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`
+- `BuildMaintenanceCacheOverviewAction`
+- `ClaimStaleCachedUrlAction`
+- `ClearAllHtmlCacheAction`
+- `ClearCachedPageUrlsAction`
+- `ClearCachedUrlAction`
+- `ClearCachedUrlsForModelAction`
+- `ClearCachedUrlsForSurrogateKeysAction`
+- `BuildHtmlCacheDashboardStatsAction`
+- `BuildHtmlCacheStaleQueueRowsAction`
+- `BuildHtmlCacheUrlRowsAction`
+- `DeletePageCacheAction`
+- `DisableGlobalMaintenanceAction`
+- `DisableSiteMaintenanceOverrideAction`
+- `EnableGlobalMaintenanceAction`
+- `EnableSiteMaintenanceOverrideAction`
+- `EnsureHtmlCachePermissionsAction`
+- `GenerateStaticSiteAction`
+- `GenerateStaticSitesAction`
+- `InspectEdgeCachePurgeReadinessAction`
+- `ListCacheMapResourceOptionsAction`
+- `MarkAllCachedUrlsStaleAction`
+- `MarkCachedUrlStaleAction`
+- `MarkCachedUrlsForModelStaleAction`
+- `MarkCachedUrlsForSiteStaleAction`
+- `NotifyClearCachedPagesAction`
+- `PrepareMaintenanceCacheAction`
+- `PrepareSiteMaintenanceCacheAction`
+- `ProcessStaleHtmlCacheAction`
+- `PruneHtmlCacheMetadataAction`
+- `PurgeEdgeCacheAction`
+- `QueueMaintenancePageGenerationAction`
+- `RecordCachedModelUrlsAction`
+- `RecordHtmlCacheHitAction`
+- `RefreshCachedUrlAtomicallyAction`
+- `RefreshOriginStaleCachedUrlAction`
+- `ResolveCachedUrlsForModelAction`
+- `ResolveCachedUrlsForSurrogateKeysAction`
+- `ResolveEdgeCacheTagsAction`
+- `SelectStaleHtmlCacheCandidatesAction`
+- `WriteRefreshedHtmlCacheFileAction`
+
+### Data objects
+
+- `CacheMapModelSummaryData`
+- `CacheMapOverviewData`
+- `CacheMapResourceSummaryData`
+- `HtmlCacheDashboardStatsData`
+- `EdgeCachePurgeData`
+- `EdgeCachePurgeReadinessData`
+- `HtmlCacheClearResult`
+- `HtmlCacheEligibilityReportData`
+- `HtmlCacheHitBatchData`
+- `MaintenanceCacheDomainData`
+- `MaintenanceCacheOverviewData`
+- `MaintenanceSiteStatusData`
+
+### Jobs
+
+- `FlushHtmlCacheHitBatchJob`
+- `GenerateMaintenancePagesJob`
+- `RegisterCachedModelUrlsJob`
+
+### Scheduled commands
+
+- `capell:html-cache:process-stale (package registered)`
+
+### Console command classes
+
+- `ClearHtmlCacheCommand`
+- `DiagnoseHtmlCacheCommand`
+- `ProcessStaleHtmlCacheCommand`
+- `StaticSiteCommand`
+- `VerifyEdgeCachePurgeCommand`
+
+### Manifest contributions
+
+- `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`
+- `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`
+- `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`
+- `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`
+- `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`
+
+### Health checks
+
+- `Capell\HtmlCache\Health\HtmlCacheHealthCheck`
+
+### Blade views
+
+- `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`
+- `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`
+
+### Cache tags
+
+- `html-cache`
+
 
 ## Data Model
 
@@ -109,8 +241,7 @@ Screenshot contract: `docs/screenshots.json`.
 ## Quick Start
 
 1. Install the package: `composer require capell-app/html-cache`.
-2. Run the required setup: `php artisan migrate`.
-3. Open the package admin surface at `/html-cache/maintenance-cache` and confirm HTML Cache is available.
+2. Open the package admin surface at `/html-cache/maintenance-cache` and confirm HTML Cache is available.
 
 ## Next Steps
 

@@ -8,6 +8,7 @@ use Capell\Core\Models\Translation;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
+use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -16,6 +17,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -434,8 +436,9 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
         ->and($staleCachedUrl->last_error)->toContain('not cacheable');
 });
 
-it('deletes obsolete stale cache files and indexed urls when the domain no longer resolves', function (): void {
+it('deletes obsolete stale cache files and indexed urls when the domain no longer resolves', function (bool $suppressInlineEdgePurge): void {
     Storage::fake('page_cache');
+    Queue::fake();
 
     $page = Page::factory()->withTranslations()->create();
     $url = 'https://obsolete.example.test/about';
@@ -473,12 +476,18 @@ it('deletes obsolete stale cache files and indexed urls when the domain no longe
         'attempts' => 1,
     ]);
 
-    RefreshCachedUrlAtomicallyAction::run($staleCachedUrl);
+    RefreshCachedUrlAtomicallyAction::run($staleCachedUrl, $suppressInlineEdgePurge);
 
     expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url_hash', $urlHash)->exists())->toBeFalse();
-});
+
+    if ($suppressInlineEdgePurge) {
+        PurgeEdgeCacheAction::assertNotPushed();
+    } else {
+        PurgeEdgeCacheAction::assertPushed();
+    }
+})->with(['default purge' => false, 'suppressed purge' => true]);
 
 it('refreshes missing pages into the error cache', function (): void {
     Storage::fake('page_cache');
@@ -1128,8 +1137,9 @@ it('alternates failed and timed out processing rows in single item retry batches
         ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForUrl('/timed-out', $siteDomain)))->toBe('fresh timed out page');
 });
 
-it('processes stale cache command with the requested limit', function (): void {
+it('processes stale cache command with the requested limit and optional edge purge suppression', function (bool $suppressInlineEdgePurge): void {
     Storage::fake('page_cache');
+    Queue::fake();
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
@@ -1163,13 +1173,25 @@ it('processes stale cache command with the requested limit', function (): void {
         ]);
     }
 
-    $this->artisan('capell:html-cache:process-stale', ['--limit' => 1])
+    $options = ['--limit' => 1];
+
+    if ($suppressInlineEdgePurge) {
+        $options['--suppress-inline-edge-purge'] = true;
+    }
+
+    $this->artisan('capell:html-cache:process-stale', $options)
         ->expectsOutput('Processed 1 stale HTML cache URL(s).')
         ->assertSuccessful();
 
     expect(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PROCESSED)->count())->toBe(1)
         ->and(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PENDING)->count())->toBe(1);
-});
+
+    if ($suppressInlineEdgePurge) {
+        PurgeEdgeCacheAction::assertNotPushed();
+    } else {
+        PurgeEdgeCacheAction::assertPushed();
+    }
+})->with(['default purge' => false, 'suppressed purge' => true]);
 
 /**
  * @param  array<string, mixed>  $attributes

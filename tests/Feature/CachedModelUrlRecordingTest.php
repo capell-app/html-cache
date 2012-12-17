@@ -14,6 +14,8 @@ use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
+use Capell\HtmlCache\Actions\ResolveCachedUrlsForModelAction;
+use Capell\HtmlCache\Actions\ResolveCachedUrlsForSurrogateKeysAction;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -738,4 +740,65 @@ it('clears all cached urls when a site domain changes', function (): void {
 
     expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
+});
+
+it('resolves the same distinct cache scope as clearing without mutating tracked entries', function (): void {
+    Storage::fake('page_cache');
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
+    $pageUrl = EloquentModel::withoutEvents(fn (): PageUrl => PageUrl::factory()->create([
+        'site_id' => $siteDomain->site_id,
+        'language_id' => $siteDomain->language_id,
+        'pageable_type' => $page->getMorphClass(),
+        'pageable_id' => $page->getKey(),
+        'url' => '/fallback',
+    ]));
+    $trackedUrls = ['https://example.test/one', 'https://example.test/two', 'https://example.test/three'];
+
+    foreach ($trackedUrls as $url) {
+        htmlCacheCreateCachedModelUrl($url, $siteDomain, $page);
+    }
+
+    $before = CachedModelUrl::query()->get()->toArray();
+    $writes = [];
+    DB::listen(function (QueryExecuted $query) use (&$writes): void {
+        if (preg_match('/^\s*(insert|update|delete|replace)\b/i', $query->sql) === 1) {
+            $writes[] = $query->sql;
+        }
+    });
+    $urls = ResolveCachedUrlsForModelAction::run($page);
+
+    expect($urls->all())->toBe([...$trackedUrls, $pageUrl->fullUrl()])
+        ->and(ResolveCachedUrlsForModelAction::run($page, includePageUrls: false)->all())->toBe($trackedUrls)
+        ->and(ResolveCachedUrlsForModelAction::run($page->getMorphClass(), $page->id)->all())->toBe($urls->all())
+        ->and(CachedModelUrl::query()->get()->toArray())->toBe($before)
+        ->and(ResolveCachedUrlsForSurrogateKeysAction::run(['site-' . $siteDomain->site_id, 'page-' . $page->id, 'unknown-key'])->sort()->values()->all())->toBe($urls->sort()->values()->all())
+        ->and(ResolveCachedUrlsForSurrogateKeysAction::run(['site-' . $siteDomain->site_id])->all())->toBe($trackedUrls)
+        ->and($writes)->toBe([]);
+
+    foreach ($urls as $url) {
+        $cachePath = resolve(HtmlCachePathResolver::class)->pathForRequestUrl($url, $siteDomain);
+        Storage::disk('page_cache')->put($cachePath, 'cached response');
+    }
+
+    expect(ClearCachedUrlsForModelAction::run($page))->toBe(4)
+        ->and(CachedModelUrl::query()->count())->toBe(0);
+
+    foreach ($urls as $url) {
+        $cachePath = resolve(HtmlCachePathResolver::class)->pathForRequestUrl($url, $siteDomain);
+        expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse();
+    }
+});
+
+it('deduplicates a page URL already present in tracked cache URLs', function (): void {
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
+    $pageUrl = EloquentModel::withoutEvents(fn (): PageUrl => PageUrl::factory()->create([
+        'site_id' => $siteDomain->site_id,
+        'language_id' => $siteDomain->language_id,
+        'pageable_type' => $page->getMorphClass(),
+        'pageable_id' => $page->getKey(),
+        'url' => '/tracked',
+    ]));
+    htmlCacheCreateCachedModelUrl($pageUrl->fullUrl(), $siteDomain, $page);
+
+    expect(ResolveCachedUrlsForModelAction::run($page)->all())->toBe([$pageUrl->fullUrl()]);
 });

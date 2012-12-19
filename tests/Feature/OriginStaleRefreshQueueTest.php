@@ -254,7 +254,9 @@ it('preserves stale claim recovery backoff and publication fencing in queued ref
             ->and($row->status)->toBe(StaleCachedUrl::STATUS_PROCESSING)
             ->and(Storage::disk('page_cache')->get(queuedOriginCachePath($row)))->toBe('Previous public HTML');
     } elseif ($state === 'invalidated during render') {
-        expect($renders)->toBe(1)->and($row->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        // A guard rejection earns one retry under a fresh token; a second rejection still fails the row.
+        expect($renders)->toBe(2)->and($row->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+            ->and($row->last_error)->toContain('the publication guard rejected the render twice')
             ->and(Storage::disk('page_cache')->exists(queuedOriginCachePath($row)))->toBeFalse();
     } else {
         expect($renders)->toBe(1)->and($row->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)

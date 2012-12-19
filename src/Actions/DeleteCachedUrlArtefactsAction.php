@@ -8,6 +8,7 @@ use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,7 +19,7 @@ use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static bool run(Request $request, ?SiteDomain $siteDomain = null, list<string> $storedFiles = [], list<string> $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, list<string> $preserve = [])
+ * @method static bool run(Request $request, ?SiteDomain $siteDomain = null, list<string> $storedFiles = [], list<string> $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, list<string> $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true)
  */
 final class DeleteCachedUrlArtefactsAction
 {
@@ -29,8 +30,10 @@ final class DeleteCachedUrlArtefactsAction
      * @param  list<string>  $storedFiles
      * @param  list<string>  $storedPaths
      * @param  list<string>  $preserve
+     * @param  bool  $rotateWhenUnchanged  false only for retirements that observe origin policy rather than act on a data change
+     * @param  bool  $fenceUrlWhenUnchanged  false only for cleanup after this caller's own guarded publish of the URL
      */
-    public function handle(Request $request, ?SiteDomain $siteDomain = null, array $storedFiles = [], array $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, array $preserve = []): bool
+    public function handle(Request $request, ?SiteDomain $siteDomain = null, array $storedFiles = [], array $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, array $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true): bool
     {
         $paths = resolve(HtmlCachePathResolver::class);
         if (! $paths->hasSafeKey($request)) {
@@ -91,6 +94,8 @@ final class DeleteCachedUrlArtefactsAction
             $unattributableLegacyBases,
             [...$variantBases, ...$this->recordedFiles($siteDomain, $paths, $urlRequest, $storedPaths, $unattributableLegacyBases)],
             $preserve,
+            $rotateWhenUnchanged,
+            $fenceUrlWhenUnchanged ? HtmlCachePublicationGuard::urlKey($request) : null,
         );
     }
 

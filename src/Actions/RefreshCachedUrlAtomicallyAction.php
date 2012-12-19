@@ -58,21 +58,27 @@ final class RefreshCachedUrlAtomicallyAction
             return;
         }
 
-        resolve(HtmlCachePublicationGuard::class)->capture($request);
         $previousRequest = resolve('request');
-        app()->instance('request', $request);
 
         try {
-            $kernel = resolve(HttpKernel::class);
-            $response = $kernel->handle($request);
-            $kernel->terminate($request, $response);
+            $response = $this->renderOrigin($request);
+
+            if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
+                // The generation advanced while this render ran, so the page is unproven
+                // rather than wrong. Render once more under a fresh token inside the same
+                // claim before counting the row as a failure.
+                $request = $this->requestForStaleCachedUrl($staleCachedUrl);
+                $request->attributes->set(HtmlCacheMiddleware::SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE, $suppressInlineEdgePurge);
+                $response = $this->renderOrigin($request);
+            }
 
             if ($response->isServerError()) {
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
-            $retirementReason = RetireCachedUrlAction::run($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
+            $retirementReason = RetireCachedUrlAction::run($request, $response, $staleCachedUrl, $suppressInlineEdgePurge)
+                ?? $this->retireUnguardedOriginResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
             $rejectionReason = $retirementReason ?? $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
 
             if ($rejectionReason instanceof HtmlCacheEligibilityReason) {
@@ -100,6 +106,56 @@ final class RefreshCachedUrlAtomicallyAction
         } finally {
             app()->instance('request', $previousRequest);
         }
+    }
+
+    private function renderOrigin(Request $request): Response
+    {
+        resolve(HtmlCachePublicationGuard::class)->capture($request);
+        app()->instance('request', $request);
+
+        $kernel = resolve(HttpKernel::class);
+        $response = $kernel->handle($request);
+        $kernel->terminate($request, $response);
+
+        return $response;
+    }
+
+    /**
+     * A route outside the cache middleware records no origin decision, so its
+     * headers are provably the origin's own. Build the decision here and evict
+     * through the single retirement path when it declares a lasting policy; the
+     * builder already limits that to accepted statuses with a deterministic reason.
+     */
+    private function retireUnguardedOriginResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): ?HtmlCacheEligibilityReason
+    {
+        if (HtmlCacheOriginDecisionData::forRequest($request) instanceof HtmlCacheOriginDecisionData) {
+            return null;
+        }
+
+        $reason = BuildHtmlCacheOriginDecisionAction::run($request, $response)->retirementReason;
+
+        if (! $reason instanceof HtmlCacheEligibilityReason || ! $reason->isDeterministicForStaleRefresh($response->getStatusCode())) {
+            return null;
+        }
+
+        // Only a response that is not a page may be retired here. An HTML page
+        // that lost the cache middleware renders Laravel's default private
+        // headers, and treating that as policy would silently uncache the site.
+        if (! in_array($reason, [HtmlCacheEligibilityReason::NonHtmlResponse, HtmlCacheEligibilityReason::RedirectUrl], true)) {
+            return null;
+        }
+
+        resolve(RetireCachedUrlAction::class)->evict(
+            $staleCachedUrl->url,
+            $staleCachedUrl->cache_path,
+            $staleCachedUrl->error_cache_path,
+            $staleCachedUrl->site_id,
+            $staleCachedUrl->site_domain_id,
+            $suppressInlineEdgePurge,
+            $request,
+        );
+
+        return $reason;
     }
 
     private function requestForStaleCachedUrl(StaleCachedUrl $staleCachedUrl): Request
@@ -153,6 +209,9 @@ final class RefreshCachedUrlAtomicallyAction
         if ($originDecision instanceof HtmlCacheOriginDecisionData && ! $originDecision->cacheWriteSucceeded) {
             if ($originDecision->rejectionReason instanceof HtmlCacheEligibilityReason) {
                 return $originDecision->rejectionReason;
+            }
+            if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
+                throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; the publication guard rejected the render twice because the cache generation advanced during each render; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
             throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; origin rendering or cache publication was rejected without a terminal cache policy change; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
         }
@@ -287,6 +346,12 @@ final class RefreshCachedUrlAtomicallyAction
             $storedPaths,
             includeVariants: true,
             preserve: [$published],
+            // The page was published under this refresh's token; clearing stale
+            // alternates that are already absent changes nothing worth fencing.
+            // Fencing the URL would reject concurrent refreshes of its query
+            // variants, which share the per-URL counter.
+            rotateWhenUnchanged: false,
+            fenceUrlWhenUnchanged: false,
         );
     }
 }

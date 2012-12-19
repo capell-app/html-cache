@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
+use Capell\HtmlCache\Actions\DeleteCachedUrlArtefactsAction;
 use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
+use Capell\HtmlCache\Actions\RetireCachedUrlAction;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -197,3 +199,88 @@ it('rejects publication lock aliases inside the page cache before deleting conte
         File::deleteDirectory($outside);
     }
 })->with(['traversal', 'directory symlink', 'file symlink', 'dangling symlink']);
+
+it('advances the generation only when a retirement removes artefacts', function (): void {
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $guard = resolve(HtmlCachePublicationGuard::class);
+    $paths = resolve(HtmlCachePathResolver::class);
+    $url = 'https://example.test/sitemap-xml';
+    $cachePath = $paths->pathForUrl('/sitemap-xml', $domain);
+    $errorCachePath = $paths->pathForUrl('/sitemap-xml', $domain, error: true);
+    $retire = static function () use ($url, $cachePath, $errorCachePath, $domain): void {
+        resolve(RetireCachedUrlAction::class)->evict($url, $cachePath, $errorCachePath, $domain->site_id, $domain->id, true);
+    };
+
+    $before = $guard->snapshot();
+    $retire();
+    expect($guard->snapshot())->toBe($before);
+
+    Storage::disk('page_cache')->put($cachePath, 'stale xml shell');
+    $retire();
+    expect($guard->snapshot())->not->toBe($before)
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse();
+
+    // A data-change invalidation still fences in-flight renders even when the URL holds nothing.
+    $before = $guard->snapshot();
+    ClearCachedUrlAction::run('https://example.test/absent');
+    expect($guard->snapshot())->not->toBe($before);
+});
+
+it('keeps an in-flight render publishable across a per-request retirement that removed nothing', function (): void {
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $path = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $domain);
+    $pageRequest = Request::create('https://example.test/about');
+    app()->instance('request', $pageRequest);
+
+    resolve(HtmlCacheMiddleware::class)->handle($pageRequest, function () {
+        $sitemapRequest = Request::create('https://example.test/sitemap-xml');
+        $sitemapResponse = resolve(HtmlCacheMiddleware::class)->handle($sitemapRequest, fn () => response('<urlset/>', 200, [
+            'Content-Type' => 'application/xml',
+            'Cache-Control' => 'max-age=3600, public',
+        ]));
+        expect($sitemapResponse->getStatusCode())->toBe(200);
+
+        return response('<main>About</main>', 200, ['Content-Type' => 'text/html']);
+    });
+
+    expect($pageRequest->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE))->toBeTrue()
+        ->and(Storage::disk('page_cache')->get($path))->toContain('About');
+});
+
+it('rejects an in-flight render of a url retired while it held nothing, and only that url', function (): void {
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $guard = resolve(HtmlCachePublicationGuard::class);
+    $paths = resolve(HtmlCachePathResolver::class);
+    $retiredRequest = Request::create('https://example.test/expiring');
+    $otherRequest = Request::create('https://example.test/other');
+    $retiredToken = $guard->capture($retiredRequest);
+    $otherToken = $guard->capture($otherRequest);
+
+    // The page expired without a data write: the origin now answers with a redirect.
+    resolve(RetireCachedUrlAction::class)->evict(
+        'https://example.test/expiring',
+        $paths->pathForUrl('/expiring', $domain),
+        $paths->pathForUrl('/expiring', $domain, error: true),
+        $domain->site_id,
+        $domain->id,
+        true,
+    );
+
+    expect($guard->publish($retiredToken, static fn (): bool => true))->toBeFalse()
+        ->and($guard->publish($otherToken, static fn (): bool => true))->toBeTrue()
+        ->and($guard->publish($guard->capture(Request::create('https://example.test/expiring')), static fn (): bool => true))->toBeTrue();
+});
+
+it('does not fence query variants when cleanup follows its own publish', function (): void {
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $guard = resolve(HtmlCachePublicationGuard::class);
+    $variantToken = $guard->capture(Request::create('https://example.test/blog?page=2'));
+
+    // A concurrent refresh of /blog published, then cleared its absent alternates.
+    DeleteCachedUrlArtefactsAction::run(Request::create('https://example.test/blog'), $domain, includeVariants: true, rotateWhenUnchanged: false, fenceUrlWhenUnchanged: false);
+    expect($guard->publish($variantToken, static fn (): bool => true))->toBeTrue();
+
+    // A retirement of the same page does fence its in-flight variants.
+    DeleteCachedUrlArtefactsAction::run(Request::create('https://example.test/blog'), $domain, includeVariants: true, rotateWhenUnchanged: false);
+    expect($guard->publish($variantToken, static fn (): bool => true))->toBeFalse();
+});

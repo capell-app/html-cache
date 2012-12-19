@@ -22,6 +22,7 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
@@ -1876,4 +1877,119 @@ it('evicts retired filesystem artefacts before tracking migrations are installed
         expect(Storage::disk('page_cache')->exists($artefact))->toBeFalse();
     }
     expect(Schema::hasTable((new CachedModelUrl)->getTable()))->toBeFalse();
+});
+
+it('retires a non-html response from a route outside the cache middleware and evicts its artefacts', function (): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    // Deliberately not behind HtmlCacheMiddleware: no origin decision is ever recorded.
+    Route::get('/sitemap-xml', static fn (): Response => response('<urlset/>', 200, [
+        'Content-Type' => 'application/xml',
+        'Cache-Control' => 'max-age=3600, public',
+    ]));
+    $row = staleCacheRowForCoverage($domain, '/sitemap-xml', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    $errorCachePath = $row->error_cache_path;
+    assert(is_string($cachePath));
+    assert(is_string($errorCachePath));
+    foreach ([$cachePath, $errorCachePath] as $artefact) {
+        Storage::disk('page_cache')->put($artefact, 'stale artefact');
+        Storage::disk('page_cache')->put($artefact . PageCache::FRAGMENT_METADATA_EXTENSION, '{}');
+    }
+    $cachedUrl = CachedModelUrl::query()->create([
+        'url' => $row->url,
+        'url_hash' => $row->url_hash,
+        'path' => $row->path,
+        'site_id' => $domain->site_id,
+        'site_domain_id' => $domain->getKey(),
+        'language_id' => $domain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 0, 'notApplicable' => 1])
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($row->last_error)->toContain('Reason: non_html_response')
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($cachePath . PageCache::FRAGMENT_METADATA_EXTENSION))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($errorCachePath . PageCache::FRAGMENT_METADATA_EXTENSION))->toBeFalse()
+        ->and(CachedModelUrl::query()->whereKey($cachedUrl->getKey())->exists())->toBeFalse()
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0);
+});
+
+it('keeps failing an html page rendered outside the cache middleware', function (): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    // A page that lost frontend.cache renders Laravel's default private headers.
+    Route::get('/lost-middleware', static fn (): Response => response('<main>Page</main>', 200, [
+        'Content-Type' => 'text/html; charset=UTF-8',
+        'Cache-Control' => 'no-cache, private',
+    ]));
+    $row = staleCacheRowForCoverage($domain, '/lost-middleware', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    assert(is_string($cachePath));
+    Storage::disk('page_cache')->put($cachePath, 'stale artefact');
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result->notApplicable)->toBe(0)
+        ->and($result->failed)->toBe(1)
+        ->and($row->refresh()->status)->not->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
+});
+
+it('retries the render once when the publication guard rejects it mid-render', function (): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    bindHtmlCacheFrontendContext(Page::factory()->recycle($domain->site)->withTranslations()->create());
+    $renders = 0;
+    staleCacheOriginRoute('/raced', function () use (&$renders): Response {
+        if ($renders++ === 0) {
+            resolve(HtmlCachePublicationGuard::class)->invalidate(static fn (): bool => true);
+        }
+
+        return response('fresh raced page', 200, ['Content-Type' => 'text/html']);
+    });
+    $row = staleCacheRowForCoverage($domain, '/raced', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    assert(is_string($cachePath));
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 1, 'failed' => 0, 'notApplicable' => 0])
+        ->and($renders)->toBe(2)
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh raced page')
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED);
+});
+
+it('names the publication guard when the retried render is rejected again', function (): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    bindHtmlCacheFrontendContext(Page::factory()->recycle($domain->site)->withTranslations()->create());
+    $renders = 0;
+    staleCacheOriginRoute('/raced', function () use (&$renders): Response {
+        $renders++;
+        resolve(HtmlCachePublicationGuard::class)->invalidate(static fn (): bool => true);
+
+        return response('fresh raced page', 200, ['Content-Type' => 'text/html']);
+    });
+    $row = staleCacheRowForCoverage($domain, '/raced', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    assert(is_string($cachePath));
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 1, 'notApplicable' => 0])
+        ->and($renders)->toBe(2)
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($row->last_error)->toContain('the publication guard rejected the render twice');
 });

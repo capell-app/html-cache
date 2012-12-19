@@ -25,13 +25,19 @@ final class HtmlCachePublicationGuard
     /** @var array<string, true> */
     private static array $heldLocks = [];
 
+    /** The withdrawal scope for a URL: every query variant of one host and path. */
+    public static function urlKey(Request $request): string
+    {
+        return hash('sha256', mb_strtolower($request->getHost()) . '/' . trim($request->path(), '/'));
+    }
+
     public function capture(Request $request): ?string
     {
         if ($request->attributes->has(self::REQUEST_TOKEN_ATTRIBUTE)) {
             return $this->token($request);
         }
 
-        $token = $this->snapshot();
+        $token = $this->snapshot(self::urlKey($request));
         $request->attributes->set(self::REQUEST_TOKEN_ATTRIBUTE, $token);
 
         return $token;
@@ -44,10 +50,21 @@ final class HtmlCachePublicationGuard
         return is_string($token) ? $token : null;
     }
 
-    public function snapshot(): ?string
+    /**
+     * A token binds the site-wide generation and, when a URL is given, that
+     * URL's withdrawal counter, so a no-op withdrawal can reject the renders of
+     * its own URL without rejecting every other publish.
+     */
+    public function snapshot(?string $urlKey = null): ?string
     {
         try {
-            return $this->locked(fn ($handle): string => $this->generation($handle));
+            return $this->locked(function ($handle) use ($urlKey): string {
+                $generation = $this->generation($handle);
+
+                return $urlKey === null
+                    ? $generation
+                    : $generation . '|' . $urlKey . '|' . ($this->urlCounters()[$urlKey] ?? 0);
+            });
         } catch (Throwable $throwable) {
             report($throwable);
 
@@ -64,7 +81,13 @@ final class HtmlCachePublicationGuard
 
         try {
             return $this->locked(function ($handle) use ($token, $publish): bool {
-                if (! hash_equals($this->generation($handle), $token)) {
+                [$generation, $urlKey, $counter] = array_pad(explode('|', $token, 3), 3, null);
+
+                if (! hash_equals($this->generation($handle), (string) $generation)) {
+                    return false;
+                }
+
+                if ($urlKey !== null && (string) ($this->urlCounters()[$urlKey] ?? 0) !== $counter) {
                     return false;
                 }
 
@@ -89,6 +112,50 @@ final class HtmlCachePublicationGuard
             $this->rotate($handle);
 
             return $invalidate();
+        });
+    }
+
+    /**
+     * Withdraw one URL's artefacts under the lock, advancing the site-wide
+     * generation only when something was actually removed.
+     *
+     * The generation exists so a render that started before a withdrawal cannot
+     * republish what the withdrawal removed. An empty disk does not prove no
+     * render of this URL is in flight: one may have captured its token and not
+     * yet written. So a no-op withdrawal still advances this URL's counter,
+     * rejecting its in-flight renders, without rotating the site-wide
+     * generation, which would reject every concurrent publish. Per-request
+     * retirements of non-HTML and redirect responses starved stale refreshes
+     * exactly that way.
+     *
+     * Data changes keep using invalidate(): a render that read the old data may
+     * be running for any URL. A null key withdraws without fencing anything
+     * when nothing was removed; use it only for cleanup that follows this
+     * caller's own guarded publish of the same URL.
+     *
+     * @param  Closure(): bool  $withdraw
+     */
+    public function withdraw(?string $urlKey, Closure $withdraw): bool
+    {
+        return $this->locked(function ($handle) use ($urlKey, $withdraw): bool {
+            try {
+                $removed = $withdraw();
+            } catch (Throwable $throwable) {
+                // A partial deletion is unknowable; stay conservative.
+                $this->rotate($handle);
+
+                throw $throwable;
+            }
+
+            if ($removed) {
+                $this->rotate($handle);
+            } elseif ($urlKey !== null) {
+                $counters = $this->urlCounters();
+                $counters[$urlKey] = ($counters[$urlKey] ?? 0) + 1;
+                $this->writeUrlCounters($counters);
+            }
+
+            return $removed;
         });
     }
 
@@ -190,9 +257,43 @@ final class HtmlCachePublicationGuard
         return $token;
     }
 
+    /** @return array<string, int> */
+    private function urlCounters(): array
+    {
+        $path = $this->lockPath() . '.urls';
+        $decoded = is_file($path) ? json_decode((string) file_get_contents($path), true) : [];
+
+        return is_array($decoded) ? array_filter($decoded, is_int(...)) : [];
+    }
+
+    /** @param array<string, int> $counters */
+    private function writeUrlCounters(array $counters): void
+    {
+        $path = $this->lockPath() . '.urls';
+
+        if ($counters === []) {
+            if (is_file($path) && ! unlink($path)) {
+                throw new RuntimeException('Unable to reset the HTML cache URL withdrawal counters.');
+            }
+
+            return;
+        }
+
+        // Replace atomically: a torn file would read as empty and re-validate old tokens.
+        $temporary = $path . '.' . bin2hex(random_bytes(4));
+        if (file_put_contents($temporary, json_encode($counters, JSON_THROW_ON_ERROR)) === false || ! rename($temporary, $path)) {
+            @unlink($temporary);
+
+            throw new RuntimeException('Unable to record the HTML cache URL withdrawal counters.');
+        }
+    }
+
     /** @param resource $handle */
     private function rotate(mixed $handle): string
     {
+        // A new generation already rejects every older token, so per-URL
+        // counters restart; this keeps the counter file bounded.
+        $this->writeUrlCounters([]);
         $token = bin2hex(random_bytes(32));
         rewind($handle);
 

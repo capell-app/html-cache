@@ -74,10 +74,13 @@ final class HtmlCacheStore
      * @param  list<string>  $unattributableLegacyBases
      * @param  list<string>  $recordedFiles
      * @param  list<string>  $preserve  pages just published under this lock scope, kept with their sidecars
+     * @param  bool  $rotateWhenUnchanged  false for retirements that only observe origin policy; see HtmlCachePublicationGuard::withdraw()
+     * @param  string|null  $fenceUrlKey  when not rotating, the URL whose in-flight renders a no-op withdrawal rejects
      */
-    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = []): bool
+    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = [], bool $rotateWhenUnchanged = true, ?string $fenceUrlKey = null): bool
     {
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($files, $variantBases, $domainDirectory, $unattributableLegacyBases, $recordedFiles, $preserve): bool {
+        $guard = resolve(HtmlCachePublicationGuard::class);
+        $delete = function () use ($files, $variantBases, $domainDirectory, $unattributableLegacyBases, $recordedFiles, $preserve): bool {
             // Independently keyed fragments retain exact query ownership.
             foreach (array_unique($variantBases) as $base) {
                 if (! $this->isSafePagePath($base, $domainDirectory)) {
@@ -134,7 +137,9 @@ final class HtmlCacheStore
             }
 
             return $deleted;
-        });
+        };
+
+        return $rotateWhenUnchanged ? $guard->invalidate($delete) : $guard->withdraw($fenceUrlKey, $delete);
     }
 
     public function isSafePagePath(string $file, string $domainDirectory): bool

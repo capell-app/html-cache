@@ -91,7 +91,17 @@ final class RetireCachedUrlAction
         $storedPaths = Schema::hasTable((new CachedModelUrl)->getTable())
             ? array_values($query->get()->map(static fn (CachedModelUrl $row): string => $row->path)->all())
             : [];
-        DeleteCachedUrlArtefactsAction::run($request ?? Request::create($url), $domain, [$cachePath, $errorCachePath], $storedPaths, includeVariants: $request === null || ! $request->headers->has(StatelessPaginationRequest::FRAGMENT_HEADER));
+        // Retirement observes a policy the origin already reports; the data change
+        // behind it carried its own invalidation. Advancing the generation for a
+        // URL that held nothing would only reject unrelated concurrent publishes.
+        DeleteCachedUrlArtefactsAction::run(
+            $request ?? Request::create($url),
+            $domain,
+            [$cachePath, $errorCachePath],
+            $storedPaths,
+            includeVariants: $request === null || ! $request->headers->has(StatelessPaginationRequest::FRAGMENT_HEADER),
+            rotateWhenUnchanged: false,
+        );
         // Static generator consumers can run before optional tracking migrations are installed.
         if (Schema::hasTable((new CachedModelUrl)->getTable())) {
             $query->delete();

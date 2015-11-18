@@ -247,6 +247,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 - [Package docs](docs/README.md)
 - [Overview](docs/overview.md)
+- [Worked extension examples](docs/extension-contracts.md)
 - [Admin guide](docs/admin-guide.md)
 - Configuration files: [`config/capell-html-cache.php`](config/capell-html-cache.php).
 - [Troubleshooting](#troubleshooting)

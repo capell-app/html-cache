@@ -31,6 +31,11 @@ require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
+function queuedOriginRoute(string $uri, callable $origin): Illuminate\Routing\Route
+{
+    return Route::get($uri, $origin)->middleware(HtmlCacheMiddleware::class);
+}
+
 function queuedOriginStaleRow(): StaleCachedUrl
 {
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
@@ -100,7 +105,7 @@ beforeEach(function (): void {
 it('queues one origin refresh across hits and performs no full render at termination', function (): void {
     $row = queuedOriginStaleRow();
     $renders = 0;
-    Route::get('/stale', function () use (&$renders): Response {
+    queuedOriginRoute('/stale', function () use (&$renders): Response {
         $renders++;
 
         return response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']);
@@ -165,7 +170,7 @@ it('never regenerates inline when the configured queue is not durable and asynch
     $row = queuedOriginStaleRow();
     config()->set('capell-html-cache.origin_stale_while_revalidate.connection', 'request-worker');
     config()->set('queue.connections.request-worker', ['driver' => $driver]);
-    Route::get('/stale', static fn (): Response => response('Inline render', 200, ['Content-Type' => 'text/html']));
+    queuedOriginRoute('/stale', static fn (): Response => response('Inline render', 200, ['Content-Type' => 'text/html']));
 
     expect(queuedOriginCacheHit($row->url)->getContent())->toBe('Previous public HTML');
     app()->terminate();
@@ -179,7 +184,7 @@ it('preserves stale serving and durable retry when the queue broker fails', func
     $row = queuedOriginStaleRow();
     config()->set('capell-html-cache.hit_recording.enabled', $recordHits);
     $renders = 0;
-    Route::get('/stale', function () use (&$renders): Response {
+    queuedOriginRoute('/stale', function () use (&$renders): Response {
         $renders++;
 
         return response('Refreshed after outage', 200, ['Content-Type' => 'text/html']);
@@ -217,7 +222,7 @@ it('preserves stale claim recovery backoff and publication fencing in queued ref
         default => [],
     })->save();
     $renders = 0;
-    Route::get('/stale', function () use ($row, $state, &$renders): Response {
+    queuedOriginRoute('/stale', function () use ($row, $state, &$renders): Response {
         $renders++;
 
         if ($state === 'reclaimed during render') {

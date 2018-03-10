@@ -51,10 +51,10 @@ final class PublicResponseCachePolicy
         );
         sort($directives);
 
-        return in_array($directives, [
-            ['no-cache', 'private'],
-            ['max-age=0', 'must-revalidate', 'no-cache', 'no-store', 'private'],
-        ], true) && $response->headers->getCookies() === [];
+        $defaultDirectives = explode(', ', (string) (new Response)->headers->get('Cache-Control'));
+        sort($defaultDirectives);
+
+        return $directives === $defaultDirectives && $response->headers->getCookies() === [];
     }
 
     private function hasSupportedVaryHeader(Response $response): bool

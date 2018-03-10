@@ -30,6 +30,7 @@ final class MarkAllCachedUrlsStaleAction
     public function handle(string $reason = 'all_changed', ?array $cachePathSiteDomainAttributes = null): int
     {
         $marked = 0;
+        $hasUnsafeUrl = false;
         $rows = [];
         $cachePathSiteDomain = $this->cachePathSiteDomain($cachePathSiteDomainAttributes);
         $pathResolver = resolve(HtmlCachePathResolver::class);
@@ -40,7 +41,12 @@ final class MarkAllCachedUrlsStaleAction
             ->join(DB::raw('(select min(id) as selected_id from cached_model_urls group by url_hash, site_id, site_domain_id, path) as unique_cached_urls'), 'cached_model_urls.id', '=', 'unique_cached_urls.selected_id')
             ->orderBy('cached_model_urls.id')
             ->lazyById(column: 'cached_model_urls.id', alias: 'id')
-            ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, $reason, $cachePathSiteDomain, $pathResolver): void {
+            ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, &$hasUnsafeUrl, $reason, $cachePathSiteDomain, $pathResolver): void {
+                if (! $pathResolver->hasSafeKey($cachedModelUrl->url)) {
+                    $hasUnsafeUrl = true;
+
+                    return;
+                }
                 if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
                     return;
                 }
@@ -70,7 +76,7 @@ final class MarkAllCachedUrlsStaleAction
             $this->upsertStaleUrls($rows);
         }
 
-        if ($marked === 0) {
+        if ($marked === 0 && ! $hasUnsafeUrl) {
             ClearAllHtmlCacheAction::run();
         }
 

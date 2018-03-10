@@ -42,7 +42,8 @@ final class MarkCachedUrlsForModelStaleAction
         $pathResolver = resolve(HtmlCachePathResolver::class);
 
         foreach ($cachedModelUrls as $cachedModelUrl) {
-            if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
+            if (! $pathResolver->hasSafeKey($cachedModelUrl->url)
+                || resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
                 continue;
             }
 

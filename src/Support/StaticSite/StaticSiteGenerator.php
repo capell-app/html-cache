@@ -7,12 +7,15 @@ namespace Capell\HtmlCache\Support\StaticSite;
 use Capell\Core\Actions\SiteDomains\ResolveSiteDomainUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
 use Capell\Core\Exceptions\UrlVisitFailedException;
+use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
+use Capell\HtmlCache\Actions\DeleteCachedUrlArtefactsAction;
+use Capell\HtmlCache\Actions\RetireCachedUrlAction;
+use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
-use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Closure;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -163,10 +166,15 @@ final class StaticSiteGenerator
         }
 
         $pathResolver = resolve(HtmlCachePathResolver::class);
-        $store = resolve(HtmlCacheStore::class);
-
-        $store->deletePage($pathResolver->pathForUrl($pageUrl->url, $siteDomain));
-        $store->deletePage($pathResolver->pathForUrl($pageUrl->url, $siteDomain, error: true));
+        if (! $pathResolver->hasSafeKey($pageUrl->url)) {
+            return;
+        }
+        DeleteCachedUrlArtefactsAction::run(
+            Request::create($pageUrl->full_url),
+            $siteDomain,
+            storedPaths: [$pageUrl->url],
+            includeVariants: true,
+        );
     }
 
     private function visitUrlInternally(string $url): void
@@ -195,10 +203,29 @@ final class StaticSiteGenerator
             'HTTPS' => $scheme === 'https' ? 'on' : 'off',
         ]);
         $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
+        // Generation must observe origin policy even when a previous public artefact exists.
+        $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
 
-        $kernel = resolve(HttpKernel::class);
-        $response = $kernel->handle($request);
-        $kernel->terminate($request, $response);
+        $previousRequest = resolve('request');
+        app()->instance('request', $request);
+
+        try {
+            $kernel = resolve(HttpKernel::class);
+            $response = $kernel->handle($request);
+            $kernel->terminate($request, $response);
+            // Standalone generator consumers do not boot the optional cache runtime.
+            if (CapellCore::isPackageInstalled('capell-app/html-cache')) {
+                $retirementReason = RetireCachedUrlAction::run($request, $response);
+                $originDecision = HtmlCacheOriginDecisionData::forRequest($request);
+                if ($retirementReason === null
+                    && $originDecision instanceof HtmlCacheOriginDecisionData
+                    && ! $originDecision->cacheWriteSucceeded) {
+                    throw new RuntimeException(sprintf('Static generation request [%s] could not publish cacheable origin HTML.', $url));
+                }
+            }
+        } finally {
+            app()->instance('request', $previousRequest);
+        }
 
         if (! $response->isSuccessful()) {
             throw new RuntimeException(sprintf(

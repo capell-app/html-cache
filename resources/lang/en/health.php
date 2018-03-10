@@ -3,6 +3,12 @@
 declare(strict_types=1);
 
 return [
+    'exhausted' => [
+        'label' => 'HTML cache exhausted refreshes',
+        'passed' => 'No stale HTML cache URLs have exhausted their refresh attempts.',
+        'failed' => ':count stale HTML cache URLs have exhausted their refresh attempts; previous HTML remains available.',
+        'remediation' => 'Inspect the exhausted rows and their last_error in stale_cached_urls, repair the origin failure, then mark those URLs stale again or explicitly clear them.',
+    ],
     'disk' => [
         'failed' => 'The page_cache disk could not be written to; cached HTML cannot be stored.',
         'label' => 'HTML cache disk writable',

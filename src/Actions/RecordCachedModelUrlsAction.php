@@ -94,6 +94,8 @@ final class RecordCachedModelUrlsAction
             $seenKeys = array_fill_keys(array_map($this->recordKey(...), $records), true);
             $staleIds = CachedModelUrl::query()
                 ->where('url_hash', $urlHash)
+                ->where('site_id', $siteDomain?->site_id)
+                ->where('site_domain_id', $siteDomain?->id)
                 ->where('last_seen_at', '<=', $now)
                 ->get(['id', 'cacheable_type', 'cacheable_id'])
                 ->reject(fn (CachedModelUrl $cachedModelUrl): bool => isset($seenKeys[$this->cachedModelUrlKey($cachedModelUrl)]))
@@ -102,6 +104,8 @@ final class RecordCachedModelUrlsAction
             if ($staleIds !== []) {
                 CachedModelUrl::query()
                     ->where('url_hash', $urlHash)
+                    ->where('site_id', $siteDomain?->site_id)
+                    ->where('site_domain_id', $siteDomain?->id)
                     ->where('last_seen_at', '<=', $now)
                     ->whereKey($staleIds)
                     ->delete();

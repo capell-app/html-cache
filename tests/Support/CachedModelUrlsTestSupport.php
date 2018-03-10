@@ -10,9 +10,16 @@ use Capell\Core\Models\Theme;
 use Capell\Frontend\Contracts\FrontendContextReader;
 use Capell\Frontend\Data\FrontendRenderPayload;
 use Capell\Frontend\Facades\Frontend;
+use Capell\HtmlCache\Actions\BuildHtmlCacheOriginDecisionAction;
+use Capell\HtmlCache\Actions\RetireCachedUrlAction;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
+use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Illuminate\Http\Request;
 use Livewire\Livewire;
+use Symfony\Component\HttpFoundation\Response;
 
 function htmlCacheMapTestComponent(int $siteId, string $modelType): mixed
 {
@@ -91,4 +98,15 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
         }
     });
     Frontend::clearResolvedInstance(FrontendContextReader::class);
+}
+
+/** Declare the origin boundary explicitly when testing the retirement consumer directly. */
+function retireDeclaredHtmlCacheOriginResponse(Request $request, Response $response, ?StaleCachedUrl $stale = null, bool $suppressPurge = false): ?HtmlCacheEligibilityReason
+{
+    $request->attributes->set(
+        HtmlCacheMiddleware::ORIGIN_DECISION_ATTRIBUTE,
+        BuildHtmlCacheOriginDecisionAction::run($request, $response),
+    );
+
+    return RetireCachedUrlAction::run($request, $response, $stale, $suppressPurge);
 }

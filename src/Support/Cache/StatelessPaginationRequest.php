@@ -33,7 +33,13 @@ final class StatelessPaginationRequest
      */
     public static function isCacheableVariant(Request $request): bool
     {
-        if (! self::enabled() || $request->query->count() === 0) {
+        return self::enabled() && self::hasStoredVariantKey($request);
+    }
+
+    /** Stored key identity remains available to explicit clears while caching is disabled. */
+    public static function hasStoredVariantKey(Request $request): bool
+    {
+        if ($request->query->count() === 0) {
             return false;
         }
 
@@ -67,14 +73,14 @@ final class StatelessPaginationRequest
 
     /**
      * A short, deterministic cache-key suffix derived from the allow-listed query
-     * params (sorted) plus a fragment marker. Empty string when there is nothing
-     * to vary on, so non-paginated URLs keep their existing cache filename.
+     * params (sorted) plus a fragment marker. Preserve this combined hash: existing
+     * HTML, error pages and sidecars must remain readable after an upgrade.
      */
     public static function cacheKeySuffix(Request $request): string
     {
         $parts = [];
 
-        if (self::isCacheableVariant($request)) {
+        if (self::hasStoredVariantKey($request)) {
             $params = array_filter(
                 $request->query->all(),
                 static fn (string $key): bool => in_array($key, self::allowedParams(), true),
@@ -88,11 +94,7 @@ final class StatelessPaginationRequest
             $parts[] = 'fragment=' . (string) $request->headers->get(self::FRAGMENT_HEADER);
         }
 
-        if ($parts === []) {
-            return '';
-        }
-
-        return '~' . mb_substr(hash('xxh128', implode('|', $parts)), 0, 16);
+        return $parts === [] ? '' : '~' . mb_substr(hash('xxh128', implode('|', $parts)), 0, 16);
     }
 
     /**

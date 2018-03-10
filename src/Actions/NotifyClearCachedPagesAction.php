@@ -42,7 +42,11 @@ final class NotifyClearCachedPagesAction
         }
 
         if (config('capell-admin.auto_clear_cache') === true) {
-            ClearCachedPageUrlsAction::run($cachedUrls);
+            foreach ($models as $model) {
+                if ($model instanceof Model) {
+                    ClearCachedUrlsForModelAction::run($model);
+                }
+            }
 
             return;
         }

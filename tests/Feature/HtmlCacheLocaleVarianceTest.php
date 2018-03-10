@@ -163,6 +163,7 @@ it('bypasses same host and path locale variants negotiated by configured headers
     expect($frenchResponse->getContent())->toBe('french about page')
         ->and($frenchResponse->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $frenchResponse->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->exists('https.example.test/about.html'))->toBeTrue()
         ->and(Storage::disk('page_cache')->get('https.example.test/about.html'))->toBe('english about page');
 });
 

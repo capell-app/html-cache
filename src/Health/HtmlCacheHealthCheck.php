@@ -10,11 +10,13 @@ use Capell\Core\Support\Filesystem\AbsolutePath;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Override;
 use Throwable;
 
 final class HtmlCacheHealthCheck implements ChecksExtensionHealth
@@ -34,6 +36,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         'html_cache_generation_runs',
     ];
 
+    #[Override]
     public static function compatibleCapellApiVersion(): string
     {
         return '^1.0';
@@ -53,6 +56,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             $check->frontendCacheMiddlewareWiredCheck(),
             $check->storageTablesCheck(),
             $check->staleProcessingCommandRegisteredCheck(),
+            $check->exhaustedStaleUrlsCheck(),
         ]);
     }
 
@@ -60,6 +64,23 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     {
         return self::runDiagnostics()
             ->every(static fn (DoctorCheckResultData $result): bool => $result->passed);
+    }
+
+    public function exhaustedStaleUrlsCheck(): DoctorCheckResultData
+    {
+        // Exhaustion can follow transient failures: warn rather than deleting valid old HTML.
+        $count = Schema::hasTable((new StaleCachedUrl)->getTable())
+            ? StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_EXHAUSTED)->count()
+            : 0;
+
+        return new DoctorCheckResultData(
+            label: (string) __('capell-html-cache::health.exhausted.label'),
+            passed: $count === 0,
+            message: $count === 0
+                ? (string) __('capell-html-cache::health.exhausted.passed')
+                : (string) __('capell-html-cache::health.exhausted.failed', ['count' => $count]),
+            remediation: $count === 0 ? null : (string) __('capell-html-cache::health.exhausted.remediation'),
+        );
     }
 
     public function pageCacheDiskLocalPathCheck(): DoctorCheckResultData

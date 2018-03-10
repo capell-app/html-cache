@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Model;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
@@ -23,11 +24,19 @@ final class ClearCachedUrlsForModelAction
     public function handle(Model|string $model, int|string|null $modelKey = null, bool $refresh = false): int
     {
         $urls = ResolveCachedUrlsForModelAction::run($model, $modelKey);
+        [$morphClass, $key] = $this->modelIdentifier($model, $modelKey);
 
         $cleared = 0;
 
         foreach ($urls as $url) {
-            if (ClearCachedUrlAction::run($url, refresh: $refresh)) {
+            // Keep tracked ownership when the URL now resolves to another site's domain.
+            $cachedUrl = CachedModelUrl::query()
+                ->where('cacheable_type', $morphClass)
+                ->where('cacheable_id', $key)
+                ->where('url_hash', CachedModelUrl::hashUrl($url))
+                ->first();
+
+            if (ClearCachedUrlAction::run($cachedUrl ?? $url, refresh: $refresh)) {
                 $cleared++;
             }
         }

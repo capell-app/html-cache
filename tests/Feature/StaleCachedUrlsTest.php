@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\Page;
+use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
@@ -15,25 +16,38 @@ use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
+use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
+use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
+use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
 require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
+
+function staleCacheOriginRoute(string $uri, callable $handler): Illuminate\Routing\Route
+{
+    return Route::get($uri, $handler)->middleware(HtmlCacheMiddleware::class);
+}
 
 it('keeps cached files available while a full manual clear queues refreshes', function (): void {
     Storage::fake('page_cache');
@@ -192,7 +206,7 @@ it('does not enqueue configured bypass URLs and retires already queued ones as n
     expect(MarkCachedUrlStaleAction::run($url, 'manual'))->toBe(1);
 
     config()->set('capell-html-cache.bypass.paths', ['/account/*']);
-    Route::get('/account/profile', fn (): mixed => response('private page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/account/profile', fn (): mixed => response('private page', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->where('url', $url)->firstOrFail();
 
@@ -293,7 +307,7 @@ it('atomically refreshes stale cached html and marks the stale row processed', f
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -317,17 +331,20 @@ it('atomically refreshes stale cached html and marks the stale row processed', f
 
 it('retires redirect responses as not applicable instead of exhausting the stale row', function (): void {
     Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
         'domain' => 'example.test',
         'path' => null,
     ]);
-    Route::get('/renamed', fn (): mixed => redirect('/new-location', Response::HTTP_MOVED_PERMANENTLY));
+    staleCacheOriginRoute('/renamed', fn (): mixed => redirect('/new-location', Response::HTTP_MOVED_PERMANENTLY));
 
     $staleCachedUrl = staleCacheRowForCoverage($siteDomain, '/renamed', StaleCachedUrl::STATUS_PENDING);
 
-    expect(ProcessStaleHtmlCacheAction::run(1))->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 0, 'notApplicable' => 1])
+    $result = ProcessStaleHtmlCacheAction::run(1);
+    expect($result->failed)->toBe(0, (string) $staleCachedUrl->refresh()->last_error);
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 0, 'notApplicable' => 1])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
         ->and($staleCachedUrl->isTerminal())->toBeTrue()
         ->and($staleCachedUrl->last_error)->toContain('Reason: redirect_url')
@@ -354,8 +371,7 @@ it('refreshes stale HTML through middleware with no configured Vary headers', fu
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html; charset=utf-8']))
-        ->middleware(HtmlCacheMiddleware::class);
+    staleCacheOriginRoute('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html; charset=utf-8']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -390,7 +406,7 @@ it('keeps the previous cached html when stale refresh fails', function (): void 
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -427,7 +443,10 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
     $url = 'https://example.test/about';
 
     bindHtmlCacheFrontendContext($page);
-    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+    $kernel = Mockery::mock(Kernel::class);
+    $kernel->shouldReceive('handle')->once()->andReturn(response('fresh cached page', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']));
+    $kernel->shouldReceive('terminate')->once();
+    app()->instance(Kernel::class, $kernel);
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -463,7 +482,7 @@ it('blocks unsafe public html during stale refresh and keeps the old cache file'
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('<div data-capell-editor="1"></div>', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('<div data-capell-editor="1"></div>', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -562,7 +581,7 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', function (): mixed {
+    staleCacheOriginRoute('/about', function (): mixed {
         RecordExtensionRenderContributionAction::run(
             packageName: 'vendor/editorial-tools',
             surface: 'frontend',
@@ -595,7 +614,7 @@ it('uses middleware cacheability rules during stale refresh', function (): void 
 
     ProcessStaleHtmlCacheAction::run(1);
 
-    expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
+    expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
         ->and($staleCachedUrl->isTerminal())->toBeTrue()
         ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: package_cache_blocking');
@@ -638,11 +657,11 @@ it('publishes a fragmented stale refresh without treating the assembled response
         fragment: true,
     ));
 
-    Route::get('/about', fn (): Response => response(
+    staleCacheOriginRoute('/about', fn (): Response => response(
         '<main>fresh shell' . resolve(RenderHookRegistry::class)->renderAll(RenderHookLocation::BodyEnd) . '</main>',
         200,
         ['Content-Type' => 'text/html; charset=utf-8'],
-    ))->middleware(HtmlCacheMiddleware::class);
+    ));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -667,13 +686,14 @@ it('publishes a fragmented stale refresh without treating the assembled response
 
 it('deletes obsolete stale cache files and indexed urls when the domain no longer resolves', function (bool $suppressInlineEdgePurge): void {
     Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
     Queue::fake();
 
     $page = Page::factory()->withTranslations()->create();
     $url = 'https://obsolete.example.test/about';
     $urlHash = CachedModelUrl::hashUrl($url);
-    $cachePath = 'obsolete/about.html';
-    $errorCachePath = 'obsolete/about.404.html';
+    $cachePath = 'https.obsolete.example.test/about.html';
+    $errorCachePath = 'https.obsolete.example.test/about.404.html';
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
     Storage::disk('page_cache')->put($errorCachePath, 'old missing page');
@@ -736,7 +756,7 @@ it('refreshes missing pages into the error cache', function (): void {
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/missing', fn (): mixed => response('fresh missing page', 404, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/missing', fn (): mixed => response('fresh missing page', 404, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -754,7 +774,133 @@ it('refreshes missing pages into the error cache', function (): void {
 
     expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and(Storage::disk('page_cache')->get($errorCachePath))->toBe('fresh missing page')
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED);
+});
+
+it('removes every artefact of the previous status when a refresh changes status', function (int $status, string $fresh, bool $toMissing, bool $historicalRow): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/index';
+    $paths = resolve(HtmlCachePathResolver::class);
+    $currentPath = $paths->pathForUrl('/index', $siteDomain);
+    $currentErrorPath = $paths->pathForUrl('/index', $siteDomain, error: true);
+    $historicalPath = $paths->rootForRequest(Request::create($url), $siteDomain) . '/index.html';
+    // Rows written before the key change store the historical name, not the current key.
+    $cachePath = $historicalRow ? $historicalPath : $currentPath;
+    $errorCachePath = $historicalRow ? substr($historicalPath, 0, -5) . '.404.html' : $currentErrorPath;
+    $fragmentRequest = Request::create($url);
+    $fragmentRequest->headers->set(StatelessPaginationRequest::FRAGMENT_HEADER, 'hero');
+    $fragmentPath = $paths->pathForRequestUrl($fragmentRequest, $siteDomain);
+    $fragmentErrorPath = $paths->pathForRequestUrl($fragmentRequest, $siteDomain, error: true);
+
+    bindHtmlCacheFrontendContext($page);
+    $stale = $toMissing
+        ? array_values(array_unique([$currentPath, $fragmentPath, $historicalPath]))
+        : array_values(array_unique([$currentErrorPath, $fragmentErrorPath, $errorCachePath]));
+    foreach ($stale as $file) {
+        Storage::disk('page_cache')->put($file, 'previous status');
+    }
+    staleCacheOriginRoute('/index', fn (): mixed => response($fresh, $status, ['Content-Type' => 'text/html']));
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/index',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/index'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => $errorCachePath,
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and(Storage::disk('page_cache')->get($toMissing ? $currentErrorPath : $currentPath))->toBe($fresh);
+
+    foreach ($stale as $file) {
+        expect(Storage::disk('page_cache')->exists($file))->toBeFalse();
+    }
+})->with([
+    'page removed (200 to 404)' => [404, 'fresh missing page', true, false],
+    'page restored (404 to 200)' => [200, 'fresh restored page', false, false],
+    'historical row removed (200 to 404)' => [404, 'fresh missing page', true, true],
+    'historical row restored (404 to 200)' => [200, 'fresh restored page', false, true],
+]);
+
+it('never restores a page that a concurrent clear removed during a status change', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/index';
+    $paths = resolve(HtmlCachePathResolver::class);
+    $cachePath = $paths->pathForUrl('/index', $siteDomain);
+    $errorCachePath = $paths->pathForUrl('/index', $siteDomain, error: true);
+
+    bindHtmlCacheFrontendContext($page);
+    Storage::disk('page_cache')->put($cachePath, 'previous status');
+    staleCacheOriginRoute('/index', fn (): mixed => response('fresh missing page', 404, ['Content-Type' => 'text/html']));
+
+    // A clear lands while the refresh is evicting: the freshly published 404 goes first.
+    $fake = Storage::disk('page_cache');
+    $disk = new class($fake->getDriver(), $fake->getAdapter(), $fake->getConfig()) extends FilesystemAdapter
+    {
+        public ?Closure $beforeFirstDelete = null;
+
+        /** @param  string|array<int, string>  $paths */
+        #[Override]
+        public function delete($paths): bool
+        {
+            $before = $this->beforeFirstDelete;
+            $this->beforeFirstDelete = null;
+            if ($before instanceof Closure) {
+                $before();
+            }
+
+            return parent::delete($paths);
+        }
+    };
+    $disk->beforeFirstDelete = static fn (): bool => $fake->delete($errorCachePath);
+    Storage::set('page_cache', $disk);
+    app()->forgetInstance(HtmlCacheStore::class);
+
+    StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/index',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/index'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => $errorCachePath,
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse();
 });
 
 it('preserves the old cache file when stale refresh cache writes are disabled', function (): void {
@@ -775,7 +921,7 @@ it('preserves the old cache file when stale refresh cache writes are disabled', 
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/write-disabled', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/write-disabled', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -816,7 +962,7 @@ it('retries failed stale cache rows after the retry backoff', function (): void 
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -858,7 +1004,7 @@ it('does not claim actively processing stale cache rows', function (): void {
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -898,7 +1044,7 @@ it('keeps a new stale mark pending when a model changes during stale refresh', f
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', function () use ($url): mixed {
+    staleCacheOriginRoute('/about', function () use ($url): mixed {
         MarkCachedUrlStaleAction::run($url, 'changed_during_refresh');
 
         return response('stale in-flight html', 200, ['Content-Type' => 'text/html']);
@@ -942,7 +1088,7 @@ it('prevents a late stale refresh worker from writing after the row is reclaimed
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('late worker html', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('late worker html', 200, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -987,7 +1133,7 @@ it('prevents a late stale refresh worker from deleting cache files after the row
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('missing', 404, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('missing', 404, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -1032,7 +1178,7 @@ it('marks repeatedly failing stale cache rows exhausted after the configured max
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -1072,7 +1218,7 @@ it('resets the retry budget when a failing stale url is marked stale again', fun
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    Route::get('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/about', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -1122,9 +1268,9 @@ it('processes fresh pending stale urls before retrying older failed rows', funct
         );
     }
 
-    Route::get('/old', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
-    Route::get('/new', fn (): mixed => response('fresh pending page', 200, ['Content-Type' => 'text/html']));
-    Route::get('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/old', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/new', fn (): mixed => response('fresh pending page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
 
     $oldFailedStaleCachedUrl = StaleCachedUrl::query()->create([
         'url' => 'https://example.test/old',
@@ -1202,9 +1348,9 @@ it('processes retryable stale urls alongside pending batch capacity', function (
         );
     }
 
-    Route::get('/old', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
-    Route::get('/new-one', fn (): mixed => response('fresh first pending page', 200, ['Content-Type' => 'text/html']));
-    Route::get('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/old', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/new-one', fn (): mixed => response('fresh first pending page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
 
     $oldFailedStaleCachedUrl = StaleCachedUrl::query()->create([
         'url' => 'https://example.test/old',
@@ -1278,7 +1424,7 @@ it('fills stale cache batches with timed out processing rows when pending capaci
             resolve(HtmlCachePathResolver::class)->pathForUrl($path, $siteDomain),
             'old cached page',
         );
-        Route::get($path, fn (): mixed => response('fresh ' . $path, 200, ['Content-Type' => 'text/html']));
+        staleCacheOriginRoute($path, fn (): mixed => response('fresh ' . $path, 200, ['Content-Type' => 'text/html']));
     }
 
     $pending = staleCacheRowForCoverage($siteDomain, '/pending-batch', StaleCachedUrl::STATUS_PENDING);
@@ -1324,8 +1470,8 @@ it('alternates failed and timed out processing rows in single item retry batches
         );
     }
 
-    Route::get('/failed', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
-    Route::get('/timed-out', fn (): mixed => response('fresh timed out page', 200, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/failed', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
+    staleCacheOriginRoute('/timed-out', fn (): mixed => response('fresh timed out page', 200, ['Content-Type' => 'text/html']));
 
     $failedStaleCachedUrl = StaleCachedUrl::query()->create([
         'url' => 'https://example.test/failed',
@@ -1388,7 +1534,7 @@ it('processes stale cache command with the requested limit and optional edge pur
         $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl($path, $siteDomain);
 
         Storage::disk('page_cache')->put($cachePath, 'old cached page');
-        Route::get($path, fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+        staleCacheOriginRoute($path, fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
         StaleCachedUrl::query()->create([
             'url' => $url,
             'url_hash' => CachedModelUrl::hashUrl($url),
@@ -1446,3 +1592,288 @@ function staleCacheRowForCoverage(SiteDomain $siteDomain, string $path, string $
         ...$attributes,
     ]);
 }
+
+it('keeps rejected refresh statuses retryable despite private or no-store directives', function (int $status, string $directive, HtmlCacheEligibilityReason $reason): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    $response = response('origin rejected refresh', $status, ['Content-Type' => 'text/html', 'Cache-Control' => $directive]);
+    $kernel = Mockery::mock(Kernel::class);
+    $kernel->shouldReceive('handle')->twice()->andReturn($response);
+    $kernel->shouldReceive('terminate')->twice();
+    app()->instance(Kernel::class, $kernel);
+    $row = staleCacheRowForCoverage($domain, '/rejected-response', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    assert(is_string($cachePath));
+    Storage::disk('page_cache')->put($cachePath, 'last successful HTML');
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result)->toHaveProperties(['attempted' => 1, 'failed' => 1, 'notApplicable' => 0])
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($row->isTerminal())->toBeFalse()
+        ->and($row->attempts)->toBe(1)
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('last successful HTML')
+        ->and(resolve(PageCache::class)->rejectionReason(Request::create($row->url), $response))->toBe($status === 404 ? $reason : HtmlCacheEligibilityReason::UncacheableResponseStatus)
+        ->and($reason->isDeterministicForStaleRefresh($status))->toBeFalse();
+
+    $this->travel(6)->minutes();
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toHaveProperties(['attempted' => 1, 'failed' => 1, 'notApplicable' => 0])
+        ->and($row->refresh()->attempts)->toBe(2)
+        ->and($row->status)->toBe(StaleCachedUrl::STATUS_FAILED);
+})->with([
+    '302 private' => [302, 'private', HtmlCacheEligibilityReason::ResponsePrivate],
+    '302 no-store' => [302, 'public, no-store', HtmlCacheEligibilityReason::ResponseNoStore],
+    '403 private' => [403, 'private', HtmlCacheEligibilityReason::ResponsePrivate],
+    '403 no-store' => [403, 'public, no-store', HtmlCacheEligibilityReason::ResponseNoStore],
+    '404 private' => [404, 'private', HtmlCacheEligibilityReason::ResponsePrivate],
+    '404 no-store' => [404, 'public, no-store', HtmlCacheEligibilityReason::ResponseNoStore],
+    '429 private' => [429, 'private', HtmlCacheEligibilityReason::ResponsePrivate],
+    '429 no-store' => [429, 'public, no-store', HtmlCacheEligibilityReason::ResponseNoStore],
+    '500 private' => [500, 'private', HtmlCacheEligibilityReason::ResponsePrivate],
+    '500 no-store' => [500, 'public, no-store', HtmlCacheEligibilityReason::ResponseNoStore],
+]);
+
+it('retires successful non-cacheable responses and serves fresh origin output to the next anonymous request', function (array $headers, string $reason): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    /** @var array<string, string> $headers */
+    $kernel = Mockery::mock(Kernel::class);
+    $kernel->shouldReceive('handle')->once()->andReturnUsing(static fn (Request $request): Response => resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        static fn (): Response => response('fresh non-cacheable response', 200, $headers),
+    ));
+    $kernel->shouldReceive('terminate')->once();
+    app()->instance(Kernel::class, $kernel);
+    $row = staleCacheRowForCoverage($domain, '/uncacheable-response', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    $errorCachePath = $row->error_cache_path;
+    assert(is_string($cachePath));
+    assert(is_string($errorCachePath));
+    Storage::disk('page_cache')->put($cachePath, 'last successful HTML');
+    Storage::disk('page_cache')->put($cachePath . PageCache::FRAGMENT_METADATA_EXTENSION, '{}');
+    Storage::disk('page_cache')->put($errorCachePath, 'old cached error HTML');
+    Storage::disk('page_cache')->put($errorCachePath . PageCache::FRAGMENT_METADATA_EXTENSION, '{}');
+    $cachedUrl = CachedModelUrl::query()->create([
+        'url' => $row->url,
+        'url_hash' => $row->url_hash,
+        'path' => $row->path,
+        'site_id' => $domain->site_id,
+        'site_domain_id' => $domain->getKey(),
+        'language_id' => $domain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    ProcessStaleHtmlCacheAction::run(1);
+
+    $request = Request::create($row->url);
+    app()->instance('request', $request);
+    $originCalls = 0;
+    $anonymousResponse = resolve(HtmlCacheMiddleware::class)->handle($request, function () use ($headers, &$originCalls): Response {
+        $originCalls++;
+
+        return response('fresh non-cacheable response', 200, $headers);
+    });
+
+    expect($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($row->last_error)->toContain('Reason: ' . $reason)
+        ->and($anonymousResponse->getContent())->toBe('fresh non-cacheable response')
+        ->and($anonymousResponse->getStatusCode())->toBe(200)
+        ->and($originCalls)->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($cachePath . PageCache::FRAGMENT_METADATA_EXTENSION))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($errorCachePath . PageCache::FRAGMENT_METADATA_EXTENSION))->toBeFalse()
+        ->and(CachedModelUrl::query()->whereKey($cachedUrl->getKey())->exists())->toBeFalse()
+        ->and(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0);
+})->with([
+    'XML document' => [['Content-Type' => 'application/xml'], 'non_html_response'],
+    'private HTML' => [['Content-Type' => 'text/html', 'Cache-Control' => 'private'], 'response_private'],
+    'no-store HTML' => [['Content-Type' => 'text/html', 'Cache-Control' => 'public, no-store'], 'response_no_store'],
+]);
+
+it('uses accepted response statuses for every retirement reason', function (): void {
+    foreach ([
+        HtmlCacheEligibilityReason::ConfiguredBypassRule,
+        HtmlCacheEligibilityReason::PackageCacheBlocking,
+        HtmlCacheEligibilityReason::PackageSensitiveOutput,
+        HtmlCacheEligibilityReason::NonHtmlResponse,
+        HtmlCacheEligibilityReason::ResponsePrivate,
+        HtmlCacheEligibilityReason::ResponseNoStore,
+        HtmlCacheEligibilityReason::RedirectUrl,
+    ] as $reason) {
+        foreach ([199, 200, 204, 299, 301, 308, 302, 303, 307, 404, 500] as $status) {
+            $accepted = $status >= 200 && $status < 300
+                || ($reason === HtmlCacheEligibilityReason::RedirectUrl && in_array($status, [301, 308], true));
+
+            expect($reason->isDeterministicForStaleRefresh($status))->toBe($accepted);
+        }
+    }
+});
+
+it('keeps status precedence and evicts every accepted retirement across refresh paths', function (bool $queued, int $status, string $blocker): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    $row = staleCacheRowForCoverage($domain, '/status-precedence', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    $errorPath = $row->error_cache_path;
+    assert(is_string($cachePath));
+    assert(is_string($errorPath));
+    Storage::disk('page_cache')->put($cachePath, 'last successful HTML');
+    Storage::disk('page_cache')->put($errorPath, 'previous error HTML');
+    if ($blocker === 'configured') {
+        config(['capell-html-cache.bypass.paths' => ['/status-precedence']]);
+    }
+    staleCacheOriginRoute('/status-precedence', function () use ($status, $blocker): Response {
+        if ($blocker === 'package') {
+            RecordExtensionRenderContributionAction::run(
+                packageName: 'vendor/private-output',
+                surface: 'frontend',
+                contributionType: 'frontend-component',
+                contributionClass: 'Vendor\\PrivateOutput',
+                elapsedMilliseconds: 1,
+                frontendRenderBudgetMs: 10,
+                cacheTags: [],
+                cacheable: false,
+                sensitiveOutput: false,
+                variesBy: [],
+            );
+        }
+
+        return response('origin output', $status, ['Content-Type' => 'text/html', 'Cache-Control' => 'public', 'Location' => '/new-location']);
+    });
+    $permanent = in_array($status, [301, 308], true);
+    $refresh = static fn (): mixed => $queued ? RefreshOriginStaleCachedUrlAction::run($row->url) : ProcessStaleHtmlCacheAction::run(1);
+    if ($queued && ! $permanent) {
+        expect($refresh)->toThrow(RuntimeException::class);
+    } else {
+        $refresh();
+    }
+
+    expect($row->refresh()->status)->toBe($permanent ? StaleCachedUrl::STATUS_NOT_APPLICABLE : StaleCachedUrl::STATUS_FAILED)
+        ->and($row->attempts)->toBe(1)
+        ->and($row->isTerminal())->toBe($permanent)
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBe(! $permanent)
+        ->and(Storage::disk('page_cache')->exists($errorPath))->toBe(! $permanent);
+    if ($permanent) {
+        expect($row->last_error)->toContain('Reason: redirect_url');
+    } else {
+        expect($row->last_error)->toContain('response status was ' . $status);
+    }
+    if ($blocker === 'package' && ! $permanent) {
+        expect(HtmlCacheEligibilityReason::PackageCacheBlocking->isDeterministicForStaleRefresh($status))->toBeFalse();
+    }
+})->with(['queued' => true, 'process-stale' => false])->with([
+    'configured bypass 404' => [404, 'configured'],
+    'public 301' => [301, 'none'],
+    'public 308 with package blocker' => [308, 'package'],
+    'public 302' => [302, 'none'],
+    'public 303' => [303, 'none'],
+    'public 307' => [307, 'none'],
+    'package-blocked 500' => [500, 'package'],
+]);
+
+it('evicts all retired package artefacts before the next anonymous request on every generation path', function (string $path, bool $sensitive): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    $row = staleCacheRowForCoverage($domain, '/package-retirement', StaleCachedUrl::STATUS_PENDING);
+    $cachePath = $row->cache_path;
+    $errorPath = $row->error_cache_path;
+    assert(is_string($cachePath));
+    assert(is_string($errorPath));
+    $artefacts = [$cachePath, $errorPath, $cachePath . PageCache::FRAGMENT_METADATA_EXTENSION, $errorPath . PageCache::FRAGMENT_METADATA_EXTENSION];
+    foreach ($artefacts as $artefact) {
+        Storage::disk('page_cache')->put($artefact, 'previous public output');
+    }
+    $index = CachedModelUrl::query()->create([
+        'url' => $row->url, 'url_hash' => $row->url_hash, 'path' => $row->path,
+        'site_id' => $domain->site_id, 'site_domain_id' => $domain->getKey(), 'language_id' => $domain->language_id,
+        'cacheable_type' => $page->getMorphClass(), 'cacheable_id' => $page->getKey(), 'cached_at' => now(), 'last_seen_at' => now(),
+    ]);
+    $originCalls = 0;
+    staleCacheOriginRoute('/package-retirement', function () use (&$originCalls, $sensitive): Response {
+        $originCalls++;
+        RecordExtensionRenderContributionAction::run(
+            packageName: 'vendor/private-output',
+            surface: 'frontend',
+            contributionType: 'frontend-component',
+            contributionClass: 'Vendor\\PrivateOutput',
+            elapsedMilliseconds: 1,
+            frontendRenderBudgetMs: 10,
+            cacheTags: [],
+            cacheable: $sensitive,
+            sensitiveOutput: $sensitive,
+            variesBy: [],
+        );
+
+        return response('fresh private origin output', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'private']);
+    });
+    if ($path === 'static') {
+        $page->pageUrls()->delete();
+        config(['capell-html-cache.static_generation.internal_requests' => true]);
+        $registry = new StaticSiteExtensionRegistry;
+        $registry->register('retirement', static function (Site $site, SiteDomain $siteDomain, Closure $visit) use ($row): void {
+            $visit($row->url);
+        });
+        app()->instance(StaticSiteExtensionRegistry::class, $registry);
+        (new StaticSiteGenerator($domain->site))->process();
+    } elseif ($path === 'queued') {
+        RefreshOriginStaleCachedUrlAction::run($row->url);
+    } else {
+        ProcessStaleHtmlCacheAction::run(1);
+    }
+
+    foreach ($artefacts as $artefact) {
+        expect(Storage::disk('page_cache')->exists($artefact))->toBeFalse();
+    }
+    expect(CachedModelUrl::query()->whereKey($index->getKey())->exists())->toBeFalse();
+    if ($path !== 'static') {
+        expect($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+            ->and($row->last_error)->toContain($sensitive ? 'Reason: package_sensitive_output' : 'Reason: package_cache_blocking');
+    }
+    $request = Request::create($row->url);
+    app()->instance('request', $request);
+    $response = resolve(HtmlCacheMiddleware::class)->handle($request, function () use (&$originCalls): Response {
+        $originCalls++;
+
+        return response('fresh private origin output', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'private']);
+    });
+    expect($response->getContent())->toBe('fresh private origin output')
+        ->and($originCalls)->toBe(2);
+})->with(['queued', 'process-stale', 'static'])->with(['blocking' => false, 'sensitive' => true]);
+
+it('evicts retired filesystem artefacts before tracking migrations are installed', function (): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($domain->site)->withTranslations()->create();
+    bindHtmlCacheFrontendContext($page);
+    $url = 'https://example.test/before-tracking';
+    $paths = resolve(HtmlCachePathResolver::class);
+    $cachePath = $paths->pathForRequestUrl($url, $domain);
+    $errorPath = $paths->pathForRequestUrl($url, $domain, error: true);
+    $artefacts = [$cachePath, $errorPath, $cachePath . PageCache::FRAGMENT_METADATA_EXTENSION, $errorPath . PageCache::FRAGMENT_METADATA_EXTENSION];
+    foreach ($artefacts as $artefact) {
+        Storage::disk('page_cache')->put($artefact, 'previous public output');
+    }
+    Schema::drop((new CachedModelUrl)->getTable());
+    $request = Request::create($url);
+    app()->instance('request', $request);
+
+    expect(retireDeclaredHtmlCacheOriginResponse($request, response('private output', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'private'])))
+        ->toBe(HtmlCacheEligibilityReason::ResponsePrivate);
+    foreach ($artefacts as $artefact) {
+        expect(Storage::disk('page_cache')->exists($artefact))->toBeFalse();
+    }
+    expect(Schema::hasTable((new CachedModelUrl)->getTable()))->toBeFalse();
+});

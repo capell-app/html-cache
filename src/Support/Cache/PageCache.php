@@ -9,6 +9,7 @@ use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Actions\ForgetCachedUrlAction;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -32,10 +33,6 @@ final class PageCache
     public const string ERROR_PAGE = '404-error.html';
 
     public const string FRAGMENT_METADATA_EXTENSION = '.fragments.json';
-
-    private const int MAX_PATH_SEGMENT_LENGTH = 255;
-
-    private const int MAX_RELATIVE_PATH_LENGTH = 2048;
 
     private ?Container $container = null;
 
@@ -283,7 +280,7 @@ final class PageCache
             return HtmlCacheEligibilityReason::NonGetRequest;
         }
 
-        if ($this->safeRequestSegments($request) === null) {
+        if (resolve(HtmlCachePathResolver::class)->relativePathForRequest($request) === null) {
             return HtmlCacheEligibilityReason::UnsafeRequestPath;
         }
 
@@ -291,14 +288,14 @@ final class PageCache
             return HtmlCacheEligibilityReason::SessionUserState;
         }
 
+        if (! in_array($response->getStatusCode(), [200, 404], true)) {
+            return HtmlCacheEligibilityReason::UncacheableResponseStatus;
+        }
+
         $responseReason = resolve(PublicResponseCachePolicy::class)->reasons($response)[0] ?? null;
 
         if ($responseReason instanceof HtmlCacheEligibilityReason) {
             return $responseReason;
-        }
-
-        if (! in_array($response->getStatusCode(), [200, 404], true)) {
-            return HtmlCacheEligibilityReason::UncacheableResponseStatus;
         }
 
         if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
@@ -320,33 +317,17 @@ final class PageCache
 
     public function forget(string $slug): bool
     {
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($slug): bool {
-            $deleted = false;
-            $extensions = ['.html', '.html' . self::FRAGMENT_METADATA_EXTENSION, '.json', '.xml', self::ERROR_EXTENSION, self::ERROR_EXTENSION . self::FRAGMENT_METADATA_EXTENSION];
-
-            foreach ($extensions as $extension) {
-                $path = $this->getCachePath($slug . $extension);
-                HtmlCacheFilesystem::directoryExists(dirname($path));
-
-                if (! $this->files->exists($path)) {
-                    continue;
-                }
-
-                if (! $this->files->delete($path)) {
-                    throw new RuntimeException(sprintf('Unable to delete HTML cache artefact "%s".', $path));
-                }
-
-                $deleted = true;
-            }
-
-            return $deleted;
-        });
+        return ForgetCachedUrlAction::run(
+            Request::create(request()->getSchemeAndHttpHost() . '/' . ltrim($slug, '/')),
+            resolve(HtmlCacheStore::class)->usingPageFilesystem($this->files, $this->getCachePath()),
+        );
     }
 
     public function clear(?string $path = null): bool
     {
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($path): bool {
-            $directory = $this->getCachePath($path);
+        $directory = $this->getCachePath($path === null ? null : resolve(HtmlCachePathResolver::class)->directoryForPath($path));
+
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($directory): bool {
 
             if (! HtmlCacheFilesystem::directoryExists($directory)) {
                 return false;
@@ -382,15 +363,6 @@ final class PageCache
         }
 
         return $metadata;
-    }
-
-    private function aliasFilename(?string $filename): string
-    {
-        if (in_array($filename, [null, '', 'index'], true)) {
-            return 'pc__index__pc';
-        }
-
-        return $filename;
     }
 
     private function readCacheFile(string $path): bool|string
@@ -521,9 +493,6 @@ final class PageCache
         return $deleted;
     }
 
-    /**
-     * @return array<array-key, mixed>|null
-     */
     /** @return array{string, string, string}|null */
     private function getDirectoryAndFileNames(SymfonyRequest $request, SymfonyResponse $response): ?array
     {
@@ -532,16 +501,14 @@ final class PageCache
         /** @var Response $laravelResponse */
         $laravelResponse = $response;
 
-        $segments = $this->safeRequestSegments($laravelRequest);
+        $extension = $this->guessFileExtension($laravelResponse);
+        $file = $this->getFileFromRequest($laravelRequest, '.' . $extension);
 
-        if ($segments === null) {
+        if ($file === null) {
             return null;
         }
 
-        $filename = $this->aliasFilename(array_pop($segments)) . StatelessPaginationRequest::cacheKeySuffix($laravelRequest);
-        $extension = $this->guessFileExtension($laravelResponse);
-
-        return [$this->getCachePath(implode('/', $segments)), $filename, $extension];
+        return [dirname($file), pathinfo($file, PATHINFO_FILENAME), $extension];
     }
 
     private function guessFileExtension(SymfonyResponse $response): string
@@ -588,56 +555,9 @@ final class PageCache
 
     private function getFileFromRequest(Request $request, string $extension = '.html'): ?string
     {
-        $segments = $this->safeRequestSegments($request);
+        $path = resolve(HtmlCachePathResolver::class)->relativePathForRequest($request, $extension);
 
-        if ($segments === null) {
-            return null;
-        }
-
-        $filename = $this->aliasFilename(array_pop($segments)) . StatelessPaginationRequest::cacheKeySuffix($request);
-
-        return $this->getCachePath(implode(DIRECTORY_SEPARATOR, $segments)) . DIRECTORY_SEPARATOR . $filename . $extension;
-    }
-
-    /** @return array<int, string>|null */
-    private function safeRequestSegments(Request $request): ?array
-    {
-        $segments = $request->segments();
-        $relativePathLength = 0;
-
-        foreach ($segments as $segment) {
-            $segment = (string) $segment;
-            $decodedSegment = $this->fullyDecodedPathSegment($segment);
-            $relativePathLength += strlen($segment) + 1;
-
-            if ($decodedSegment === '.'
-                || $decodedSegment === '..'
-                || strlen($segment) > self::MAX_PATH_SEGMENT_LENGTH
-                || $relativePathLength > self::MAX_RELATIVE_PATH_LENGTH
-                || str_contains($decodedSegment, '..')
-                || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $decodedSegment) === 1) {
-                return null;
-            }
-        }
-
-        return $segments;
-    }
-
-    private function fullyDecodedPathSegment(string $segment): string
-    {
-        $decodedSegment = $segment;
-
-        for ($attempt = 0; $attempt < 3; $attempt++) {
-            $nextSegment = rawurldecode($decodedSegment);
-
-            if ($nextSegment === $decodedSegment) {
-                return $decodedSegment;
-            }
-
-            $decodedSegment = $nextSegment;
-        }
-
-        return $decodedSegment;
+        return $path === null ? null : $this->getCachePath($path);
     }
 
     private function isInertiaRequest(Request $request): bool

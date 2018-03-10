@@ -624,7 +624,7 @@ it('bypasses cache reads and writes for configured path rules', function (): voi
     capell_expect($response->getContent())->toBe('fresh profile')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->get('https.example.test/account/profile.html'))->toBe('cached profile');
+        ->and(Storage::disk('page_cache')->exists('https.example.test/account/profile.html'))->toBeFalse();
 });
 
 it('bypasses cache reads and writes for configured cookie rules', function (): void {
@@ -652,6 +652,7 @@ it('bypasses cache reads and writes for configured cookie rules', function (): v
     capell_expect($response->getContent())->toBe('fresh pricing')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->exists('https.example.test/pricing.html'))->toBeTrue()
         ->and(Storage::disk('page_cache')->get('https.example.test/pricing.html'))->toBe('cached pricing');
 });
 
@@ -1136,7 +1137,7 @@ it('serves stale cached html until the queued origin refresh runs', function ():
 
     bindHtmlCacheFrontendContext($page);
     Storage::disk('page_cache')->put($cachePath, 'old cached html');
-    Route::get('/stale', fn (): Response => response('fresh cached html', 200, ['Content-Type' => 'text/html']));
+    Route::get('/stale', fn (): Response => response('fresh cached html', 200, ['Content-Type' => 'text/html']))->middleware(HtmlCacheMiddleware::class);
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,

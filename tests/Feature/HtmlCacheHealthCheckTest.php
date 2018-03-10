@@ -21,7 +21,7 @@ it('passes all diagnostics when the cache is fully wired', function (): void {
 
     $results = HtmlCacheHealthCheck::runDiagnostics();
 
-    expect($results)->toHaveCount(6)
+    expect($results)->toHaveCount(7)
         ->and($results->every(static fn (DoctorCheckResultData $result): bool => $result->passed))->toBeTrue()
         ->and(HtmlCacheHealthCheck::passed())->toBeTrue();
 });

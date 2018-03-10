@@ -17,11 +17,14 @@ use Capell\Frontend\Support\Render\RenderHookFragmentRegistry;
 use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Actions\BuildHtmlCacheOriginDecisionAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction;
 use Capell\HtmlCache\Actions\ResolveEdgeCacheTagsAction;
+use Capell\HtmlCache\Actions\RetireCachedUrlAction;
 use Capell\HtmlCache\Actions\ScheduleOriginStaleCachedUrlRefreshAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
+use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Enums\HtmlCacheRenderLockStatus;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
@@ -47,11 +50,15 @@ final class HtmlCacheMiddleware
 
     public const string CACHE_WRITE_SUCCEEDED_ATTRIBUTE = 'capell.html_cache.cache_write_succeeded';
 
+    public const string ORIGIN_DECISION_ATTRIBUTE = 'capell.html_cache.origin_decision';
+
     public const string STALE_CACHE_ID_ATTRIBUTE = 'capell.html_cache.stale_cache_id';
 
     public const string STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
 
     public const string SYNTHETIC_RENDER_ATTRIBUTE = 'capell.html_cache.synthetic_render';
+
+    public const string SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE = 'capell.html_cache.suppress_inline_edge_purge';
 
     public const string ELIGIBILITY_REPORT_ATTRIBUTE = 'capell.html_cache.eligibility_report';
 
@@ -67,22 +74,30 @@ final class HtmlCacheMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
+        $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, new HtmlCacheOriginDecisionData);
+        $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, false);
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
 
         if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
-            return $this->privateNoStore($next($request), $request);
+            $response = $next($request);
+            $this->retireOriginResponse($request, $response);
+
+            return $this->privateNoStore($response, $request);
         }
 
         if ($this->shouldBypassForAccessGate($request)) {
+            // Gate/browser state is visitor-specific, not an anonymous URL policy change.
             return $this->privateNoStore($next($request), $request);
         }
 
         if (resolve(CacheBypassResolver::class)->shouldBypass()) {
+            // The retirement guard also excludes this request-specific bypass.
             return $next($request);
         }
 
         if (config('capell-html-cache.enabled', true) !== true) {
             $response = $next($request);
+            // Disablement preserves stored artefacts; explicit clears still derive their keys.
 
             if ($request->attributes->get(self::SYNTHETIC_RENDER_ATTRIBUTE) === true) {
                 return $response;
@@ -95,6 +110,8 @@ final class HtmlCacheMiddleware
 
         if (! $forceCacheReadBypass && $this->shouldBypassCacheRead($request)) {
             $response = $next($request);
+            // Keep visitor and unsafe-key exclusions in the shared retirement guard.
+            $this->retireOriginResponse($request, $response);
             $request->attributes->set(
                 self::ELIGIBILITY_REPORT_ATTRIBUTE,
                 BuildHtmlCacheEligibilityReportAction::run($request, $response),
@@ -236,12 +253,17 @@ final class HtmlCacheMiddleware
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $response);
 
         if ($this->containsUnsafeSharedHtml($request, $response)) {
+            // Inspect the origin policy before privateNoStore adds middleware directives.
+            $this->retireOriginResponse($request, $response);
             $response->headers->set('X-Frontend-Cache', 'BYPASS');
 
             return $this->privateNoStore($response, $request);
         }
 
         $cached = $this->cacheResponse($pageCache, $request, $response);
+        if ($cached) {
+            $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, new HtmlCacheOriginDecisionData(cacheWriteSucceeded: true));
+        }
         $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, $cached);
         $response->headers->set('X-Frontend-Cache', 'MISS');
 
@@ -297,14 +319,25 @@ final class HtmlCacheMiddleware
 
             if (! $this->hasMatchingSafeInspection($request, $content)
                 && $inspector->containsAuthoringSurface($content)) {
-                return true;
+                return $this->rejectSharedHtml($request, HtmlCacheEligibilityReason::UnsafePublicOutput);
             }
 
-            return ! method_exists($inspector, 'containsBakedCsrfToken')
-                || $inspector->containsBakedCsrfToken($content);
+            if (! method_exists($inspector, 'containsBakedCsrfToken')) {
+                return $this->rejectSharedHtml($request, HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable);
+            }
+
+            return $inspector->containsBakedCsrfToken($content)
+                && $this->rejectSharedHtml($request, HtmlCacheEligibilityReason::BakedSessionToken);
         } catch (Throwable) {
-            return true;
+            return $this->rejectSharedHtml($request, HtmlCacheEligibilityReason::UnsafePublicOutput);
         }
+    }
+
+    private function rejectSharedHtml(Request $request, HtmlCacheEligibilityReason $reason): bool
+    {
+        $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, new HtmlCacheOriginDecisionData(rejectionReason: $reason));
+
+        return true;
     }
 
     private function hasMatchingSafeInspection(Request $request, string $content): bool
@@ -313,8 +346,16 @@ final class HtmlCacheMiddleware
             && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
+    private function retireOriginResponse(Request $request, Response $response): void
+    {
+        $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, BuildHtmlCacheOriginDecisionAction::run($request, $response));
+        RetireCachedUrlAction::run($request, $response);
+    }
+
     private function privateNoStore(Response $response, Request $request): Response
     {
+        // Consumers must retain the origin decision: these safety headers are
+        // not evidence that the anonymous URL has become permanently private.
         $request->attributes->set(self::PRIVATE_RESPONSE_ATTRIBUTE, true);
         $response->headers->set('Cache-Control', 'private, no-store');
         $response->headers->set('Pragma', 'no-cache');
@@ -426,7 +467,18 @@ final class HtmlCacheMiddleware
 
     private function cacheResponse(PageCache $pageCache, Request $request, Response $response): bool
     {
+        // Failed fragment rendering is transient and must preserve the previous shell.
         if ($request->attributes->get(self::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true) {
+            return false;
+        }
+
+        // Deterministic origin policy changes must retire before any write-only rejection.
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+        $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
+
+        if (! $report->eligible) {
+            $this->retireOriginResponse($request, $response);
+
             return false;
         }
 
@@ -440,13 +492,6 @@ final class HtmlCacheMiddleware
             if (! $this->hasFragmentCacheData($request)) {
                 return false;
             }
-        }
-
-        $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
-        $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
-
-        if (! $report->eligible) {
-            return false;
         }
 
         try {

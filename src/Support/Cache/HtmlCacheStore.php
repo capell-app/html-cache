@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\Cache;
 
 use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Filesystem\Filesystem as NativeFilesystem;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Facades\File;
 use League\Flysystem\PathTraversalDetected;
@@ -16,9 +17,24 @@ final class HtmlCacheStore
 {
     private readonly Filesystem $disk;
 
+    private ?NativeFilesystem $pageFilesystem = null;
+
+    private ?string $pageDirectory = null;
+
     public function __construct(FilesystemManager $storage)
     {
         $this->disk = $storage->disk('page_cache');
+    }
+
+    public function usingPageFilesystem(NativeFilesystem $files, string $directory): self
+    {
+        // PageCache supports a caller-selected directory and filesystem. Keep that
+        // ownership when routing CLI invalidation through the common deletion path.
+        $store = clone $this;
+        $store->pageFilesystem = $files;
+        $store->pageDirectory = rtrim($directory, '/');
+
+        return $store;
     }
 
     public function exists(string $file): bool
@@ -47,34 +63,113 @@ final class HtmlCacheStore
         );
     }
 
-    public function deletePage(string $file): bool
+    public function deletePage(string $file, ?string $domainDirectory = null): bool
     {
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($file): bool {
-            $safeFile = str_replace(['../', '..\\'], '', $file);
-            $files = [$safeFile];
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(fn (): bool => $this->deletePageFiles($file, $domainDirectory));
+    }
 
-            if (str_ends_with($safeFile, '.html')) {
-                $files[] = $safeFile . PageCache::FRAGMENT_METADATA_EXTENSION;
-            }
-
-            $deleted = false;
-
-            foreach ($files as $artifact) {
-                $this->directoryExists(dirname($artifact));
-
-                if (! $this->disk->exists($artifact)) {
+    /**
+     * @param  list<string>  $files
+     * @param  list<string>  $variantBases
+     * @param  list<string>  $unattributableLegacyBases
+     * @param  list<string>  $recordedFiles
+     * @param  list<string>  $preserve  pages just published under this lock scope, kept with their sidecars
+     */
+    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = []): bool
+    {
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($files, $variantBases, $domainDirectory, $unattributableLegacyBases, $recordedFiles, $preserve): bool {
+            // Independently keyed fragments retain exact query ownership.
+            foreach (array_unique($variantBases) as $base) {
+                if (! $this->isSafePagePath($base, $domainDirectory)) {
                     continue;
                 }
-
-                if (! $this->disk->delete($artifact)) {
-                    throw new RuntimeException(sprintf('Unable to delete HTML cache artefact "%s".', $artifact));
+                $stem = preg_replace('/\.html$/', '', $base);
+                if (! is_string($stem)) {
+                    continue;
                 }
-
-                $deleted = true;
+                $pattern = '/^' . preg_quote($stem, '/') . '(?:~f[a-f0-9]{16})?(?:\.404)?\.(?:html|json|xml)(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
+                foreach ($this->pageFilesInDomain(dirname($base), $domainDirectory) as $file) {
+                    if (preg_match($pattern, $file) === 1) {
+                        $files[] = $file;
+                    }
+                }
+            }
+            $recordedStems = [];
+            foreach ($recordedFiles as $file) {
+                if ($this->isSafePagePath($file, $domainDirectory)) {
+                    $recordedStems[preg_replace('/(?:\.404)?\.(?:html|json|xml)$/', '', $file) ?? $file] = true;
+                }
+            }
+            foreach (array_unique($unattributableLegacyBases) as $base) {
+                if (! $this->isSafePagePath($base, $domainDirectory)) {
+                    continue;
+                }
+                $stem = preg_replace('/\.html$/', '', $base);
+                if (! is_string($stem)) {
+                    continue;
+                }
+                // Conservative eviction exception: legacy fragments and untracked
+                // full query responses share opaque ~<16-hex> names. Evict only
+                // unattributable artefacts on this page path in this domain;
+                // regeneration is safer than retaining stale bytes. The required
+                // hash excludes the canonical no-query entry from this sweep.
+                $pattern = '/^(' . preg_quote($stem, '/') . '~[a-f0-9]{16})(?:\.404)?\.html(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
+                foreach ($this->pageFilesInDomain(dirname($base), $domainDirectory) as $file) {
+                    if (preg_match($pattern, $file, $matches) === 1 && ! isset($recordedStems[$matches[1]])) {
+                        $files[] = $file;
+                    }
+                }
+            }
+            $kept = [];
+            foreach ($preserve as $file) {
+                $kept[$file] = true;
+                $kept[$file . PageCache::FRAGMENT_METADATA_EXTENSION] = true;
+            }
+            $deleted = false;
+            foreach (array_unique($files) as $file) {
+                if (isset($kept[$file])) {
+                    continue;
+                }
+                $deleted = $this->deletePageFiles($file, $domainDirectory) || $deleted;
             }
 
             return $deleted;
         });
+    }
+
+    public function isSafePagePath(string $file, string $domainDirectory): bool
+    {
+        if (! str_starts_with($file, $domainDirectory . '/') || str_contains($file, '\\')) {
+            return false;
+        }
+
+        $absolutePath = $this->pageDirectory ?? rtrim($this->root(), '/');
+        if (is_link($absolutePath)) {
+            return false;
+        }
+        $segments = explode('/', $file);
+        if ($this->pageDirectory !== null) {
+            array_shift($segments);
+        }
+        foreach ($segments as $segment) {
+            $decoded = $segment;
+            for ($attempt = 0; $attempt < 3; $attempt++) {
+                $decoded = rawurldecode($decoded);
+            }
+            // Encoded separators in historical filenames are literal bytes on disk;
+            // Flysystem normalises actual separators but does not URL-decode paths.
+            if ($segment === '' || $decoded === '.' || str_contains($decoded, '..')
+                || preg_match('/[\x00-\x1F\x7F]/', $decoded) === 1) {
+                return false;
+            }
+            $absolutePath .= '/' . $segment;
+            // Flysystem's lexical normalisation does not protect against symlinked ancestors.
+            if (is_link($absolutePath)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function put(string $file, string $contents): void
@@ -164,6 +259,75 @@ final class HtmlCacheStore
     public function deleteAll(): HtmlCacheClearResult
     {
         return resolve(HtmlCachePublicationGuard::class)->invalidate($this->deleteAllFiles(...));
+    }
+
+    private function deletePageFiles(string $file, ?string $domainDirectory): bool
+    {
+        if ($domainDirectory !== null && ! $this->isSafePagePath($file, $domainDirectory)) {
+            return false;
+        }
+        $safeFile = str_replace(['../', '..\\'], '', $file);
+        $files = [$safeFile];
+
+        if (str_ends_with($safeFile, '.html')) {
+            $files[] = $safeFile . PageCache::FRAGMENT_METADATA_EXTENSION;
+        }
+
+        $deleted = false;
+
+        foreach ($files as $artifact) {
+            if ($domainDirectory !== null && ! $this->isSafePagePath($artifact, $domainDirectory)) {
+                continue;
+            }
+            $nativePath = $domainDirectory === null ? null : $this->pagePath($artifact, $domainDirectory);
+            HtmlCacheFilesystem::directoryExists(dirname($nativePath ?? $this->disk->path($artifact)));
+
+            if ($nativePath !== null && $this->pageFilesystem instanceof NativeFilesystem) {
+                if (! $this->pageFilesystem->exists($nativePath)) {
+                    continue;
+                }
+                $removed = $this->pageFilesystem->delete($nativePath);
+            } elseif ($this->disk->exists($artifact)) {
+                $removed = $this->disk->delete($artifact);
+            } else {
+                continue;
+            }
+
+            if (! $removed) {
+                throw new RuntimeException(sprintf('Unable to delete HTML cache artefact "%s".', $artifact));
+            }
+
+            $deleted = true;
+        }
+
+        return $deleted;
+    }
+
+    /** @return list<string> */
+    private function pageFilesInDomain(string $directory, string $domainDirectory): array
+    {
+        $absoluteDirectory = $this->pagePath($directory, $domainDirectory) ?? $this->disk->path($directory);
+        if (! $this->isSafePagePath($directory . '/scope.html', $domainDirectory)
+            || ! HtmlCacheFilesystem::directoryExists($absoluteDirectory)) {
+            return [];
+        }
+
+        // A shallow native listing does not traverse links; Flysystem rejects the
+        // whole listing when even an unrelated symlink exists in the directory.
+        $files = [];
+        foreach (File::files($absoluteDirectory, hidden: true) as $file) {
+            $relativePath = $directory . '/' . $file->getFilename();
+            if ($this->isSafePagePath($relativePath, $domainDirectory)) {
+                $files[] = $relativePath;
+            }
+        }
+
+        return $files;
+    }
+
+    private function pagePath(string $file, string $domainDirectory): ?string
+    {
+        return $this->pageDirectory === null ? null : $this->pageDirectory . substr($file, strlen($domainDirectory));
     }
 
     private function deleteAllFiles(): HtmlCacheClearResult

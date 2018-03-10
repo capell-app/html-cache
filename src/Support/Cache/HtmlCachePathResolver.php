@@ -10,32 +10,80 @@ use InvalidArgumentException;
 
 final class HtmlCachePathResolver
 {
-    public function pathForRequestUrl(string $url, SiteDomain $siteDomain, bool $error = false): string
+    private const int MAX_PATH_SEGMENT_LENGTH = 255;
+
+    private const int MAX_RELATIVE_PATH_LENGTH = 2048;
+
+    /**
+     * The stored key is shared by publication, reads and every URL invalidation.
+     * Laravel decodes path segments and aliases index; raw URL paths are not keys.
+     */
+    public function relativePathForRequest(Request $request, string $extension = '.html'): ?string
     {
-        $request = Request::create($url);
-        $path = $this->normalizePathFromUrl($url);
-        $domainPath = rtrim($siteDomain->path ?? '', '/');
-
-        if ($domainPath !== '') {
-            if ($path === $domainPath) {
-                $path = '/';
-            } elseif (str_starts_with($path, $domainPath . '/')) {
-                $path = substr($path, strlen($domainPath));
-            }
+        if ($request->query->count() > 0 && ! StatelessPaginationRequest::hasStoredVariantKey($request)) {
+            return null;
         }
 
-        $suffix = StatelessPaginationRequest::cacheKeySuffix($request);
+        $segments = $this->safeRequestSegments($request);
 
-        if ($suffix === '') {
-            return $this->pathForUrl($path, $siteDomain, $error);
+        if ($segments === null) {
+            return null;
         }
 
-        $lastSlash = strrpos($path, '/');
-        $directory = $lastSlash === false ? '' : substr($path, 0, $lastSlash + 1);
-        $filename = $lastSlash === false ? $path : substr($path, $lastSlash + 1);
-        $variantPath = $directory . ($filename === '' ? 'pc__index__pc' : $filename) . $suffix;
+        $filename = array_pop($segments);
+        $filename = in_array($filename, [null, '', 'index'], true) ? 'pc__index__pc' : $filename;
 
-        return $this->pathForUrl($variantPath, $siteDomain, $error);
+        return implode('/', [...$segments, $filename . StatelessPaginationRequest::cacheKeySuffix($request) . $extension]);
+    }
+
+    public function pathForRequestUrl(string|Request $url, ?SiteDomain $siteDomain = null, bool $error = false): string
+    {
+        $request = $url instanceof Request ? $url : Request::create($url);
+
+        // An unsupported query has no stored key; a missing suffix must never alias canonical files.
+        if ($request->query->count() > 0 && ! StatelessPaginationRequest::hasStoredVariantKey($request)) {
+            throw new InvalidArgumentException('Unsupported query parameters have no HTML cache path.');
+        }
+
+        $path = $this->relativePathForRequest($request, $error ? PageCache::ERROR_EXTENSION : '.html');
+
+        if ($path === null) {
+            throw new InvalidArgumentException('Unsafe URL for cache path.');
+        }
+
+        return $this->rootForRequest($request, $siteDomain) . '/' . $path;
+    }
+
+    public function hasSafeKey(string|Request $url): bool
+    {
+        return $this->relativePathForRequest($url instanceof Request ? $url : Request::create($url)) !== null;
+    }
+
+    public function rootForRequest(Request $request, ?SiteDomain $siteDomain = null): string
+    {
+        $scheme = $siteDomain instanceof SiteDomain ? $siteDomain->scheme : $request->getScheme();
+        $domain = $siteDomain instanceof SiteDomain ? $siteDomain->domain : $request->getHost();
+        $this->assertSafeSegment('scheme', $scheme);
+        $this->assertSafeSegment('domain', $domain);
+
+        return sprintf('%s.%s', $scheme, $domain);
+    }
+
+    public function directoryForPath(string $path): string
+    {
+        $request = Request::create('/' . ltrim($path, '/'));
+        $segments = $this->safeRequestSegments($request);
+
+        if ($request->query->count() > 0 || $segments === null) {
+            throw new InvalidArgumentException('Unsafe directory for cache path.');
+        }
+
+        return implode('/', $segments);
+    }
+
+    public function directoryForSiteDomain(SiteDomain $siteDomain): string
+    {
+        return rtrim($this->rootForRequest(Request::create('/'), $siteDomain) . '/' . $this->directoryForPath($siteDomain->path ?? ''), '/');
     }
 
     public function pathForUrl(string $url, SiteDomain $siteDomain, bool $error = false): string
@@ -45,27 +93,27 @@ final class HtmlCachePathResolver
         $this->assertSafePath('site domain path', $siteDomain->path ?? '/');
         $this->assertSafePath('URL', $url);
 
-        $path = sprintf('%s.%s', $siteDomain->scheme, $siteDomain->domain);
+        $absoluteUrl = sprintf('%s://%s%s/%s', $siteDomain->scheme, $siteDomain->domain, rtrim($siteDomain->path ?? '', '/'), ltrim($url, '/'));
 
-        if ($siteDomain->path !== null && $siteDomain->path !== '') {
-            $path .= $siteDomain->path;
+        return $this->pathForRequestUrl($absoluteUrl, $siteDomain, $error);
+    }
+
+    /** @return list<string> */
+    public function historicalPathsForStoredPath(string $path, Request $request, ?SiteDomain $siteDomain = null): array
+    {
+        // Index paths predate decoded segments and the current index alias.
+        $this->assertSafePath('stored URL', $path);
+        $root = $this->rootForRequest($request, $siteDomain);
+        $domainPath = rtrim($siteDomain->path ?? '', '/');
+        $base = $root . $domainPath;
+        if ($path !== '/') {
+            $base .= '/' . ltrim($path, '/');
+        } elseif ($domainPath === '') {
+            $base .= '/pc__index__pc';
         }
+        $base .= StatelessPaginationRequest::cacheKeySuffix($request);
 
-        if ($url === '/') {
-            if ($siteDomain->path !== null && $siteDomain->path !== '') {
-                return $path . ($error ? '.404' : '') . '.html';
-            }
-
-            $cacheName = 'pc__index__pc';
-        } else {
-            $cacheName = ltrim($url, '/');
-        }
-
-        if ($error) {
-            $cacheName .= '.404';
-        }
-
-        return $path . '/' . $cacheName . '.html';
+        return [$base . '.html', $base . PageCache::ERROR_EXTENSION];
     }
 
     public function normalizePathFromUrl(string $url): string
@@ -73,6 +121,33 @@ final class HtmlCachePathResolver
         $path = parse_url($url, PHP_URL_PATH);
 
         return is_string($path) && $path !== '' ? $path : '/';
+    }
+
+    /** @return list<string>|null */
+    private function safeRequestSegments(Request $request): ?array
+    {
+        $segments = $request->segments();
+        $safeSegments = [];
+        $relativePathLength = 0;
+
+        foreach ($segments as $segment) {
+            if (! is_string($segment)) {
+                return null;
+            }
+            $decodedSegment = $this->fullyDecodedSegment($segment);
+            $relativePathLength += strlen($segment) + 1;
+
+            if (strlen($segment) > self::MAX_PATH_SEGMENT_LENGTH
+                || $relativePathLength > self::MAX_RELATIVE_PATH_LENGTH
+                || str_contains($decodedSegment, '..')
+                || $decodedSegment === '.'
+                || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $decodedSegment) === 1) {
+                return null;
+            }
+            $safeSegments[] = $segment;
+        }
+
+        return $safeSegments;
     }
 
     private function assertSafeSegment(string $label, ?string $value): void

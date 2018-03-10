@@ -125,7 +125,8 @@ final class MarkCachedUrlStaleAction
 
     private function shouldSkipEnqueue(string $url): bool
     {
-        return resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($url);
+        return ! resolve(HtmlCachePathResolver::class)->hasSafeKey($url)
+            || resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($url);
     }
 
     private function markUrl(string $url, string $reason): bool

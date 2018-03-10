@@ -42,7 +42,8 @@ final class MarkCachedUrlsForSiteStaleAction
             ->orderBy('cached_model_urls.id')
             ->lazyById(column: 'cached_model_urls.id', alias: 'id')
             ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, $reason, $pathResolver): void {
-                if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
+                if (! $pathResolver->hasSafeKey($cachedModelUrl->url)
+                    || resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
                     return;
                 }
 

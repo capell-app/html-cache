@@ -125,7 +125,7 @@ it('retains URL tracking when any page artefact cannot be deleted', function (bo
     PurgeEdgeCacheAction::assertNotPushed();
 })->with([[false, false], [false, true], [true, false]]);
 
-it('retains orphaned URL tracking until its historical artefacts can be resolved', function (bool $resolves, bool $selectedRow): void {
+it('clears orphaned tracking and purges the edge without guessing historical artefacts', function (bool $resolves, bool $selectedRow): void {
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $row = failureReportingCachedUrl($domain);
     $path = resolve(HtmlCachePathResolver::class)->pathForRequestUrl($row->url, $domain);
@@ -136,14 +136,15 @@ it('retains orphaned URL tracking until its historical artefacts can be resolved
         $domain->updateQuietly(['domain' => 'moved.test']);
     }
 
-    expect(fn (): bool => ClearCachedUrlAction::run($selectedRow ? $row : $row->url))
-        ->toThrow(RuntimeException::class, 'site domain');
-    expect($row->fresh())->not->toBeNull()
+    expect(ClearCachedUrlAction::run($selectedRow ? $row : $row->url))->toBeFalse();
+    expect($row->fresh())->toBeNull()
         ->and(Storage::disk('page_cache')->get($path))->toBe('old public HTML');
-    PurgeEdgeCacheAction::assertNotPushed();
+    PurgeEdgeCacheAction::assertPushed();
 })->with([true, false])->with([true, false]);
 
 it('retains orphaned URL tracking when stale processing lacks a historical cache path', function (bool $hasCachePath, bool $hasErrorPath): void {
+    config()->set('capell-html-cache.enabled', true);
+    config()->set('capell-html-cache.write_enabled', true);
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $row = failureReportingCachedUrl($domain);
     $resolver = resolve(HtmlCachePathResolver::class);

@@ -39,9 +39,27 @@ enum HtmlCacheEligibilityReason: string
     case RedirectUrl = 'redirect_url';
     case UnpublishedPage = 'unpublished_page';
 
-    public function isDeterministicForStaleRefresh(): bool
+    public static function acceptsRefreshStatus(int $responseStatus): bool
     {
+        return ($responseStatus >= 200 && $responseStatus < 300)
+            || in_array($responseStatus, [301, 308], true);
+    }
+
+    public function isDeterministicForStaleRefresh(int $responseStatus): bool
+    {
+        // A failure or temporary redirect says nothing about the URL's lasting cache policy.
+        if (! self::acceptsRefreshStatus($responseStatus)) {
+            return false;
+        }
+
+        if ($responseStatus >= 300) {
+            return $this === self::RedirectUrl;
+        }
+
         return match ($this) {
+            self::NonHtmlResponse,
+            self::ResponsePrivate,
+            self::ResponseNoStore,
             self::ConfiguredBypassRule,
             self::PackageCacheBlocking,
             self::PackageSensitiveOutput,

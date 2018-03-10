@@ -543,7 +543,7 @@ it('clears stale cached url rows when the url no longer resolves to a site domai
         ->create();
     $url = 'https://old-domain.test/about';
 
-    CachedModelUrl::query()->create([
+    $cachedUrl = CachedModelUrl::query()->create([
         'url' => $url,
         'url_hash' => CachedModelUrl::hashUrl($url),
         'path' => '/about',
@@ -557,6 +557,9 @@ it('clears stale cached url rows when the url no longer resolves to a site domai
     ]);
 
     expect(ClearCachedUrlAction::run($url))->toBeFalse()
+        ->and($cachedUrl->fresh())->not->toBeNull();
+
+    expect(ClearCachedUrlAction::run($cachedUrl))->toBeTrue()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
 });
 
@@ -576,7 +579,7 @@ it('clears historical cached files from stored rows when the url no longer resol
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'stale cached page');
-    CachedModelUrl::query()->create([
+    $cachedUrl = CachedModelUrl::query()->create([
         'url' => $url,
         'url_hash' => CachedModelUrl::hashUrl($url),
         'path' => '/about',
@@ -590,6 +593,9 @@ it('clears historical cached files from stored rows when the url no longer resol
     ]);
 
     expect(ClearCachedUrlAction::run($url))->toBeFalse()
+        ->and($cachedUrl->fresh())->not->toBeNull();
+
+    expect(ClearCachedUrlAction::run($cachedUrl))->toBeTrue()
         ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
 });

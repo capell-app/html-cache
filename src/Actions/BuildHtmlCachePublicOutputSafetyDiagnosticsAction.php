@@ -129,7 +129,7 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
                 continue;
             }
 
-            if (! $cachedModelUrl->siteDomain instanceof SiteDomain) {
+            if (! $cachedModelUrl->siteDomain instanceof SiteDomain || ! $pathResolver->hasSafeKey($cachedModelUrl->url)) {
                 continue;
             }
 
@@ -298,7 +298,7 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
             return $files;
         }
 
-        $siteRootDirectory = $this->siteDomainCacheRootDirectory($siteDomain);
+        $siteRootDirectory = $pathResolver->directoryForSiteDomain($siteDomain);
 
         $domainFiles = $store->allFiles($siteRootDirectory);
 
@@ -306,17 +306,6 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
             ...$files,
             ...array_slice($domainFiles, 0, $limit - count($files)),
         ];
-    }
-
-    private function siteDomainCacheRootDirectory(SiteDomain $siteDomain): string
-    {
-        $path = sprintf('%s.%s', $siteDomain->scheme, $siteDomain->domain);
-
-        if (! in_array($siteDomain->path, [null, '', '/'], true)) {
-            $path .= $siteDomain->path;
-        }
-
-        return rtrim($path, '/');
     }
 
     /**

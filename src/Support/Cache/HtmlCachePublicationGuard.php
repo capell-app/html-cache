@@ -22,6 +22,9 @@ final class HtmlCachePublicationGuard
 
     public const string REJECTED_ATTRIBUTE = 'capell.html_cache.publication_rejected';
 
+    /** @var array<string, true> */
+    private static array $heldLocks = [];
+
     public function capture(Request $request): ?string
     {
         if ($request->attributes->has(self::REQUEST_TOKEN_ATTRIBUTE)) {
@@ -141,14 +144,31 @@ final class HtmlCachePublicationGuard
             throw new RuntimeException('Unable to open the HTML cache publication lock.');
         }
 
+        $acquired = false;
+        $identity = null;
         try {
+            $metadata = fstat($handle);
+            if ($metadata === false) {
+                throw new RuntimeException('Unable to identify the HTML cache publication lock.');
+            }
+            $identity = $metadata['dev'] . ':' . $metadata['ino'];
+            // A second handle to our own locked inode blocks forever. Refuse
+            // nested publication/invalidation, including across guard instances.
+            if (isset(self::$heldLocks[$identity])) {
+                throw new RuntimeException('Cannot reacquire the HTML cache publication lock within the same operation.');
+            }
             if (! flock($handle, LOCK_EX)) {
                 throw new RuntimeException('Unable to acquire the HTML cache publication lock.');
             }
+            $acquired = true;
+            self::$heldLocks[$identity] = true;
 
             return $operation($handle);
         } finally {
-            flock($handle, LOCK_UN);
+            if ($acquired && $identity !== null) {
+                unset(self::$heldLocks[$identity]);
+                flock($handle, LOCK_UN);
+            }
             fclose($handle);
         }
     }

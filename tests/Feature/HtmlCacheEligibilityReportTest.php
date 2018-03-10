@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\AssertableJsonString;
 use Illuminate\Testing\Fluent\AssertableJson;
+use Livewire\Livewire;
 use Symfony\Component\HttpFoundation\Cookie;
 
 uses(HtmlCacheTestCase::class);
@@ -372,6 +373,10 @@ it('diagnoses the enabled URL for the requested site and language rather than an
         ]);
     });
     Route::get($path, fn (): Response => response('<main>Canonical public page</main>', 200, ['Content-Type' => 'text/html']));
+
+    // Factory-created editor schemas mount components outside the public request.
+    // Close that setup cycle before Livewire's middleware handles the synthetic origin.
+    Livewire::flushState();
 
     Artisan::call('capell:html-cache:diagnose', [
         'url' => 'https://example.test' . $path,

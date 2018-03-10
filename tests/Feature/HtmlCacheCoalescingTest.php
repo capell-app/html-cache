@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
+use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
@@ -252,10 +253,14 @@ it('expires the uncacheable marker at the configured TTL without bypassing other
     $request = Request::create($url);
     app()->instance('request', $request);
     $response = resolve(HtmlCacheMiddleware::class)->handle($request, static fn (): Response => response('Public again', 200, ['Content-Type' => 'text/html']));
-    $hit = resolve(HtmlCacheMiddleware::class)->handle($request, static fn (): Response => response('Unexpected render'));
+    $hitRequest = Request::create($url);
+    app()->instance('request', $hitRequest);
+    $hit = resolve(HtmlCacheMiddleware::class)->handle($hitRequest, static fn (): Response => response('Unexpected render'));
 
     expect($response->getStatusCode())->toBe(200)
         ->and($request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE))->toBeTrue()
+        ->and(HtmlCacheOriginDecisionData::forRequest($request)?->cacheWriteSucceeded)->toBeTrue()
+        ->and(HtmlCacheOriginDecisionData::forRequest($hitRequest)?->cacheWriteSucceeded)->toBeFalse()
         ->and($hit->getContent())->toBe('Public again')
         ->and($hit->headers->get('X-Frontend-Cache'))->toBe('HIT');
 });

@@ -161,7 +161,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             $store = resolve(HtmlCacheStore::class);
 
             $request = request();
-            $domainPath = $request->getScheme() . '.' . $request->getHost();
+            $domainPath = resolve(HtmlCachePathResolver::class)->rootForRequest($request);
             $cachePath = $store->path($domainPath)
                 ?? rtrim($store->root(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $domainPath;
 

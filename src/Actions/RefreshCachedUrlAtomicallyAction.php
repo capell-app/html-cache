@@ -8,18 +8,21 @@ use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
-use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
@@ -36,17 +39,25 @@ final class RefreshCachedUrlAtomicallyAction
 
     public function handle(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge = false): void
     {
+        // Validate before resolving the domain: missing domains can still have canonical artefacts.
+        $request = $this->requestForStaleCachedUrl($staleCachedUrl);
+        if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
+            throw new RuntimeException('Unsupported query parameters have no HTML cache path.');
+        }
+        $request->attributes->set(HtmlCacheMiddleware::SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE, $suppressInlineEdgePurge);
         $resolved = LoadSiteDomainFromUrlAction::run($staleCachedUrl->url);
         $siteDomain = is_array($resolved) ? $resolved[0] : null;
 
         if (! $siteDomain instanceof SiteDomain) {
+            if (config('capell-html-cache.enabled', true) !== true || config('capell-html-cache.write_enabled', true) !== true) {
+                throw new RuntimeException('Unable to retire obsolete HTML cache while cache writes are disabled.');
+            }
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
             $this->deleteConfirmedObsoleteCache($staleCachedUrl, $suppressInlineEdgePurge);
 
             return;
         }
 
-        $request = $this->requestForStaleCachedUrl($staleCachedUrl);
         resolve(HtmlCachePublicationGuard::class)->capture($request);
         $previousRequest = resolve('request');
         app()->instance('request', $request);
@@ -60,7 +71,9 @@ final class RefreshCachedUrlAtomicallyAction
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
-            $rejectionReason = $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
+            $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
+            $retirementReason = RetireCachedUrlAction::run($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
+            $rejectionReason = $retirementReason ?? $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
 
             if ($rejectionReason instanceof HtmlCacheEligibilityReason) {
                 $message = sprintf(
@@ -75,7 +88,7 @@ final class RefreshCachedUrlAtomicallyAction
                     $request->query->count(),
                 );
 
-                if ($rejectionReason->isDeterministicForStaleRefresh()) {
+                if ($retirementReason instanceof HtmlCacheEligibilityReason) {
                     throw new StaleCachedUrlNotApplicableException($rejectionReason, $message);
                 }
 
@@ -136,22 +149,20 @@ final class RefreshCachedUrlAtomicallyAction
             throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; a marked render fragment failed.', $staleCachedUrl->url));
         }
 
-        $packageReason = resolve(ExtensionCacheSafetyResolver::class)->blockingReasonCodes()[0] ?? null;
-
-        if ($packageReason instanceof HtmlCacheEligibilityReason) {
-            return $packageReason;
-        }
-
-        if ($response->isRedirection()) {
-            return HtmlCacheEligibilityReason::RedirectUrl;
+        $originDecision = HtmlCacheOriginDecisionData::forRequest($request);
+        if ($originDecision instanceof HtmlCacheOriginDecisionData && ! $originDecision->cacheWriteSucceeded) {
+            if ($originDecision->rejectionReason instanceof HtmlCacheEligibilityReason) {
+                return $originDecision->rejectionReason;
+            }
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; origin rendering or cache publication was rejected without a terminal cache policy change; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
         }
 
         $pageCache = resolve(PageCache::class);
 
-        if ($request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) === true
-            && $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData) {
+        if ($originDecision?->cacheWriteSucceeded === true) {
             throw_unless(
-                $pageCache->getCacheFragmentData(
+                ! $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData
+                || $pageCache->getCacheFragmentData(
                     $request,
                     $response->getStatusCode() === Response::HTTP_NOT_FOUND ? PageCache::ERROR_EXTENSION : '.html',
                 ) instanceof RenderHookFragmentCacheData,
@@ -164,6 +175,16 @@ final class RefreshCachedUrlAtomicallyAction
             }
 
             return null;
+        }
+
+        $packageReason = resolve(ExtensionCacheSafetyResolver::class)->blockingReasonCodes()[0] ?? null;
+
+        if ($packageReason instanceof HtmlCacheEligibilityReason) {
+            return $packageReason;
+        }
+
+        if ($response->isRedirection()) {
+            return HtmlCacheEligibilityReason::RedirectUrl;
         }
 
         $pageCacheReason = $pageCache->rejectionReason($request, $response);
@@ -220,48 +241,52 @@ final class RefreshCachedUrlAtomicallyAction
 
     private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): void
     {
-        if (! is_string($staleCachedUrl->cache_path) || $staleCachedUrl->cache_path === ''
-            || ! is_string($staleCachedUrl->error_cache_path) || $staleCachedUrl->error_cache_path === '') {
-            throw new RuntimeException(sprintf(
-                'Unable to resolve historical cache paths for "%s"; its cache tracking has been retained.',
-                $staleCachedUrl->url,
-            ));
-        }
-
-        $store = resolve(HtmlCacheStore::class);
-        $store->deletePage($staleCachedUrl->cache_path);
-        $store->deletePage($staleCachedUrl->error_cache_path);
-
-        $query = CachedModelUrl::query()->where('url_hash', $staleCachedUrl->url_hash);
-
-        if ($staleCachedUrl->site_id !== null) {
-            $query->where('site_id', $staleCachedUrl->site_id);
-        }
-
-        if ($staleCachedUrl->site_domain_id !== null) {
-            $query->where('site_domain_id', $staleCachedUrl->site_domain_id);
-        }
-
-        $query->delete();
-        if (! $suppressInlineEdgePurge) {
-            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
-        }
+        resolve(RetireCachedUrlAction::class)->evict(
+            $staleCachedUrl->url,
+            $staleCachedUrl->cache_path,
+            $staleCachedUrl->error_cache_path,
+            $staleCachedUrl->site_id,
+            $staleCachedUrl->site_domain_id,
+            $suppressInlineEdgePurge,
+        );
     }
 
+    /**
+     * A status change leaves the other status's artefacts behind under historical,
+     * fragment and variant keys, and the middleware prefers a surviving 200 file.
+     * Evict the URL's whole scope inside one publication-guarded operation that keeps
+     * the page this refresh just published, so a concurrent clear is never undone.
+     */
     private function deleteAlternateStatusFile(StaleCachedUrl $staleCachedUrl, Response $response): void
     {
-        $store = resolve(HtmlCacheStore::class);
+        $cachePath = $staleCachedUrl->cache_path;
+        $errorCachePath = $staleCachedUrl->error_cache_path;
 
-        if ($response->getStatusCode() === Response::HTTP_NOT_FOUND) {
-            if (is_string($staleCachedUrl->cache_path) && $staleCachedUrl->cache_path !== '') {
-                $store->deletePage($staleCachedUrl->cache_path);
-            }
-
+        if (! is_string($cachePath) || $cachePath === '' || ! is_string($errorCachePath) || $errorCachePath === '') {
             return;
         }
 
-        if (is_string($staleCachedUrl->error_cache_path) && $staleCachedUrl->error_cache_path !== '') {
-            $store->deletePage($staleCachedUrl->error_cache_path);
-        }
+        $domain = $staleCachedUrl->site_domain_id === null ? null : SiteDomain::withTrashed()->find($staleCachedUrl->site_domain_id);
+        $request = $this->requestForStaleCachedUrl($staleCachedUrl);
+        // Publication writes under the URL's current key; historical rows may store an older name.
+        $published = resolve(HtmlCachePathResolver::class)->pathForRequestUrl($request, $domain, error: $response->getStatusCode() === Response::HTTP_NOT_FOUND);
+        $storedPaths = Schema::hasTable((new CachedModelUrl)->getTable())
+            ? array_values(CachedModelUrl::query()
+                ->where('url_hash', CachedModelUrl::hashUrl($staleCachedUrl->url))
+                ->where('site_id', $staleCachedUrl->site_id)
+                ->where('site_domain_id', $staleCachedUrl->site_domain_id)
+                ->pluck('path')
+                ->filter(static fn (mixed $path): bool => is_string($path) && $path !== '')
+                ->all())
+            : [];
+
+        DeleteCachedUrlArtefactsAction::run(
+            $request,
+            $domain,
+            [$cachePath, $errorCachePath],
+            $storedPaths,
+            includeVariants: true,
+            preserve: [$published],
+        );
     }
 }

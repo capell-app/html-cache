@@ -69,6 +69,20 @@ it('resolves query variants to the same files used by the page cache', function 
         ->toBe('https.example.test/uk/articles' . $prefixedSuffix . '.html');
 });
 
+it('refuses to resolve unsupported query variants to canonical cache paths', function (string $query): void {
+    config()->set('capell-html-cache.enabled', true);
+    config()->set('capell-html-cache.stateless_pagination.enabled', true);
+    config()->set('capell-html-cache.stateless_pagination.params', ['page']);
+    $domain = htmlCachePathResolverSiteDomain([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    expect(fn (): string => (new HtmlCachePathResolver)->pathForRequestUrl('https://example.test/page?' . $query, $domain))
+        ->toThrow(InvalidArgumentException::class, 'Unsupported query parameters have no HTML cache path.');
+})->with(['preview=1', 'page=2&preview=1', 'page%5B%5D=2']);
+
 it('builds safe cache paths for domains, prefixes, errors and absolute urls', function (): void {
     $resolver = new HtmlCachePathResolver;
     $domain = htmlCachePathResolverSiteDomain([

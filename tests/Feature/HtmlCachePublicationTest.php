@@ -30,6 +30,14 @@ beforeEach(function (): void {
     config()->set('capell-html-cache.request_coalescing.enabled', false);
 });
 
+it('refuses recursive publication locking and releases the outer operation after failure', function (): void {
+    $guard = resolve(HtmlCachePublicationGuard::class);
+
+    expect(fn (): mixed => $guard->invalidate(static fn (): mixed => (new HtmlCachePublicationGuard)->invalidate(static fn (): bool => true)))
+        ->toThrow(RuntimeException::class, 'Cannot reacquire the HTML cache publication lock within the same operation.');
+    expect($guard->invalidate(static fn (): string => 'fresh operation'))->toBe('fresh operation');
+});
+
 it('does not republish a render started before hard invalidation', function (string $operation, bool $trustedWarm): void {
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $url = 'https://example.test/withdrawn';

@@ -10,20 +10,26 @@ use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static bool run(string $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
+ * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
  */
 final class ClearCachedUrlAction
 {
     use AsJob;
     use AsObject;
 
-    public function handle(string $url, ?SiteDomain $siteDomain = null, bool $refresh = false): bool
+    public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false): bool
     {
-        $path = resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
+        $selectedCachedModelUrl = $url instanceof CachedModelUrl ? $url : null;
+        $selectedCachedModelUrl?->loadMissing('siteDomain');
+        $url = $selectedCachedModelUrl?->url ?? $url;
+        $path = $selectedCachedModelUrl?->path ?? resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
+        $cachedModelUrls = $this->cachedModelUrls($url, $selectedCachedModelUrl);
+        $siteDomain ??= $selectedCachedModelUrl?->siteDomain;
 
         if (! $siteDomain instanceof SiteDomain) {
             $resolved = LoadSiteDomainFromUrlAction::run($url);
@@ -35,23 +41,72 @@ final class ClearCachedUrlAction
         }
 
         if (! $siteDomain instanceof SiteDomain || $siteDomain->domain === null || $siteDomain->domain === '') {
+            $this->deleteFilesFromCachedRows($cachedModelUrls);
+            $cachedModelUrls->each->delete();
+
             return false;
         }
 
+        $this->deleteFilesFromCachedRows($cachedModelUrls);
+
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
-
         $store->delete($pathResolver->pathForUrl($path, $siteDomain));
         $store->delete($pathResolver->pathForUrl($path, $siteDomain, error: true));
 
-        CachedModelUrl::query()
-            ->where('url_hash', CachedModelUrl::hashUrl($url))
-            ->delete();
+        $cachedModelUrls->each->delete();
 
         if ($refresh) {
             VisitUrlAction::dispatch($url);
         }
 
         return true;
+    }
+
+    /**
+     * @return Collection<int, CachedModelUrl>
+     */
+    private function cachedModelUrls(string $url, ?CachedModelUrl $selectedCachedModelUrl): Collection
+    {
+        $query = CachedModelUrl::query()
+            ->with('siteDomain')
+            ->where('url_hash', CachedModelUrl::hashUrl($url));
+
+        if (! $selectedCachedModelUrl instanceof CachedModelUrl) {
+            return $query->get();
+        }
+
+        if ($selectedCachedModelUrl->site_id !== null) {
+            return $query
+                ->where('site_id', $selectedCachedModelUrl->site_id)
+                ->get();
+        }
+
+        return $query
+            ->whereKey($selectedCachedModelUrl->getKey())
+            ->get();
+    }
+
+    /**
+     * @param  Collection<int, CachedModelUrl>  $cachedModelUrls
+     */
+    private function deleteFilesFromCachedRows(Collection $cachedModelUrls): void
+    {
+        $pathResolver = resolve(HtmlCachePathResolver::class);
+        $store = resolve(HtmlCacheStore::class);
+        $files = [];
+
+        foreach ($cachedModelUrls as $cachedModelUrl) {
+            if (! $cachedModelUrl->siteDomain instanceof SiteDomain) {
+                continue;
+            }
+
+            $files[] = $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain);
+            $files[] = $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain, error: true);
+        }
+
+        foreach (array_unique($files) as $file) {
+            $store->delete($file);
+        }
     }
 }

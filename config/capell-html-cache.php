@@ -13,6 +13,9 @@ return [
     'static_generation' => [
         'internal_requests' => env('CAPELL_STATIC_HTML_INTERNAL_REQUESTS', false),
     ],
+    'site_health_public_html_scan_limit' => (int) env('CAPELL_HTML_CACHE_SITE_HEALTH_SCAN_LIMIT', 100),
+    'site_health_unindexed_public_html_scan_limit' => (int) env('CAPELL_HTML_CACHE_SITE_HEALTH_UNINDEXED_SCAN_LIMIT', 25),
+    'site_health_cached_url_limit' => (int) env('CAPELL_HTML_CACHE_SITE_HEALTH_CACHED_URL_LIMIT', 20),
     'public_html_authoring_markers' => [
         'data-capell-authoring',
         'data-capell-editable',

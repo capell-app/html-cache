@@ -30,7 +30,7 @@
         "frontend": []
     },
     "database": {
-        "migrations": false,
+        "migrations": true,
         "settings": false,
         "requiredTables": []
     },
@@ -43,7 +43,7 @@
         "health": null
     },
     "settings": [],
-    "permissions": [],
+    "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
     "capabilities": [],
     "assets": [],
     "healthChecks": [],

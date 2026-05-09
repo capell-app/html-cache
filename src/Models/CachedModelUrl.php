@@ -28,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property CarbonImmutable|null $last_seen_at
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
- * @property-read Model $cacheable
+ * @property-read Model|null $cacheable
  * @property-read Language|null $language
  * @property-read Site|null $site
  * @property-read SiteDomain|null $siteDomain
@@ -58,6 +58,25 @@ final class CachedModelUrl extends Model
     public static function hashUrl(string $url): string
     {
         return hash('sha256', $url);
+    }
+
+    public function cacheableLabel(): string
+    {
+        $cacheable = $this->cacheable;
+
+        if (! $cacheable instanceof Model) {
+            return class_basename($this->cacheable_type) . ' #' . $this->cacheable_id;
+        }
+
+        foreach (['title', 'name', 'label', 'slug'] as $attribute) {
+            $value = $cacheable->getAttribute($attribute);
+
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return class_basename($this->cacheable_type) . ' #' . $this->cacheable_id;
     }
 
     public function cacheable(): MorphTo

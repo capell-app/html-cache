@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Filament\Resources\CachedModelUrls;
 
 use BackedEnum;
+use Capell\Admin\Support\SiteScope;
+use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\Pages\ListCachedModelUrls;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\Tables\CachedModelUrlsTable;
 use Capell\HtmlCache\Models\CachedModelUrl;
@@ -12,6 +14,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 final class CachedModelUrlResource extends Resource
@@ -40,6 +44,24 @@ final class CachedModelUrlResource extends Resource
         return CachedModelUrl::class;
     }
 
+    #[Override]
+    public static function getEloquentQuery(): Builder
+    {
+        return SiteScope::applyForCurrentActor(parent::getEloquentQuery(), denyWhenMissingActor: true);
+    }
+
+    #[Override]
+    public static function canAccess(): bool
+    {
+        return self::canViewCacheMap();
+    }
+
+    #[Override]
+    public static function canViewAny(): bool
+    {
+        return self::canViewCacheMap();
+    }
+
     public static function getNavigationLabel(): string
     {
         return (string) __('capell-html-cache::admin.cached_model_urls');
@@ -55,5 +77,21 @@ final class CachedModelUrlResource extends Resource
         return [
             'index' => ListCachedModelUrls::route('/'),
         ];
+    }
+
+    private static function canViewCacheMap(): bool
+    {
+        $actor = auth()->user();
+
+        if (! $actor instanceof Authenticatable) {
+            return false;
+        }
+
+        if (SiteScope::isGlobalActor($actor)) {
+            return true;
+        }
+
+        return method_exists($actor, 'can')
+            && $actor->can(HtmlCachePermission::ViewCachedModelUrls->value) === true;
     }
 }

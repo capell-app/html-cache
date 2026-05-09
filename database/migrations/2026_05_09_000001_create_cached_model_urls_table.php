@@ -27,8 +27,9 @@ return new class extends Migration
             $table->index('url_hash');
             $table->index(['cacheable_type', 'cacheable_id'], 'cached_model_urls_model_index');
             $table->index(['site_id', 'language_id'], 'cached_model_urls_site_language_index');
+            $table->index(['site_id', 'last_seen_at'], 'cached_model_urls_site_last_seen_index');
             $table->index('site_domain_id');
-            $table->index('path', 'cached_model_urls_path_index');
+            $table->index('last_seen_at', 'cached_model_urls_last_seen_index');
         });
     }
 

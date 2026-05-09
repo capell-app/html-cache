@@ -19,7 +19,7 @@ final class ClearCachedPageUrlsAction
     use AsJob;
     use AsObject;
 
-    public function handle(Collection $urls, ?EloquentCollection $sites = null): int
+    public function handle(Collection $urls): int
     {
         $cleared = 0;
 

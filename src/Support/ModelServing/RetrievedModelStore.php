@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\ModelServing;
 
 use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -50,12 +51,13 @@ final class RetrievedModelStore implements RenderedModelTracker
 
         if ($mode === 'deferred') {
             $retrievedModels = $this->retrievedModels;
+            $seenAt = CarbonImmutable::now();
 
-            defer(static fn (): mixed => dispatch_sync(new RegisterCachedModelUrlsJob($url, $retrievedModels)));
+            defer(static fn (): mixed => dispatch_sync(new RegisterCachedModelUrlsJob($url, $retrievedModels, $seenAt)));
         } elseif ($mode === 'async') {
-            dispatch(new RegisterCachedModelUrlsJob($url, $this->retrievedModels));
+            dispatch(new RegisterCachedModelUrlsJob($url, $this->retrievedModels, CarbonImmutable::now()));
         } else {
-            dispatch_sync(new RegisterCachedModelUrlsJob($url, $this->retrievedModels));
+            dispatch_sync(new RegisterCachedModelUrlsJob($url, $this->retrievedModels, CarbonImmutable::now()));
         }
 
         $this->retrievedModels = [];

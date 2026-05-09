@@ -8,9 +8,19 @@ use Aimeos\Nestedset\NestedSetServiceProvider;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Macros\BlueprintMacros;
 use Capell\Core\Models\Media;
+use Capell\Frontend\Providers\FrontendServiceProvider;
 use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
 use Capell\Tests\AbstractTestCase;
+use Filament\Actions\ActionsServiceProvider;
+use Filament\FilamentServiceProvider;
+use Filament\Forms\FormsServiceProvider;
+use Filament\Schemas\SchemasServiceProvider;
+use Filament\Support\SupportServiceProvider;
+use Filament\Tables\TablesServiceProvider;
+use Filament\Widgets\WidgetsServiceProvider;
 use Illuminate\Database\Schema\Blueprint;
+use Livewire\LivewireServiceProvider;
+use MichalOravec\PaginateRoute\PaginateRouteServiceProvider;
 use Override;
 
 abstract class HtmlCacheTestCase extends AbstractTestCase
@@ -27,7 +37,17 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
     protected function getPackageProviders(mixed $app): array
     {
         return [
-            ...parent::getPackageProviders($app),
+            ...parent::getDefaultPackageProviders(),
+            ActionsServiceProvider::class,
+            FilamentServiceProvider::class,
+            FormsServiceProvider::class,
+            SchemasServiceProvider::class,
+            SupportServiceProvider::class,
+            TablesServiceProvider::class,
+            WidgetsServiceProvider::class,
+            FrontendServiceProvider::class,
+            PaginateRouteServiceProvider::class,
+            LivewireServiceProvider::class,
             HtmlCacheServiceProvider::class,
         ];
     }
@@ -46,6 +66,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
             HtmlCacheServiceProvider::$packageName,
             path: realpath(__DIR__ . '/../'),
         );
+        CapellCore::forcePackageInstalled(FrontendServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(HtmlCacheServiceProvider::$packageName);
     }
 }

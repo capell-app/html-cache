@@ -8,11 +8,13 @@ use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run(string $url, array $models)
+ * @method static void run(string $url, array $models, ?CarbonInterface $seenAt = null)
  */
 final class RecordCachedModelUrlsAction
 {
@@ -21,7 +23,7 @@ final class RecordCachedModelUrlsAction
     /**
      * @param  array<string, array<int, int|string>>  $models
      */
-    public function handle(string $url, array $models): void
+    public function handle(string $url, array $models, ?CarbonInterface $seenAt = null): void
     {
         if ($url === '' || $models === []) {
             return;
@@ -35,27 +37,37 @@ final class RecordCachedModelUrlsAction
         $urlHash = CachedModelUrl::hashUrl($url);
 
         $seenKeys = [];
-        $now = now();
+        $now = $seenAt?->toImmutable() ?? CarbonImmutable::now();
 
         DB::transaction(function () use ($models, $url, $urlHash, $path, $siteDomain, $now, &$seenKeys): void {
             foreach ($models as $cacheableType => $ids) {
-                if ($cacheableType === '' || $ids === []) {
+                if ($cacheableType === '') {
                     continue;
                 }
-
-                foreach (array_unique(array_map('intval', $ids)) as $cacheableId) {
+                if ($ids === []) {
+                    continue;
+                }
+                foreach (array_unique(array_map(intval(...), $ids)) as $cacheableId) {
                     if ($cacheableId <= 0) {
                         continue;
                     }
 
                     $seenKeys[] = $cacheableType . ':' . $cacheableId;
+                    $attributes = [
+                        'url_hash' => $urlHash,
+                        'cacheable_type' => $cacheableType,
+                        'cacheable_id' => $cacheableId,
+                    ];
+                    $existing = CachedModelUrl::query()
+                        ->where($attributes)
+                        ->first();
+
+                    if ($existing instanceof CachedModelUrl && $existing->last_seen_at instanceof CarbonInterface && $existing->last_seen_at->greaterThan($now)) {
+                        continue;
+                    }
 
                     CachedModelUrl::query()->updateOrCreate(
-                        [
-                            'url_hash' => $urlHash,
-                            'cacheable_type' => $cacheableType,
-                            'cacheable_id' => $cacheableId,
-                        ],
+                        $attributes,
                         [
                             'url' => $url,
                             'path' => $path,
@@ -71,6 +83,7 @@ final class RecordCachedModelUrlsAction
 
             CachedModelUrl::query()
                 ->where('url_hash', $urlHash)
+                ->where('last_seen_at', '<=', $now)
                 ->get()
                 ->each(function (CachedModelUrl $cachedModelUrl) use ($seenKeys): void {
                     $key = $cachedModelUrl->cacheable_type . ':' . $cachedModelUrl->cacheable_id;

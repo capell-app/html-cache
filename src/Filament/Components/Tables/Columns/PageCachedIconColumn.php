@@ -7,8 +7,7 @@ namespace Capell\HtmlCache\Filament\Components\Tables\Columns;
 use Capell\Core\Contracts\Pageable;
 use Capell\Core\Models\PageUrl;
 use Capell\HtmlCache\Actions\DeletePageCacheAction;
-use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
-use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Models\CachedModelUrl;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Illuminate\Support\Facades\Date;
@@ -21,28 +20,15 @@ final class PageCachedIconColumn extends IconColumn
 
         $this->label(__('capell-admin::table.page_cached'))
             ->alignCenter()
-            ->getStateUsing(fn (Pageable|PageUrl $record): ?string => $this->getCachedPage($record))
-            ->icon(fn (?string $state): string => blank($state) ? 'heroicon-c-x-mark' : 'heroicon-c-check')
-            ->color(fn (?string $state): string => blank($state) ? 'gray' : 'info')
-            ->tooltip(function (?string $state): ?string {
-                if (blank($state)) {
+            ->getStateUsing(fn (Pageable|PageUrl $record): ?CachedModelUrl => $this->getCachedPage($record))
+            ->icon(fn (?CachedModelUrl $state): string => $state instanceof CachedModelUrl ? 'heroicon-c-check' : 'heroicon-c-x-mark')
+            ->color(fn (?CachedModelUrl $state): string => $state instanceof CachedModelUrl ? 'info' : 'gray')
+            ->tooltip(function (?CachedModelUrl $state): ?string {
+                if (! $state instanceof CachedModelUrl || $state->last_seen_at === null) {
                     return null;
                 }
 
-                $state = str_replace(['../', '..\\'], '', $state);
-                $store = resolve(HtmlCacheStore::class);
-
-                if (! $store->exists($state)) {
-                    return null;
-                }
-
-                $lastModified = $store->lastModified($state);
-
-                if ($lastModified === null) {
-                    return null;
-                }
-
-                $time = Date::createFromTimestamp($lastModified);
+                $time = Date::instance($state->last_seen_at);
 
                 return __(
                     'capell-admin::generic.page_cached_tooltip',
@@ -66,18 +52,18 @@ final class PageCachedIconColumn extends IconColumn
         }
     }
 
-    private function getCachedPage(Pageable|PageUrl $record): ?string
+    private function getCachedPage(Pageable|PageUrl $record): ?CachedModelUrl
     {
         if ($record instanceof PageUrl) {
-            return $this->cacheFileForPageUrl($record);
+            return $this->cachedModelUrlForPageUrl($record);
         }
 
         foreach ($record->pageUrls as $url) {
             if ($url instanceof PageUrl) {
-                $cacheFile = $this->cacheFileForPageUrl($url);
+                $cachedModelUrl = $this->cachedModelUrlForPageUrl($url);
 
-                if ($cacheFile !== null && $cacheFile !== '') {
-                    return $cacheFile;
+                if ($cachedModelUrl instanceof CachedModelUrl) {
+                    return $cachedModelUrl;
                 }
             }
         }
@@ -85,14 +71,16 @@ final class PageCachedIconColumn extends IconColumn
         return null;
     }
 
-    private function cacheFileForPageUrl(PageUrl $pageUrl): ?string
+    private function cachedModelUrlForPageUrl(PageUrl $pageUrl): ?CachedModelUrl
     {
         if ($pageUrl->siteDomain === null) {
             return null;
         }
 
-        $cacheFile = resolve(HtmlCachePathResolver::class)->pathForUrl($pageUrl->url, $pageUrl->siteDomain);
-
-        return resolve(HtmlCacheStore::class)->exists($cacheFile) ? $cacheFile : null;
+        return CachedModelUrl::query()
+            ->where('site_domain_id', $pageUrl->siteDomain->getKey())
+            ->where('path', $pageUrl->url)
+            ->latest('last_seen_at')
+            ->first();
     }
 }

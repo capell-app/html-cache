@@ -44,7 +44,11 @@ final class PageCache extends Cache
         $this->files->makeDirectory($path, 0775, true, true);
 
         if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
-            $this->cacheErrorPage($path, $filename . self::ERROR_EXTENSION, $laravelResponse);
+            $this->files->put(
+                $this->join([$path, $filename . self::ERROR_EXTENSION]),
+                $laravelResponse->getContent(),
+                true,
+            );
 
             return;
         }
@@ -147,7 +151,7 @@ final class PageCache extends Cache
         return [$this->getCachePath(implode('/', $segments)), $filename, $extension];
     }
 
-    protected function getFileFromRequest(Request $request, string $extension = '.html'): string
+    private function getFileFromRequest(Request $request, string $extension = '.html'): string
     {
         $segments = $this->safeRequestSegments($request);
 
@@ -166,7 +170,7 @@ final class PageCache extends Cache
         $segments = $request->segments();
 
         foreach ($segments as $segment) {
-            if ($segment === '..' || str_contains($segment, "\0") || str_contains($segment, '\\')) {
+            if ($segment === '..' || str_contains((string) $segment, "\0") || str_contains((string) $segment, '\\')) {
                 return null;
             }
         }
@@ -176,11 +180,20 @@ final class PageCache extends Cache
 
     private function isInertiaRequest(Request $request): bool
     {
-        return $request->headers->has('X-Inertia')
-            || $request->headers->has('X-Inertia-Version')
-            || $request->headers->has('X-Inertia-Partial-Component')
-            || $request->headers->has('X-Inertia-Partial-Data')
-            || $request->headers->has('X-Inertia-Reset');
+        if ($request->headers->has('X-Inertia')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Version')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Partial-Component')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Partial-Data')) {
+            return true;
+        }
+
+        return $request->headers->has('X-Inertia-Reset');
     }
 
     private function sessionHasUserState(Request $request): bool
@@ -190,14 +203,26 @@ final class PageCache extends Cache
         }
 
         $session = $request->session();
+        if (filled($session->get('_flash.old', []))) {
+            return true;
+        }
+        if (filled($session->get('_flash.new', []))) {
+            return true;
+        }
+        if ($session->has('errors')) {
+            return true;
+        }
+        if ($session->has('_old_input')) {
+            return true;
+        }
+        if ($session->has('status')) {
+            return true;
+        }
+        if ($session->has('enquiry_status')) {
+            return true;
+        }
 
-        return filled($session->get('_flash.old', []))
-            || filled($session->get('_flash.new', []))
-            || $session->has('errors')
-            || $session->has('_old_input')
-            || $session->has('status')
-            || $session->has('enquiry_status')
-            || $session->has('roadmap-status');
+        return $session->has('roadmap-status');
     }
 
     private function containsAuthoringSurface(string $content): bool

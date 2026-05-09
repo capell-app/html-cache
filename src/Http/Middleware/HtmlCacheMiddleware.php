@@ -119,16 +119,25 @@ final class HtmlCacheMiddleware
         }
 
         return config('capell-html-cache.cache_skip_authenticated', true) === true
-            && $request->user() !== null;
+            && ($request->user() !== null || $this->hasIncomingSessionCookie($request));
     }
 
     private function isInertiaRequest(Request $request): bool
     {
-        return $request->headers->has('X-Inertia')
-            || $request->headers->has('X-Inertia-Version')
-            || $request->headers->has('X-Inertia-Partial-Component')
-            || $request->headers->has('X-Inertia-Partial-Data')
-            || $request->headers->has('X-Inertia-Reset');
+        if ($request->headers->has('X-Inertia')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Version')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Partial-Component')) {
+            return true;
+        }
+        if ($request->headers->has('X-Inertia-Partial-Data')) {
+            return true;
+        }
+
+        return $request->headers->has('X-Inertia-Reset');
     }
 
     private function cacheResponse(PageCache $pageCache, Request $request, Response $response): bool
@@ -187,7 +196,8 @@ final class HtmlCacheMiddleware
             return $this->privateNoStore($response);
         }
 
-        $cacheTtl = (int) config('capell-html-cache.cache_ttl', 3600);
+        $configuredCacheTtl = config('capell-html-cache.cache_ttl');
+        $cacheTtl = is_numeric($configuredCacheTtl) ? max(0, (int) $configuredCacheTtl) : 3600;
         $response->headers->set('Cache-Control', sprintf(
             'public, s-maxage=%d, max-age=%d, stale-while-revalidate=%d',
             intdiv($cacheTtl, 6),

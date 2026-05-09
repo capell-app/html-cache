@@ -172,6 +172,10 @@ final class StaticSiteGenerator
 
     private function isSuccessfulStaticResponse(Response $response): bool
     {
-        return $response->isSuccessful() || $response->isRedirection();
+        if ($response->isSuccessful()) {
+            return true;
+        }
+
+        return $response->isRedirection();
     }
 }

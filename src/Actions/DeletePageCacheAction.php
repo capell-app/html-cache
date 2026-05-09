@@ -27,7 +27,7 @@ final class DeletePageCacheAction
 
         foreach ($pageUrls as $pageUrl) {
             if ($pageUrl instanceof PageUrl) {
-                ClearCachedUrlAction::run($pageUrl->full_url, refresh: (bool) $refresh);
+                ClearCachedUrlAction::run($pageUrl->full_url, refresh: $refresh);
             }
         }
 

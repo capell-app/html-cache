@@ -1,0 +1,52 @@
+{
+    "manifest-version": 2,
+    "name": "capell-app/html-cache",
+    "kind": "package",
+    "capell-version": "^4.0",
+    "productGroup": "Frontend",
+    "tier": "core",
+    "bundle": "foundation",
+    "description": "Static HTML cache, dependency indexing, and cache administration for Capell.",
+    "surfaces": ["admin", "frontend"],
+    "dependencies": {
+        "requires": [
+            "capell-app/core",
+            "capell-app/admin",
+            "capell-app/frontend"
+        ],
+        "optional": [],
+        "conflicts": []
+    },
+    "lifecycle": {
+        "activation": "manual",
+        "defaultStatus": "available",
+        "requiresInstallCommand": false
+    },
+    "providers": {
+        "metadata": [],
+        "install": [],
+        "runtime": ["Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"],
+        "admin": [],
+        "frontend": []
+    },
+    "database": {
+        "migrations": false,
+        "settings": false,
+        "requiredTables": []
+    },
+    "commands": {
+        "install": null,
+        "setup": null,
+        "setupParams": [],
+        "demo": null,
+        "demoParams": [],
+        "health": null
+    },
+    "settings": [],
+    "permissions": [],
+    "capabilities": [],
+    "assets": [],
+    "healthChecks": [],
+    "scopes": ["backend", "frontend"],
+    "order": 45
+}

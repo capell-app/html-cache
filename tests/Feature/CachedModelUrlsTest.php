@@ -2,16 +2,23 @@
 
 declare(strict_types=1);
 
+use Capell\Admin\Data\Bridges\AdminBridgeContextData;
+use Capell\Admin\Enums\AdminSurfaceContributionType;
+use Capell\Admin\Facades\CapellAdmin;
 use Capell\Admin\Filament\Pages\SiteHealthPage;
+use Capell\Admin\Support\Bridges\AdminBridgeRegistrar;
 use Capell\Core\Models\Concerns\HasSitePermissions;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\HtmlCache\Actions\BuildCachedModelUrlDiagnosticsAction;
+use Capell\HtmlCache\Actions\BuildCacheMapOverviewAction;
 use Capell\HtmlCache\Actions\BuildHtmlCachePublicOutputSafetyDiagnosticsAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
+use Capell\HtmlCache\Actions\ListCacheMapResourceOptionsAction;
 use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
+use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\CachedModelUrlResource;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
@@ -541,83 +548,137 @@ it('exposes the selected site and cache map widget on site health', function ():
         ->and(view()->exists('capell-html-cache::livewire.site-health-cache-map'))->toBeTrue();
 });
 
-it('scopes the site health cache map table to the selected site', function (): void {
-    $user = new class extends User
-    {
-        use HasSitePermissions;
+it('does not register the cached model urls resource as an admin page', function (): void {
+    CapellAdmin::clearAdminSurfaceContributions();
 
-        protected $table = 'users';
+    (new HtmlCacheAdminBridge)->register(
+        new AdminBridgeRegistrar,
+        AdminBridgeContextData::forPackage('capell-app/html-cache'),
+    );
 
-        public function getMorphClass(): string
-        {
-            return User::class;
-        }
-    };
-    $user->forceFill([
-        'name' => 'Site scoped cache map user',
-        'email' => fake()->unique()->safeEmail(),
-        'password' => bcrypt('password'),
-    ]);
-    $user->save();
+    expect(CapellAdmin::getAdminSurfaceContributions(AdminSurfaceContributionType::Resource))->toBe([]);
+});
+
+it('builds a cache map overview grouped by model and top resource impact', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('super_admin');
 
     test()->actingAs($user);
 
-    $firstSiteDomain = SiteDomain::factory()->create([
+    $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
-        'domain' => 'first.test',
+        'domain' => 'example.test',
         'path' => null,
     ]);
-    $secondSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'second.test',
-        'path' => null,
-    ]);
-    $role = Role::findOrCreate('editor', 'web');
-    DB::table('model_has_roles')->insert([
-        'role_id' => $role->getKey(),
-        'model_type' => $user->getMorphClass(),
-        'model_id' => $user->getKey(),
-        'team_id' => $firstSiteDomain->site_id,
-    ]);
-    $firstPage = Page::factory()
-        ->recycle($firstSiteDomain->site)
+    $sharedPage = Page::factory()
+        ->recycle($siteDomain->site)
         ->withTranslations()
-        ->create();
-    $secondPage = Page::factory()
-        ->recycle($secondSiteDomain->site)
+        ->create(['name' => 'Shared page']);
+    $secondaryPage = Page::factory()
+        ->recycle($siteDomain->site)
         ->withTranslations()
-        ->create();
+        ->create(['name' => 'Secondary page']);
+    $translation = $sharedPage->translations()->first();
 
-    $firstCachedModelUrl = CachedModelUrl::query()->create([
-        'url' => 'https://first.test/about',
-        'url_hash' => CachedModelUrl::hashUrl('https://first.test/about'),
-        'path' => '/about',
-        'site_id' => $firstSiteDomain->site_id,
-        'site_domain_id' => $firstSiteDomain->getKey(),
-        'language_id' => $firstSiteDomain->language_id,
-        'cacheable_type' => $firstPage->getMorphClass(),
-        'cacheable_id' => $firstPage->getKey(),
+    expect($translation)->toBeInstanceOf(Translation::class);
+
+    foreach ([
+        ['https://example.test/about', $sharedPage],
+        ['https://example.test/team', $sharedPage],
+        ['https://example.test/about', $secondaryPage],
+        ['https://example.test/about', $translation],
+    ] as [$url, $cacheable]) {
+        CachedModelUrl::query()->create([
+            'url' => $url,
+            'url_hash' => CachedModelUrl::hashUrl($url),
+            'path' => str_replace('https://example.test', '', $url),
+            'site_id' => $siteDomain->site_id,
+            'site_domain_id' => $siteDomain->getKey(),
+            'language_id' => $siteDomain->language_id,
+            'cacheable_type' => $cacheable->getMorphClass(),
+            'cacheable_id' => $cacheable->getKey(),
+            'cached_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+    }
+
+    $overview = BuildCacheMapOverviewAction::run((int) $siteDomain->site_id);
+
+    expect($overview->totalUrls)->toBe(2)
+        ->and($overview->totalDependencies)->toBe(4)
+        ->and($overview->modelSummaries[0]->modelType)->toBe($sharedPage->getMorphClass())
+        ->and($overview->modelSummaries[0]->urlCount)->toBe(2)
+        ->and($overview->modelSummaries[0]->dependencyCount)->toBe(3)
+        ->and(str_starts_with($overview->topResources[0]->label, 'Shared page'))->toBeTrue()
+        ->and($overview->topResources[0]->urlCount)->toBe(2);
+});
+
+it('lists the top five cache map resources for the selected model and search', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('super_admin');
+
+    test()->actingAs($user);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $otherSiteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'other.test',
+        'path' => null,
+    ]);
+    $pages = collect(range(1, 6))
+        ->map(fn (int $index): Page => Page::factory()
+            ->recycle($siteDomain->site)
+            ->withTranslations()
+            ->create(['name' => $index === 6 ? 'Needle page' : 'Page ' . $index]));
+    $otherSitePage = Page::factory()
+        ->recycle($otherSiteDomain->site)
+        ->withTranslations()
+        ->create(['name' => 'Other site page']);
+
+    $pages->each(function (Page $page, int $zeroBasedIndex) use ($siteDomain): void {
+        foreach (range(1, 6 - $zeroBasedIndex) as $urlIndex) {
+            $url = sprintf('https://example.test/page-%s-%s', $page->getKey(), $urlIndex);
+
+            CachedModelUrl::query()->create([
+                'url' => $url,
+                'url_hash' => CachedModelUrl::hashUrl($url),
+                'path' => str_replace('https://example.test', '', $url),
+                'site_id' => $siteDomain->site_id,
+                'site_domain_id' => $siteDomain->getKey(),
+                'language_id' => $siteDomain->language_id,
+                'cacheable_type' => $page->getMorphClass(),
+                'cacheable_id' => $page->getKey(),
+                'cached_at' => now(),
+                'last_seen_at' => now(),
+            ]);
+        }
+    });
+
+    CachedModelUrl::query()->create([
+        'url' => 'https://other.test/page',
+        'url_hash' => CachedModelUrl::hashUrl('https://other.test/page'),
+        'path' => '/page',
+        'site_id' => $otherSiteDomain->site_id,
+        'site_domain_id' => $otherSiteDomain->getKey(),
+        'language_id' => $otherSiteDomain->language_id,
+        'cacheable_type' => $otherSitePage->getMorphClass(),
+        'cacheable_id' => $otherSitePage->getKey(),
         'cached_at' => now(),
         'last_seen_at' => now(),
     ]);
-    $secondCachedModelUrl = CachedModelUrl::query()->create([
-        'url' => 'https://second.test/about',
-        'url_hash' => CachedModelUrl::hashUrl('https://second.test/about'),
-        'path' => '/about',
-        'site_id' => $secondSiteDomain->site_id,
-        'site_domain_id' => $secondSiteDomain->getKey(),
-        'language_id' => $secondSiteDomain->language_id,
-        'cacheable_type' => $secondPage->getMorphClass(),
-        'cacheable_id' => $secondPage->getKey(),
-        'cached_at' => now(),
-        'last_seen_at' => now(),
-    ]);
 
-    Livewire::component('capell-html-cache.site-health-cache-map', SiteHealthCacheMap::class);
+    $topOptions = ListCacheMapResourceOptionsAction::run($pages->first()->getMorphClass(), (int) $siteDomain->site_id);
+    $searchOptions = ListCacheMapResourceOptionsAction::run($pages->first()->getMorphClass(), (int) $siteDomain->site_id, 'Needle');
 
-    Livewire::test('capell-html-cache.site-health-cache-map', ['siteId' => $firstSiteDomain->site_id])
-        ->assertCanSeeTableRecords([$firstCachedModelUrl])
-        ->assertCanNotSeeTableRecords([$secondCachedModelUrl]);
+    expect($topOptions)->toHaveCount(5)
+        ->and(collect($topOptions)->pluck('label')->all())->not->toContain('Other site page')
+        ->and(str_starts_with((string) $topOptions[0]->label, 'Page 1'))->toBeTrue()
+        ->and($searchOptions)->toHaveCount(1)
+        ->and(str_starts_with((string) $searchOptions[0]->label, 'Needle page'))->toBeTrue();
 });
 
 it('clears cache map rows through the table action for authorized actors', function (): void {
@@ -657,7 +718,8 @@ it('clears cache map rows through the table action for authorized actors', funct
     Livewire::component('capell-html-cache.site-health-cache-map', SiteHealthCacheMap::class);
 
     Livewire::test('capell-html-cache.site-health-cache-map', ['siteId' => $siteDomain->site_id])
-        ->assertCanSeeTableRecords([$cachedModelUrl])
+        ->set('selectedModelType', $page->getMorphClass())
+        ->loadTable()
         ->callTableAction('clear', record: (string) $cachedModelUrl->getKey());
 
     expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
@@ -723,6 +785,8 @@ it('hides cache map clear actions from actors without clear permission', functio
     Livewire::component('capell-html-cache.site-health-cache-map', SiteHealthCacheMap::class);
 
     Livewire::test('capell-html-cache.site-health-cache-map', ['siteId' => $siteDomain->site_id])
+        ->set('selectedModelType', $page->getMorphClass())
+        ->loadTable()
         ->assertCanSeeTableRecords([$cachedModelUrl])
         ->assertTableActionHidden('clear', record: (string) $cachedModelUrl->getKey());
 });

@@ -19,7 +19,7 @@ use Livewire\Component;
 
 final class CachedModelUrlsTable
 {
-    public static function configure(Table $table, ?Builder $query = null, bool $isSiteScoped = false): Table
+    public static function configure(Table $table, ?Builder $query = null, bool $isSiteScoped = false, bool $showFilters = true): Table
     {
         if ($query instanceof Builder) {
             $table = $table->query($query);
@@ -74,7 +74,7 @@ final class CachedModelUrlsTable
                     ->dateTime()
                     ->sortable(),
             ])
-            ->filters(self::filters($isSiteScoped))
+            ->filters($showFilters ? self::filters($isSiteScoped) : [])
             ->recordActions([
                 Action::make('open_url')
                     ->label(__('capell-html-cache::admin.open_url_new_tab'))

@@ -68,7 +68,11 @@ final class CachedModelUrl extends Model
             return class_basename($this->cacheable_type) . ' #' . $this->cacheable_id;
         }
 
-        foreach (['title', 'name', 'label', 'slug'] as $attribute) {
+        foreach (['name', 'label', 'slug', 'title'] as $attribute) {
+            if (! array_key_exists($attribute, $cacheable->getAttributes())) {
+                continue;
+            }
+
             $value = $cacheable->getAttribute($attribute);
 
             if (is_string($value) && $value !== '') {

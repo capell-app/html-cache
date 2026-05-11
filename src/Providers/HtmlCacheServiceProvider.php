@@ -56,7 +56,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasConfigFile('capell-html-cache')
             ->hasTranslations()
             ->hasViews('capell-html-cache')
-            ->hasMigration('2026_05_09_000001_create_cached_model_urls_table');
+            ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table');
     }
 
     public function registeringPackage(): void

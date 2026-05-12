@@ -95,15 +95,6 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return $instance;
         });
 
-        CapellCore::registerPackage(
-            self::$packageName,
-            type: self::getType(),
-            serviceProviderClass: self::class,
-            path: realpath(__DIR__ . '/../..'),
-            version: CapellCore::getInstalledPrettyVersion(self::$packageName),
-            description: fn (): string => 'Static HTML cache, dependency indexing, and cache administration for Capell.',
-        );
-
         $this
             ->registerMiddlewareAliases()
             ->registerFrontendMiddleware();

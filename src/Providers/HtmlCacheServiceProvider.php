@@ -33,6 +33,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Illuminate\Database\Eloquent\Model;
@@ -65,6 +66,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());
         $this->app->scoped(RetrievedModelStore::class, fn (): RetrievedModelStore => new RetrievedModelStore);
         $this->app->scoped(RenderedModelTracker::class, fn (): RenderedModelTracker => $this->app->make(RetrievedModelStore::class));

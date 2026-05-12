@@ -12,6 +12,7 @@ use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
 use Illuminate\Http\Request;
@@ -149,6 +150,10 @@ final class HtmlCacheMiddleware
             return false;
         }
 
+        if (! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
+            return false;
+        }
+
         if (! $pageCache->shouldCachePage($request, $response)) {
             return false;
         }
@@ -178,6 +183,10 @@ final class HtmlCacheMiddleware
         bool $forcePublic = false,
     ): Response {
         if (! $forcePublic && $this->shouldBypassHttpCache($request, $response)) {
+            return $this->privateNoStore($response);
+        }
+
+        if (! $forcePublic && ! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
             return $this->privateNoStore($response);
         }
 
@@ -237,6 +246,11 @@ final class HtmlCacheMiddleware
         } catch (Exception) {
             // Frontend context is optional for non-page responses.
         }
+
+        $keys = [
+            ...$keys,
+            ...resolve(ExtensionCacheSafetyResolver::class)->cacheTags(),
+        ];
 
         $keys = SurrogateKeyNormalizer::normalize($keys);
 

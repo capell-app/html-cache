@@ -17,7 +17,7 @@ beforeEach(function (): void {
     config()->set('capell-html-cache.write_enabled', true);
     config()->set('capell-html-cache.cache_ttl', '3600');
 
-    app(RecordExtensionRenderContributionAction::class)->clear();
+    resolve(RecordExtensionRenderContributionAction::class)->clear();
 });
 
 it('does not write public html cache for non-cacheable extension output', function (): void {

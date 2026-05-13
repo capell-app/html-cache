@@ -39,7 +39,7 @@ final class ExtensionCacheSafetyResolver
             return [];
         }
 
-        return app(RecordExtensionRenderContributionAction::class)->recorded();
+        return resolve(RecordExtensionRenderContributionAction::class)->recorded();
     }
 
     private function normalizeTag(string $tag): string

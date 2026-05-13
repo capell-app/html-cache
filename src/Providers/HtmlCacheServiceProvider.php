@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Providers;
 
+use Capell\Admin\Contracts\AdminTools\AdminToolItem;
 use Capell\Admin\Contracts\Cache\AdminCacheCleaner;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthReportExtender;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthWidget;
 use Capell\Admin\Contracts\Extenders\PageTableExtender;
+use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Facades\CapellAdmin;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
@@ -16,6 +18,7 @@ use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
 use Capell\Frontend\Contracts\RenderedModelTracker;
+use Capell\Frontend\Contracts\StaticMaintenancePageStore;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
@@ -23,6 +26,8 @@ use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
+use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
+use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
@@ -30,10 +35,12 @@ use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
+use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
+use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Illuminate\Database\Eloquent\Model;
@@ -108,6 +115,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this
             ->registerPageCacheDisk()
+            ->registerMaintenanceStorage()
             ->registerAdminBridge()
             ->registerAdminExtenders()
             ->registerModelInvalidationHooks()
@@ -126,6 +134,17 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         Route::aliasMiddleware('frontend.cache', HtmlCacheMiddleware::class);
         Route::aliasMiddleware('frontend.model_events', EnsureModelEventsRegistered::class);
         Route::aliasMiddleware('frontend.no_session_cookies_on_cache', PreventSessionCookieOnCacheableRequests::class);
+
+        return $this;
+    }
+
+    private function registerMaintenanceStorage(): self
+    {
+        $this->app->singleton(HtmlCacheStaticMaintenancePageStore::class);
+        $this->app->singleton(
+            StaticMaintenancePageStore::class,
+            fn (): HtmlCacheStaticMaintenancePageStore => $this->app->make(HtmlCacheStaticMaintenancePageStore::class),
+        );
 
         return $this;
     }
@@ -176,6 +195,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     private function registerAdminBridge(): self
     {
         CapellAdmin::registerAdminBridge(self::$packageName, HtmlCacheAdminBridge::class);
+        CapellAdmin::registerExtensionPage(self::$packageName, MaintenanceCachePage::class);
         CapellAdmin::bootAdminBridges(self::$packageName);
 
         return $this;
@@ -187,11 +207,15 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->bind(HtmlCacheAdminCacheCleaner::class);
         $this->app->bind(HtmlCacheSiteHealthReportExtender::class);
         $this->app->bind(HtmlCacheSiteHealthWidget::class);
+        $this->app->bind(MaintenanceAdminTool::class);
+        $this->app->bind(MaintenanceSiteHeaderActionExtender::class);
 
         $this->app->tag(PageCachePageTableExtender::class, PageTableExtender::TAG);
         $this->app->tag(HtmlCacheAdminCacheCleaner::class, AdminCacheCleaner::TAG);
         $this->app->tag(HtmlCacheSiteHealthReportExtender::class, SiteHealthReportExtender::TAG);
         $this->app->tag(HtmlCacheSiteHealthWidget::class, SiteHealthWidget::TAG);
+        $this->app->tag(MaintenanceAdminTool::class, AdminToolItem::TAG);
+        $this->app->tag(MaintenanceSiteHeaderActionExtender::class, SiteHeaderActionExtender::TAG);
         Livewire::component('capell-html-cache.site-health-cache-map', SiteHealthCacheMap::class);
 
         return $this;

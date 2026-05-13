@@ -8,6 +8,7 @@ enum HtmlCachePermission: string
 {
     case ViewCachedModelUrls = 'capell-html-cache.view';
     case ClearCachedModelUrls = 'capell-html-cache.clear';
+    case ManageMaintenance = 'capell-html-cache.maintenance.manage';
 
     /**
      * @return list<string>

@@ -38,6 +38,11 @@ final class HtmlCacheStore
         return $this->disk->delete(str_replace(['../', '..\\'], '', $file));
     }
 
+    public function put(string $file, string $contents): void
+    {
+        $this->disk->put(str_replace(['../', '..\\'], '', $file), $contents);
+    }
+
     public function root(): string
     {
         return $this->disk->path('');

@@ -45,10 +45,17 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 
 - Livewire: `SiteHealthCacheMap`.
 - Jobs: `RegisterCachedModelUrlsJob`.
+- Integration: registers `StaticMaintenancePageStore` so Capell frontend maintenance pages can use the `page_cache` disk when this package is installed.
 
 ## Commands
 
 - `capell:static-site {--site=} {--internal : Render URLs through the current Laravel kernel} {--refresh : Delete affected HTML cache files before rendering}` (packages/html-cache/src/Console/Commands/StaticSiteCommand.php)
+
+## Maintenance Pages
+
+Capell frontend owns maintenance page rendering, the manifest, and the runtime middleware. This package only contributes the `page_cache`-backed static store plus optional admin actions for generating those files.
+
+Generated files are written under `maintenance/` on the `page_cache` disk. The manifest at `storage/framework/capell-maintenance.json` maps host/scheme/path combinations to those files. To serve static maintenance HTML during Laravel maintenance mode, wire the frontend `frontend.maintenance` middleware into the host application's maintenance path. If this package is not installed, no static store is registered and frontend falls back to Laravel's plain 503.
 
 ## Data And Persistence
 

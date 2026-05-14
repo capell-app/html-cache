@@ -72,6 +72,6 @@
     "scopes": ["backend", "frontend"],
     "order": 45,
     "contributionTraceability": {
-        "deferredContributions": ["route"]
+        "deferredContributions": ["admin-page", "route"]
     }
 }

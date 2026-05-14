@@ -6,10 +6,12 @@ namespace Capell\HtmlCache\Providers;
 
 use Capell\Admin\Contracts\AdminTools\AdminToolItem;
 use Capell\Admin\Contracts\Cache\AdminCacheCleaner;
+use Capell\Admin\Contracts\DashboardSettingsContributor;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthReportExtender;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthWidget;
 use Capell\Admin\Contracts\Extenders\PageTableExtender;
 use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
+use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
@@ -32,6 +34,10 @@ use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
+use Capell\HtmlCache\Filament\Settings\Contributors\HtmlCacheDashboardSettingsContributor;
+use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueWidget;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
@@ -127,6 +133,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerMaintenanceStorage()
             ->registerAdminBridge()
             ->registerAdminExtenders()
+            ->registerDashboardSettingsContributor()
+            ->registerDashboardWidgets()
             ->registerModelInvalidationHooks()
             ->registerCommands()
             ->registerScheduledInvalidation()
@@ -227,6 +235,22 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->tag(MaintenanceAdminTool::class, AdminToolItem::TAG);
         $this->app->tag(MaintenanceSiteHeaderActionExtender::class, SiteHeaderActionExtender::TAG);
         Livewire::component('capell-html-cache.site-health-cache-map', SiteHealthCacheMap::class);
+
+        return $this;
+    }
+
+    private function registerDashboardSettingsContributor(): self
+    {
+        $this->app->tag([HtmlCacheDashboardSettingsContributor::class], DashboardSettingsContributor::TAG);
+
+        return $this;
+    }
+
+    private function registerDashboardWidgets(): self
+    {
+        CapellAdmin::registerDashboardWidget(HtmlCacheOverviewWidget::class, DashboardEnum::Main);
+        CapellAdmin::registerDashboardWidget(CacheCoverageUrlsWidget::class, DashboardEnum::Main);
+        CapellAdmin::registerDashboardWidget(HtmlCacheStaleQueueWidget::class, DashboardEnum::Main);
 
         return $this;
     }
@@ -401,10 +425,12 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             $frequency = 'everyFiveMinutes';
         }
 
-        $this->callAfterResolving(Schedule::class, function (Schedule $schedule) use ($frequency): void {
+        $overlapExpiresAfterMinutes = $this->configuredSchedulerOverlapMinutes();
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule) use ($frequency, $overlapExpiresAfterMinutes): void {
             $event = $schedule
                 ->command('capell:html-cache:process-stale')
-                ->withoutOverlapping()
+                ->withoutOverlapping($overlapExpiresAfterMinutes)
                 ->onOneServer();
 
             match ($frequency) {
@@ -421,6 +447,14 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         });
 
         return $this;
+    }
+
+    private function configuredSchedulerOverlapMinutes(): int
+    {
+        $configuredTimeout = config('capell-html-cache.invalidation.processing_timeout_minutes', 15);
+        $processingTimeout = is_int($configuredTimeout) ? $configuredTimeout : 15;
+
+        return max(10, $processingTimeout + 5);
     }
 
     private function usesScheduledInvalidation(): bool

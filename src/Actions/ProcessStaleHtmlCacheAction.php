@@ -8,6 +8,7 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsJob;
@@ -70,50 +71,194 @@ final class ProcessStaleHtmlCacheAction
      */
     private function nextEligibleStaleUrls(int $limit): Collection
     {
-        if (StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PENDING)->exists()) {
-            return StaleCachedUrl::query()
-                ->where('status', StaleCachedUrl::STATUS_PENDING)
-                ->orderBy('created_at')
-                ->orderBy('id')
-                ->limit($limit)
-                ->get();
+        if ($limit === 1) {
+            return $this->nextSingleEligibleStaleUrl();
         }
 
-        return $this->retryableStaleUrlsQuery()
-            ->orderBy('failed_at')
-            ->orderBy('created_at')
+        $pendingLimit = $limit;
+
+        if ($this->hasRetryableStaleUrls()) {
+            $pendingLimit = $limit - $this->retryableShareForBatch($limit);
+        }
+
+        $pending = StaleCachedUrl::query()
+            ->where('status', StaleCachedUrl::STATUS_PENDING)->oldest()
             ->orderBy('id')
-            ->limit($limit)
+            ->limit($pendingLimit)
             ->get();
+
+        if ($pending->count() >= $limit) {
+            return $pending;
+        }
+
+        $retryable = $this->retryableStaleUrls($limit - $pending->count());
+
+        return $pending->merge($retryable);
+    }
+
+    private function retryableShareForBatch(int $limit): int
+    {
+        return max(1, intdiv($limit, 4));
+    }
+
+    /**
+     * @return Collection<int, StaleCachedUrl>
+     */
+    private function nextSingleEligibleStaleUrl(): Collection
+    {
+        $pendingQuery = StaleCachedUrl::query()
+            ->where('status', StaleCachedUrl::STATUS_PENDING)
+            ->oldest()
+            ->orderBy('id');
+        $hasPending = $pendingQuery->exists();
+        $hasRetryable = $this->hasRetryableStaleUrls();
+
+        if (! $hasPending) {
+            return $this->retryableStaleUrls(1);
+        }
+
+        if (! $hasRetryable) {
+            return $pendingQuery->limit(1)->get();
+        }
+
+        if ($this->shouldPreferRetryableForSingleItemBatch()) {
+            $retryable = $this->retryableStaleUrls(1);
+
+            return $retryable->isNotEmpty() ? $retryable : $pendingQuery->limit(1)->get();
+        }
+
+        $pending = $pendingQuery->limit(1)->get();
+
+        return $pending->isNotEmpty() ? $pending : $this->retryableStaleUrls(1);
+    }
+
+    private function shouldPreferRetryableForSingleItemBatch(): bool
+    {
+        $cacheKey = 'capell-html-cache:stale-refresh:single-item-source';
+        $nextSource = Cache::get($cacheKey, 'pending');
+
+        Cache::put($cacheKey, $nextSource === 'retryable' ? 'pending' : 'retryable', now()->addDay());
+
+        return $nextSource === 'retryable';
+    }
+
+    /**
+     * @return Collection<int, StaleCachedUrl>
+     */
+    private function retryableStaleUrls(int $limit): Collection
+    {
+        if ($limit <= 0) {
+            return new Collection;
+        }
+
+        if ($limit === 1) {
+            return $this->nextSingleRetryableStaleUrl();
+        }
+
+        $failedLimit = $limit;
+
+        if ($limit > 1 && $this->timedOutProcessingStaleUrlsQuery()->exists()) {
+            $failedLimit = $limit - 1;
+        }
+
+        $failed = $this->failedStaleUrlsQuery()
+            ->oldest('failed_at')
+            ->oldest()
+            ->orderBy('id')
+            ->limit($failedLimit)
+            ->get();
+
+        if ($failed->count() >= $limit) {
+            return $failed;
+        }
+
+        $timedOutProcessing = $this->timedOutProcessingStaleUrlsQuery()
+            ->oldest('updated_at')
+            ->oldest()
+            ->orderBy('id')
+            ->limit($limit - $failed->count())
+            ->get();
+
+        return $failed->merge($timedOutProcessing);
+    }
+
+    /**
+     * @return Collection<int, StaleCachedUrl>
+     */
+    private function nextSingleRetryableStaleUrl(): Collection
+    {
+        $failed = $this->failedStaleUrlsQuery()
+            ->oldest('failed_at')
+            ->oldest()
+            ->orderBy('id')
+            ->limit(1)
+            ->get();
+        $timedOutProcessing = $this->timedOutProcessingStaleUrlsQuery()
+            ->oldest('updated_at')
+            ->oldest()
+            ->orderBy('id')
+            ->limit(1)
+            ->get();
+
+        if ($failed->isEmpty()) {
+            return $timedOutProcessing;
+        }
+
+        if ($timedOutProcessing->isEmpty()) {
+            return $failed;
+        }
+
+        if ($this->shouldPreferTimedOutProcessingForSingleRetryableBatch()) {
+            return $timedOutProcessing;
+        }
+
+        return $failed;
+    }
+
+    private function shouldPreferTimedOutProcessingForSingleRetryableBatch(): bool
+    {
+        $cacheKey = 'capell-html-cache:stale-refresh:single-retryable-source';
+        $nextSource = Cache::get($cacheKey, 'failed');
+
+        Cache::put($cacheKey, $nextSource === 'timed_out_processing' ? 'failed' : 'timed_out_processing', now()->addDay());
+
+        return $nextSource === 'timed_out_processing';
+    }
+
+    private function hasRetryableStaleUrls(): bool
+    {
+        if ($this->failedStaleUrlsQuery()->exists()) {
+            return true;
+        }
+
+        return $this->timedOutProcessingStaleUrlsQuery()->exists();
     }
 
     /**
      * @return Builder<StaleCachedUrl>
      */
-    private function retryableStaleUrlsQuery(): Builder
+    private function failedStaleUrlsQuery(): Builder
     {
         $now = CarbonImmutable::now();
-        $processingTimeoutAt = $now->subMinutes($this->configuredProcessingTimeoutMinutes());
 
         return StaleCachedUrl::query()
-            ->where(function (Builder $query) use ($now, $processingTimeoutAt): void {
+            ->where('status', StaleCachedUrl::STATUS_FAILED)
+            ->where('attempts', '<', $this->configuredMaxAttempts())
+            ->where(function (Builder $query) use ($now): void {
                 $query
-                    ->where(function (Builder $query) use ($now): void {
-                        $query
-                            ->where('status', StaleCachedUrl::STATUS_FAILED)
-                            ->where('attempts', '<', $this->configuredMaxAttempts())
-                            ->where(function (Builder $query) use ($now): void {
-                                $query
-                                    ->whereNull('failed_at')
-                                    ->orWhere('failed_at', '<=', $now->subMinutes($this->retryBackoffMinutes()));
-                            });
-                    })
-                    ->orWhere(function (Builder $query) use ($processingTimeoutAt): void {
-                        $query
-                            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
-                            ->where('updated_at', '<=', $processingTimeoutAt);
-                    });
+                    ->whereNull('failed_at')
+                    ->orWhere('failed_at', '<=', $now->subMinutes($this->retryBackoffMinutes()));
             });
+    }
+
+    /**
+     * @return Builder<StaleCachedUrl>
+     */
+    private function timedOutProcessingStaleUrlsQuery(): Builder
+    {
+        return StaleCachedUrl::query()
+            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+            ->where('updated_at', '<=', CarbonImmutable::now()->subMinutes($this->configuredProcessingTimeoutMinutes()));
     }
 
     /**
@@ -205,6 +350,7 @@ final class ProcessStaleHtmlCacheAction
             $this->completeClaim($staleCachedUrl, [
                 'status' => StaleCachedUrl::STATUS_PROCESSED,
                 'claim_token' => null,
+                'attempts' => 0,
                 'processed_at' => CarbonImmutable::now(),
                 'failed_at' => null,
                 'last_error' => null,

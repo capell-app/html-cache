@@ -40,7 +40,7 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $request = $this->requestForStaleCachedUrl($staleCachedUrl);
-        $previousRequest = app('request');
+        $previousRequest = resolve('request');
         app()->instance('request', $request);
 
         try {

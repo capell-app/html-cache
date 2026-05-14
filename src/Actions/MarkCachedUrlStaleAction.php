@@ -195,6 +195,7 @@ final class MarkCachedUrlStaleAction
                 'reason',
                 'status',
                 'claim_token',
+                'attempts',
                 'processed_at',
                 'failed_at',
                 'last_error',

@@ -47,6 +47,7 @@ use Capell\Tests\Fixtures\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -276,10 +277,11 @@ it('marks cached urls stale for a model from the cache map', function (): void {
         ->withTranslations()
         ->create();
     $url = 'https://example.test/about';
+    $urlHash = CachedModelUrl::hashUrl($url);
 
     CachedModelUrl::query()->create([
         'url' => $url,
-        'url_hash' => CachedModelUrl::hashUrl($url),
+        'url_hash' => $urlHash,
         'path' => '/about',
         'site_id' => $siteDomain->site_id,
         'site_domain_id' => $siteDomain->getKey(),
@@ -289,9 +291,24 @@ it('marks cached urls stale for a model from the cache map', function (): void {
         'cached_at' => now(),
         'last_seen_at' => now(),
     ]);
+    StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => $urlHash,
+        'path' => '/about',
+        'stale_key' => StaleCachedUrl::staleKey($urlHash, $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'reason' => 'previous_failure',
+        'status' => StaleCachedUrl::STATUS_FAILED,
+        'attempts' => 4,
+        'failed_at' => now()->subMinutes(6),
+    ]);
 
     expect(MarkCachedUrlsForModelStaleAction::run($page))->toBe(1)
-        ->and(StaleCachedUrl::query()->where('url', $url)->where('status', StaleCachedUrl::STATUS_PENDING)->exists())->toBeTrue();
+        ->and(StaleCachedUrl::query()->where('url', $url)->first())
+        ->status->toBe(StaleCachedUrl::STATUS_PENDING)
+        ->attempts->toBe(0);
 });
 
 it('clears only the selected site scope when clearing a cached model url row', function (): void {
@@ -832,7 +849,7 @@ it('retries failed stale cache rows after the retry backoff', function (): void 
     expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
-        ->and($staleCachedUrl->attempts)->toBe(2);
+        ->and($staleCachedUrl->attempts)->toBe(0);
 });
 
 it('does not claim actively processing stale cache rows', function (): void {
@@ -1043,7 +1060,7 @@ it('marks repeatedly failing stale cache rows exhausted after the configured max
         ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(0);
 });
 
-it('does not reset the retry budget when a failing stale url is marked stale again', function (): void {
+it('resets the retry budget when a failing stale url is marked stale again', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.invalidation.max_attempts', 2);
 
@@ -1076,14 +1093,15 @@ it('does not reset the retry budget when a failing stale url is marked stale aga
 
     MarkCachedUrlStaleAction::run($url, 'changed_again');
 
-    expect($staleCachedUrl->refresh()->attempts)->toBe(1)
+    expect($staleCachedUrl->refresh()->attempts)->toBe(0)
         ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
-        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_EXHAUSTED)
-        ->and($staleCachedUrl->attempts)->toBe(2);
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($staleCachedUrl->attempts)->toBe(1);
 });
 
 it('processes fresh pending stale urls before retrying older failed rows', function (): void {
     Storage::fake('page_cache');
+    Cache::forget('capell-html-cache:stale-refresh:single-item-source');
     config()->set('capell-html-cache.invalidation.retry_backoff_minutes', 5);
 
     $siteDomain = SiteDomain::factory()->create([
@@ -1098,7 +1116,7 @@ it('processes fresh pending stale urls before retrying older failed rows', funct
 
     bindHtmlCacheFrontendContext($page);
 
-    foreach (['/old', '/new'] as $path) {
+    foreach (['/old', '/new', '/new-two'] as $path) {
         Storage::disk('page_cache')->put(
             resolve(HtmlCachePathResolver::class)->pathForUrl($path, $siteDomain),
             'old cached page',
@@ -1107,6 +1125,7 @@ it('processes fresh pending stale urls before retrying older failed rows', funct
 
     Route::get('/old', fn (): mixed => response('broken', 500, ['Content-Type' => 'text/html']));
     Route::get('/new', fn (): mixed => response('fresh pending page', 200, ['Content-Type' => 'text/html']));
+    Route::get('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
 
     $oldFailedStaleCachedUrl = StaleCachedUrl::query()->create([
         'url' => 'https://example.test/old',
@@ -1137,10 +1156,173 @@ it('processes fresh pending stale urls before retrying older failed rows', funct
         'reason' => 'test',
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
+    $secondPendingStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/new-two',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/new-two'),
+        'path' => '/new-two',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/new-two'), $siteDomain->site_id, $siteDomain->getKey(), '/new-two'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-two', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-two', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
 
     expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
         ->and($newPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
-        ->and($oldFailedStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED);
+        ->and($oldFailedStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($secondPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
+        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and($oldFailedStaleCachedUrl->refresh()->attempts)->toBe(2)
+        ->and($oldFailedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($secondPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING);
+});
+
+it('processes retryable stale urls alongside pending batch capacity', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.invalidation.retry_backoff_minutes', 5);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+
+    bindHtmlCacheFrontendContext($page);
+
+    foreach (['/old', '/new-one', '/new-two'] as $path) {
+        Storage::disk('page_cache')->put(
+            resolve(HtmlCachePathResolver::class)->pathForUrl($path, $siteDomain),
+            'old cached page',
+        );
+    }
+
+    Route::get('/old', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
+    Route::get('/new-one', fn (): mixed => response('fresh first pending page', 200, ['Content-Type' => 'text/html']));
+    Route::get('/new-two', fn (): mixed => response('fresh second pending page', 200, ['Content-Type' => 'text/html']));
+
+    $oldFailedStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/old',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/old'),
+        'path' => '/old',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/old'), $siteDomain->site_id, $siteDomain->getKey(), '/old'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/old', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/old', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_FAILED,
+        'attempts' => 1,
+        'failed_at' => now()->subMinutes(6),
+    ]);
+    $firstPendingStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/new-one',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/new-one'),
+        'path' => '/new-one',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/new-one'), $siteDomain->site_id, $siteDomain->getKey(), '/new-one'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-one', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-one', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+    $secondPendingStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/new-two',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/new-two'),
+        'path' => '/new-two',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/new-two'), $siteDomain->site_id, $siteDomain->getKey(), '/new-two'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-two', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/new-two', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(2))->toBe(2)
+        ->and($firstPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($oldFailedStaleCachedUrl->refresh()->attempts)->toBe(2)
+        ->and($oldFailedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($secondPendingStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING);
+});
+
+it('alternates failed and timed out processing rows in single item retry batches', function (): void {
+    Storage::fake('page_cache');
+    Cache::forget('capell-html-cache:stale-refresh:single-retryable-source');
+    config()->set('capell-html-cache.invalidation.processing_timeout_minutes', 15);
+    config()->set('capell-html-cache.invalidation.retry_backoff_minutes', 5);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+
+    bindHtmlCacheFrontendContext($page);
+
+    foreach (['/failed', '/timed-out'] as $path) {
+        Storage::disk('page_cache')->put(
+            resolve(HtmlCachePathResolver::class)->pathForUrl($path, $siteDomain),
+            'old cached page',
+        );
+    }
+
+    Route::get('/failed', fn (): mixed => response('still broken', 500, ['Content-Type' => 'text/html']));
+    Route::get('/timed-out', fn (): mixed => response('fresh timed out page', 200, ['Content-Type' => 'text/html']));
+
+    $failedStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/failed',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/failed'),
+        'path' => '/failed',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/failed'), $siteDomain->site_id, $siteDomain->getKey(), '/failed'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/failed', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/failed', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_FAILED,
+        'attempts' => 1,
+        'failed_at' => now()->subMinutes(6),
+    ]);
+    $timedOutStaleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/timed-out',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/timed-out'),
+        'path' => '/timed-out',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl('https://example.test/timed-out'), $siteDomain->site_id, $siteDomain->getKey(), '/timed-out'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/timed-out', $siteDomain),
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/timed-out', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PROCESSING,
+        'claim_token' => 'timed-out-claim',
+        'attempts' => 1,
+    ]);
+    $timedOutStaleCachedUrl->forceFill(['updated_at' => now()->subMinutes(16)])->save();
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and($failedStaleCachedUrl->refresh()->attempts)->toBe(2)
+        ->and($failedStaleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($timedOutStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSING)
+        ->and(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and($timedOutStaleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForUrl('/timed-out', $siteDomain)))->toBe('fresh timed out page');
 });
 
 it('processes stale cache command with the requested limit', function (): void {

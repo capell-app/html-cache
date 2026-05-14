@@ -7,9 +7,13 @@ namespace Capell\HtmlCache\Support\Cache;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use RuntimeException;
 use Silber\PageCache\Cache;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
@@ -45,6 +49,7 @@ final class PageCache extends Cache
 
         if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
             $this->writeCacheFile(
+                $laravelRequest,
                 $this->join([$path, $filename . self::ERROR_EXTENSION]),
                 (string) $laravelResponse->getContent(),
             );
@@ -57,6 +62,7 @@ final class PageCache extends Cache
         }
 
         $this->writeCacheFile(
+            $laravelRequest,
             $this->join([$path, $filename . '.' . $extension]),
             $content,
         );
@@ -236,8 +242,68 @@ final class PageCache extends Cache
         return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
     }
 
-    private function writeCacheFile(string $path, string $content): void
+    private function writeCacheFile(Request $request, string $path, string $content): void
     {
-        $this->files->replace($path, $content);
+        $staleCachedUrlId = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE);
+        $claimToken = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
+
+        if ($staleCachedUrlId === null && $claimToken === null) {
+            $this->files->replace($path, $content);
+
+            return;
+        }
+
+        $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrlId, $claimToken, $path, $content);
+    }
+
+    private function replaceCacheFileForCurrentStaleClaim(mixed $staleCachedUrlId, mixed $claimToken, string $path, string $content): void
+    {
+        if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
+            return;
+        }
+
+        $temporaryPath = $this->temporaryPathForAtomicReplace($path);
+        $bytesWritten = $this->files->put($temporaryPath, $content);
+
+        if ($bytesWritten === false || $bytesWritten !== strlen($content)) {
+            throw new RuntimeException(sprintf('Unable to write temporary cache file for "%s".', $path));
+        }
+
+        try {
+            DB::transaction(function () use ($staleCachedUrlId, $claimToken, $path, $temporaryPath): void {
+                $staleCachedUrl = StaleCachedUrl::query()
+                    ->whereKey((int) $staleCachedUrlId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (
+                    ! $staleCachedUrl instanceof StaleCachedUrl
+                    || $staleCachedUrl->status !== StaleCachedUrl::STATUS_PROCESSING
+                    || $staleCachedUrl->claim_token !== $claimToken
+                ) {
+                    return;
+                }
+
+                if (! $this->files->move($temporaryPath, $path)) {
+                    throw new RuntimeException(sprintf('Unable to replace cache file for "%s".', $path));
+                }
+            });
+        } finally {
+            if ($this->files->exists($temporaryPath)) {
+                $this->files->delete($temporaryPath);
+            }
+        }
+    }
+
+    private function temporaryPathForAtomicReplace(string $path): string
+    {
+        $directory = dirname($path);
+        $temporaryPath = tempnam($directory, basename($path) . '.tmp.');
+
+        if (! is_string($temporaryPath) || $temporaryPath === '') {
+            throw new RuntimeException(sprintf('Unable to create temporary cache file for "%s".', $path));
+        }
+
+        return $temporaryPath;
     }
 }

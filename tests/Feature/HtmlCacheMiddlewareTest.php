@@ -97,6 +97,7 @@ it('can bypass cache reads for internal stale refresh requests while still allow
     ]);
     $request = Request::create('https://example.test/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
+
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('old cached html', 200, ['Content-Type' => 'text/html']));
 

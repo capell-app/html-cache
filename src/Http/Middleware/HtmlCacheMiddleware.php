@@ -20,6 +20,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 final class HtmlCacheMiddleware
 {
+    public const BYPASS_CACHE_READ_ATTRIBUTE = 'capell.html_cache.bypass_cache_read';
+
     private const INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
     public function handle(Request $request, Closure $next): Response
@@ -34,7 +36,9 @@ final class HtmlCacheMiddleware
             return $this->applyCacheHeaders($request, $next($request));
         }
 
-        if ($this->shouldBypassCacheRead($request)) {
+        $forceCacheReadBypass = $this->shouldForceCacheReadBypass($request);
+
+        if (! $forceCacheReadBypass && $this->shouldBypassCacheRead($request)) {
             $response = $next($request);
 
             if ($this->shouldBypassHttpCache($request, $response)) {
@@ -45,16 +49,19 @@ final class HtmlCacheMiddleware
         }
 
         $pageCache = resolve(PageCache::class);
-        $cachedPage = $pageCache->getCachePage($request);
 
-        if ($cachedPage !== false) {
-            return $this->cacheHitResponse($cachedPage, 200);
-        }
+        if (! $forceCacheReadBypass) {
+            $cachedPage = $pageCache->getCachePage($request);
 
-        $cachedErrorPage = $pageCache->getCacheErrorPage($request);
+            if ($cachedPage !== false) {
+                return $this->cacheHitResponse($cachedPage, 200);
+            }
 
-        if ($cachedErrorPage !== false) {
-            return $this->cacheHitResponse($cachedErrorPage, 404);
+            $cachedErrorPage = $pageCache->getCacheErrorPage($request);
+
+            if ($cachedErrorPage !== false) {
+                return $this->cacheHitResponse($cachedErrorPage, 404);
+            }
         }
 
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $next($request));
@@ -121,6 +128,11 @@ final class HtmlCacheMiddleware
 
         return config('capell-html-cache.cache_skip_authenticated', true) === true
             && ($request->user() !== null || $this->hasIncomingSessionCookie($request));
+    }
+
+    private function shouldForceCacheReadBypass(Request $request): bool
+    {
+        return $request->attributes->get(self::BYPASS_CACHE_READ_ATTRIBUTE) === true;
     }
 
     private function isInertiaRequest(Request $request): bool

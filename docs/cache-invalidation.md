@@ -1,17 +1,35 @@
 # HTML Cache Invalidation
 
-HTML Cache stores two things: the cached HTML file and an index of which models were seen while rendering a URL. Clear both when a package changes content that may already be cached.
+HTML Cache stores cached HTML files, an index of which models were seen while rendering each URL, and optionally a stale URL queue for scheduled refreshes. Clear or refresh both when a package changes content that may already be cached.
+
+## Invalidation Modes
+
+The default invalidation mode is `instant`, which keeps the existing behaviour: model and routing changes delete affected cached files immediately. Enable scheduled invalidation with:
+
+```env
+CAPELL_HTML_CACHE_INVALIDATION_MODE=scheduled
+CAPELL_HTML_CACHE_INVALIDATION_SCHEDULE=everyFiveMinutes
+CAPELL_HTML_CACHE_INVALIDATION_BATCH_SIZE=100
+```
+
+In `scheduled` mode, model changes insert rows into `stale_cached_urls` instead of deleting cached files immediately. The scheduler runs `capell:html-cache:process-stale` on the configured cadence, renders fresh HTML through the Laravel kernel, and atomically replaces the existing cache file only after the refreshed response is safe and cacheable.
+
+If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete, deletes the old cache files, and removes matching `cached_model_urls` rows.
 
 ## Main Actions
 
-| Action                          | Use it when                                                                  |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `ClearCachedUrlAction`          | You know the public URL that should be removed from the cache.               |
-| `ClearCachedPageUrlsAction`     | You have a collection of URLs and want a simple count of cleared entries.    |
-| `ClearCachedUrlsForModelAction` | You changed one model and want to clear every cached URL that referenced it. |
-| `RecordCachedModelUrlsAction`   | A render pass knows which models contributed to a cached URL.                |
-| `GenerateStaticSiteAction`      | A full static generation run is needed for one `Site`.                       |
-| `GenerateStaticSitesAction`     | Static generation should run for all selected sites.                         |
+| Action                              | Use it when                                                                  |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| `ClearCachedUrlAction`              | You know the public URL that should be removed from the cache.               |
+| `ClearCachedPageUrlsAction`         | You have a collection of URLs and want a simple count of cleared entries.    |
+| `ClearCachedUrlsForModelAction`     | You changed one model and want to clear every cached URL that referenced it. |
+| `MarkCachedUrlStaleAction`          | You know a URL should be refreshed on the next scheduled cycle.              |
+| `MarkCachedUrlsForModelStaleAction` | You changed one model and want scheduled mode to refresh indexed URLs.       |
+| `MarkAllCachedUrlsStaleAction`      | Broad routing/domain changes should queue all indexed URLs as stale.         |
+| `ProcessStaleHtmlCacheAction`       | Process pending stale URLs and atomically refresh their cached HTML.         |
+| `RecordCachedModelUrlsAction`       | A render pass knows which models contributed to a cached URL.                |
+| `GenerateStaticSiteAction`          | A full static generation run is needed for one `Site`.                       |
+| `GenerateStaticSitesAction`         | Static generation should run for all selected sites.                         |
 
 The admin cache map reads `cached_model_urls`; it does not scan public HTML on every request. If a package renders model-backed content but never records dependencies, cache invalidation can only work by URL.
 
@@ -70,8 +88,11 @@ vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml
 The package command is:
 
 ```text
+capell:html-cache:process-stale {--limit=}
 capell:static-site {--site=} {--internal} {--refresh}
 ```
+
+`capell:html-cache:process-stale` is scheduled automatically when `capell-html-cache.invalidation.mode` is `scheduled`. `--limit` overrides the configured batch size for one run.
 
 `--internal` renders through the current Laravel kernel. `--refresh` deletes affected cached files before rendering.
 

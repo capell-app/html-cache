@@ -11,6 +11,11 @@ return [
     'cache_ttl' => 3600,
     'cache_vary_headers' => ['Accept-Encoding'],
     'cache_skip_authenticated' => true,
+    'invalidation' => [
+        'mode' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_MODE', 'instant'),
+        'schedule' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_SCHEDULE', 'everyFiveMinutes'),
+        'batch_size' => (int) Env::get('CAPELL_HTML_CACHE_INVALIDATION_BATCH_SIZE', 100),
+    ],
     'model_event_registration_mode' => Env::get('CAPELL_MODEL_EVENT_REGISTRATION_MODE', 'deferred'),
     'static_generation' => [
         'internal_requests' => Env::get('CAPELL_STATIC_HTML_INTERNAL_REQUESTS', false),

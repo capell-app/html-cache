@@ -24,7 +24,10 @@ use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
+use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
+use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
+use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
@@ -44,6 +47,7 @@ use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Route;
@@ -64,7 +68,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasConfigFile('capell-html-cache')
             ->hasTranslations()
             ->hasViews('capell-html-cache')
-            ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table');
+            ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
+            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table');
     }
 
     public function registeringPackage(): void
@@ -122,6 +127,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerAdminExtenders()
             ->registerModelInvalidationHooks()
             ->registerCommands()
+            ->registerScheduledInvalidation()
             ->ensurePermissions()
             ->registerOptimization();
     }
@@ -245,7 +251,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 return null;
             }
 
-            $this->dispatchClearAllHtmlCache();
+            $this->dispatchClearAllHtmlCache($this->originalSiteDomainAttributes($siteDomain));
 
             return null;
         });
@@ -289,8 +295,23 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         return $this;
     }
 
-    private function dispatchClearAllHtmlCache(): void
+    /**
+     * @param  array<string, mixed>|null  $cachePathSiteDomainAttributes
+     */
+    private function dispatchClearAllHtmlCache(?array $cachePathSiteDomainAttributes = null): void
     {
+        if ($this->usesScheduledInvalidation()) {
+            if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
+                MarkAllCachedUrlsStaleAction::dispatchSync('all_changed', $cachePathSiteDomainAttributes);
+
+                return;
+            }
+
+            MarkAllCachedUrlsStaleAction::dispatchAfterResponse('all_changed', $cachePathSiteDomainAttributes);
+
+            return;
+        }
+
         if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
             ClearAllHtmlCacheAction::dispatchSync();
 
@@ -302,6 +323,18 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function dispatchClearCachedUrlsForModel(Model $model): void
     {
+        if ($this->usesScheduledInvalidation()) {
+            if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
+                MarkCachedUrlsForModelStaleAction::dispatchSync($model);
+
+                return;
+            }
+
+            MarkCachedUrlsForModelStaleAction::dispatchAfterResponse($model);
+
+            return;
+        }
+
         if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
             ClearCachedUrlsForModelAction::dispatchSync($model);
 
@@ -315,6 +348,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->commands([
+                ProcessStaleHtmlCacheCommand::class,
                 StaticSiteCommand::class,
             ]);
         }
@@ -331,6 +365,65 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         }
 
         return $this;
+    }
+
+    private function registerScheduledInvalidation(): self
+    {
+        if (! $this->usesScheduledInvalidation()) {
+            return $this;
+        }
+
+        $frequency = config('capell-html-cache.invalidation.schedule', 'everyFiveMinutes');
+
+        if (! is_string($frequency) || $frequency === '') {
+            $frequency = 'everyFiveMinutes';
+        }
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule) use ($frequency): void {
+            $event = $schedule
+                ->command('capell:html-cache:process-stale')
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            match ($frequency) {
+                'everyMinute' => $event->everyMinute(),
+                'everyTwoMinutes' => $event->everyTwoMinutes(),
+                'everyThreeMinutes' => $event->everyThreeMinutes(),
+                'everyFourMinutes' => $event->everyFourMinutes(),
+                'everyTenMinutes' => $event->everyTenMinutes(),
+                'everyFifteenMinutes' => $event->everyFifteenMinutes(),
+                'everyThirtyMinutes' => $event->everyThirtyMinutes(),
+                'hourly' => $event->hourly(),
+                default => $event->everyFiveMinutes(),
+            };
+        });
+
+        return $this;
+    }
+
+    private function usesScheduledInvalidation(): bool
+    {
+        return config('capell-html-cache.invalidation.mode', 'instant') === 'scheduled';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function originalSiteDomainAttributes(SiteDomain $siteDomain): ?array
+    {
+        if (! $siteDomain->wasChanged(['scheme', 'domain', 'path'])) {
+            return null;
+        }
+
+        return [
+            'id' => $siteDomain->getKey(),
+            'site_id' => $siteDomain->getOriginal('site_id'),
+            'language_id' => $siteDomain->getOriginal('language_id'),
+            'scheme' => $siteDomain->getOriginal('scheme'),
+            'domain' => $siteDomain->getOriginal('domain'),
+            'path' => $siteDomain->getOriginal('path'),
+            'status' => $siteDomain->getOriginal('status'),
+        ];
     }
 
     private function registerOptimization(): self

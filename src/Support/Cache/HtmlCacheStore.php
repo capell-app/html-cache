@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\Cache;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemManager;
+use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Throwable;
 
@@ -41,6 +42,15 @@ final class HtmlCacheStore
     public function put(string $file, string $contents): void
     {
         $this->disk->put(str_replace(['../', '..\\'], '', $file), $contents);
+    }
+
+    public function replace(string $file, string $contents): void
+    {
+        $safeFile = str_replace(['../', '..\\'], '', $file);
+        $path = $this->disk->path($safeFile);
+
+        File::ensureDirectoryExists(dirname($path), 0775, true);
+        File::replace($path, $contents);
     }
 
     public function root(): string

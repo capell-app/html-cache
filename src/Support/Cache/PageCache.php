@@ -44,10 +44,9 @@ final class PageCache extends Cache
         $this->files->makeDirectory($path, 0775, true, true);
 
         if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
-            $this->files->put(
+            $this->writeCacheFile(
                 $this->join([$path, $filename . self::ERROR_EXTENSION]),
-                $laravelResponse->getContent(),
-                true,
+                (string) $laravelResponse->getContent(),
             );
 
             return;
@@ -57,10 +56,9 @@ final class PageCache extends Cache
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
-        $this->files->put(
+        $this->writeCacheFile(
             $this->join([$path, $filename . '.' . $extension]),
             $content,
-            true,
         );
     }
 
@@ -236,5 +234,10 @@ final class PageCache extends Cache
     private function containsAuthoringSurface(string $content): bool
     {
         return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
+    }
+
+    private function writeCacheFile(string $path, string $content): void
+    {
+        $this->files->replace($path, $content);
     }
 }

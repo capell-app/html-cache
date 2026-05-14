@@ -88,6 +88,29 @@ it('returns cached 404 html with a 404 status code', function (): void {
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT');
 });
 
+it('can bypass cache reads for internal stale refresh requests while still allowing writes', function (): void {
+    Storage::fake('page_cache');
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
+    app()->instance('request', $request);
+    resolve(PageCache::class)->cache($request, response('old cached html', 200, ['Content-Type' => 'text/html']));
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh missing html', 404, ['Content-Type' => 'text/html']),
+    );
+
+    expect($response->getStatusCode())->toBe(404)
+        ->and($response->getContent())->toBe('fresh missing html')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
+        ->and(Storage::disk('page_cache')->exists('https.example.test/missing.404.html'))->toBeTrue();
+});
+
 it('strips configured cookies from anonymous cache hits', function (): void {
     Storage::fake('page_cache');
     config()->set('session.cookie', 'capell_session');

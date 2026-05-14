@@ -326,7 +326,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     {
         $table = config('permission.table_names.permissions', 'permissions');
 
-        if (is_string($table) && app(RuntimeSchemaState::class)->hasTable($table)) {
+        if (is_string($table) && resolve(RuntimeSchemaState::class)->hasTable($table)) {
             EnsureHtmlCachePermissionsAction::run();
         }
 

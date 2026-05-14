@@ -9,6 +9,8 @@ use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 final class RetrievedModelStore implements RenderedModelTracker
 {
@@ -53,7 +55,18 @@ final class RetrievedModelStore implements RenderedModelTracker
             $retrievedModels = $this->retrievedModels;
             $seenAt = CarbonImmutable::now();
 
-            defer(static fn (): mixed => dispatch_sync(new RegisterCachedModelUrlsJob($url, $retrievedModels, $seenAt)));
+            defer(static function () use ($url, $retrievedModels, $seenAt): void {
+                try {
+                    dispatch_sync(new RegisterCachedModelUrlsJob($url, $retrievedModels, $seenAt));
+                } catch (Throwable $throwable) {
+                    Log::warning('Unable to record cached model URLs after rendering.', [
+                        'url' => $url,
+                        'model_types' => array_keys($retrievedModels),
+                        'exception' => $throwable::class,
+                        'message' => $throwable->getMessage(),
+                    ]);
+                }
+            });
         } elseif ($mode === 'async') {
             dispatch(new RegisterCachedModelUrlsJob($url, $this->retrievedModels, CarbonImmutable::now()));
         } else {

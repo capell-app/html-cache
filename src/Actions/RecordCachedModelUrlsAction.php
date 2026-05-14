@@ -94,6 +94,6 @@ final class RecordCachedModelUrlsAction
                         $cachedModelUrl->delete();
                     }
                 });
-        });
+        }, attempts: 5);
     }
 }

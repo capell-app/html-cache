@@ -93,6 +93,13 @@ it('records rendered models against a cached url and removes stale model links',
         ->cacheable_id->toBe($page->getKey());
 });
 
+it('configures cached model url registration retries and backoff', function (): void {
+    $job = new RegisterCachedModelUrlsJob('https://example.test/about', []);
+
+    expect($job->tries)->toBe(5)
+        ->and($job->backoff())->toBe([1, 5, 15, 30]);
+});
+
 it('clears cached files and table rows for a url', function (): void {
     Storage::fake('page_cache');
 

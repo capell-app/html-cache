@@ -20,6 +20,8 @@ final class RegisterCachedModelUrlsJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public int $tries = 5;
+
     /**
      * @param  array<string, array<int, int|string>>  $models
      */
@@ -32,5 +34,13 @@ final class RegisterCachedModelUrlsJob implements ShouldQueue
     public function handle(): void
     {
         RecordCachedModelUrlsAction::run($this->url, $this->models, $this->seenAt ?? CarbonImmutable::now());
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function backoff(): array
+    {
+        return [1, 5, 15, 30];
     }
 }

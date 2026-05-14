@@ -34,18 +34,20 @@ final class CacheCoverageUrlsWidget extends BaseWidget implements CapellWidgetCo
             ->paginated(false)
             ->searchable(false)
             ->heading(__('capell-html-cache::dashboard.cache_coverage_urls'))
+            ->emptyStateHeading(__('capell-html-cache::dashboard.no_cache_coverage_urls'))
+            ->emptyStateDescription(__('capell-html-cache::dashboard.no_cache_coverage_urls_description'))
             ->columns([
                 TextColumn::make('state')
                     ->label(__('capell-html-cache::dashboard.state')),
                 TextColumn::make('url')
                     ->label(__('capell-html-cache::dashboard.url'))
                     ->limit(60)
+                    ->tooltip(fn (mixed $state): ?string => is_string($state) && $state !== '' ? $state : null)
                     ->wrap(),
                 TextColumn::make('site')
                     ->label(__('capell-html-cache::dashboard.site')),
                 TextColumn::make('hits')
-                    ->label(__('capell-html-cache::dashboard.hits'))
-                    ->numeric(),
+                    ->label(__('capell-html-cache::dashboard.page_hits')),
                 TextColumn::make('last_seen')
                     ->label(__('capell-html-cache::dashboard.last_seen')),
             ]);

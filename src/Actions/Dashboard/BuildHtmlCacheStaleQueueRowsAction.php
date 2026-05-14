@@ -22,17 +22,22 @@ final class BuildHtmlCacheStaleQueueRowsAction
     public function handle(int $limit = 5): Collection
     {
         return SiteScope::applyForCurrentActor(StaleCachedUrl::query(), denyWhenMissingActor: true)
-            ->orderByRaw("CASE WHEN status IN ('failed', 'exhausted') THEN 0 WHEN status IN ('pending', 'processing') THEN 1 ELSE 2 END")
+            ->whereIn('status', [
+                StaleCachedUrl::STATUS_FAILED,
+                StaleCachedUrl::STATUS_EXHAUSTED,
+                StaleCachedUrl::STATUS_PENDING,
+                StaleCachedUrl::STATUS_PROCESSING,
+            ])
             ->orderByDesc('updated_at')
             ->limit($limit)
             ->get()
             ->map(fn (StaleCachedUrl $staleUrl): array => [
                 'id' => 'stale-url-' . $staleUrl->id,
                 'url' => $staleUrl->url,
-                'status' => $staleUrl->status,
+                'status' => __('capell-html-cache::dashboard.status_' . $staleUrl->status),
                 'attempts' => $staleUrl->attempts,
-                'reason' => $staleUrl->reason ?? '-',
-                'updated' => $staleUrl->updated_at?->diffForHumans() ?? '-',
+                'reason' => $staleUrl->reason ?? __('capell-html-cache::dashboard.not_available'),
+                'updated' => $staleUrl->updated_at?->diffForHumans() ?? __('capell-html-cache::dashboard.not_available'),
             ])
             ->values();
     }

@@ -34,10 +34,13 @@ final class HtmlCacheStaleQueueWidget extends BaseWidget implements CapellWidget
             ->paginated(false)
             ->searchable(false)
             ->heading(__('capell-html-cache::dashboard.stale_queue'))
+            ->emptyStateHeading(__('capell-html-cache::dashboard.no_stale_queue'))
+            ->emptyStateDescription(__('capell-html-cache::dashboard.no_stale_queue_description'))
             ->columns([
                 TextColumn::make('url')
                     ->label(__('capell-html-cache::dashboard.url'))
                     ->limit(60)
+                    ->tooltip(fn (mixed $state): ?string => is_string($state) && $state !== '' ? $state : null)
                     ->wrap(),
                 TextColumn::make('status')
                     ->label(__('capell-html-cache::dashboard.status')),
@@ -46,7 +49,8 @@ final class HtmlCacheStaleQueueWidget extends BaseWidget implements CapellWidget
                     ->numeric(),
                 TextColumn::make('reason')
                     ->label(__('capell-html-cache::dashboard.reason'))
-                    ->limit(30),
+                    ->limit(30)
+                    ->tooltip(fn (mixed $state): ?string => is_string($state) && $state !== '' ? $state : null),
                 TextColumn::make('updated')
                     ->label(__('capell-html-cache::dashboard.updated')),
             ]);

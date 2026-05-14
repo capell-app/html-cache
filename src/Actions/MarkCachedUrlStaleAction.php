@@ -9,6 +9,7 @@ use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -63,9 +64,21 @@ final class MarkCachedUrlStaleAction
      */
     private function cachedModelUrls(string $url): Collection
     {
+        $urlHash = CachedModelUrl::hashUrl($url);
+
         return CachedModelUrl::query()
             ->with('siteDomain')
-            ->where('url_hash', CachedModelUrl::hashUrl($url))
+            ->select('cached_model_urls.*')
+            ->joinSub(
+                CachedModelUrl::query()
+                    ->selectRaw('min(id) as selected_id')
+                    ->where('url_hash', $urlHash)
+                    ->groupBy('url_hash', 'site_id', 'site_domain_id', 'path'),
+                'unique_cached_urls',
+                'cached_model_urls.id',
+                '=',
+                'unique_cached_urls.selected_id',
+            )
             ->get();
     }
 
@@ -146,11 +159,11 @@ final class MarkCachedUrlStaleAction
         ?string $errorCachePath,
         string $reason,
     ): void {
-        StaleCachedUrl::query()->updateOrCreate(
-            [
+        $now = CarbonImmutable::now();
+
+        StaleCachedUrl::query()->upsert(
+            [[
                 'stale_key' => StaleCachedUrl::staleKey($urlHash, $siteId, $siteDomainId, $path),
-            ],
-            [
                 'url' => $url,
                 'url_hash' => $urlHash,
                 'path' => $path,
@@ -161,9 +174,32 @@ final class MarkCachedUrlStaleAction
                 'error_cache_path' => $errorCachePath,
                 'reason' => $reason,
                 'status' => StaleCachedUrl::STATUS_PENDING,
+                'claim_token' => null,
+                'attempts' => 0,
                 'processed_at' => null,
                 'failed_at' => null,
                 'last_error' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]],
+            ['stale_key'],
+            [
+                'url',
+                'url_hash',
+                'path',
+                'site_id',
+                'site_domain_id',
+                'language_id',
+                'cache_path',
+                'error_cache_path',
+                'reason',
+                'status',
+                'claim_token',
+                'processed_at',
+                'failed_at',
+                'last_error',
+                'created_at',
+                'updated_at',
             ],
         );
     }

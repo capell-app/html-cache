@@ -6,13 +6,13 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
-use Capell\Frontend\Contracts\HtmlMinifier;
-use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -33,12 +33,13 @@ final class RefreshCachedUrlAtomicallyAction
         $siteDomain = is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain ? $resolved[0] : null;
 
         if (! $siteDomain instanceof SiteDomain) {
+            $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
             $this->deleteConfirmedObsoleteCache($staleCachedUrl);
 
             return;
         }
 
-        $request = $this->requestForUrl($staleCachedUrl->url);
+        $request = $this->requestForStaleCachedUrl($staleCachedUrl);
         $previousRequest = app('request');
         app()->instance('request', $request);
 
@@ -51,9 +52,10 @@ final class RefreshCachedUrlAtomicallyAction
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
-            $pageCache = resolve(PageCache::class);
-
-            if (! $this->shouldCacheRefreshResponse($request, $response)) {
+            if (
+                $request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) !== true
+                && ! $this->writeCacheFromRefreshResponse($request, $response)
+            ) {
                 throw new RuntimeException(sprintf(
                     'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Status: %d. Content-Type: %s. Query count: %d.',
                     $staleCachedUrl->url,
@@ -63,16 +65,16 @@ final class RefreshCachedUrlAtomicallyAction
                 ));
             }
 
-            $pageCache->cache($request, $response);
-            $this->writeRefreshedCacheFile($staleCachedUrl, $response);
+            $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
             $this->deleteAlternateStatusFile($staleCachedUrl, $response);
         } finally {
             app()->instance('request', $previousRequest);
         }
     }
 
-    private function requestForUrl(string $url): Request
+    private function requestForStaleCachedUrl(StaleCachedUrl $staleCachedUrl): Request
     {
+        $url = $staleCachedUrl->url;
         $components = parse_url($url);
         $host = $components['host'] ?? null;
         $path = $components['path'] ?? '/';
@@ -94,48 +96,74 @@ final class RefreshCachedUrlAtomicallyAction
             'HTTPS' => $scheme === 'https' ? 'on' : 'off',
         ]);
         $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
+        $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $staleCachedUrl->getKey());
+        $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, $staleCachedUrl->claim_token);
 
         return $request;
     }
 
-    private function shouldCacheRefreshResponse(Request $request, Response $response): bool
+    private function writeCacheFromRefreshResponse(Request $request, Response $response): bool
     {
-        if (! $request->isMethod(SymfonyRequest::METHOD_GET)) {
+        if (config('capell-html-cache.write_enabled', true) !== true) {
             return false;
         }
 
-        if ($request->query->count() > 0) {
+        if (! $this->staleRefreshClaimIsCurrent($request)) {
             return false;
         }
 
-        if (! in_array($response->getStatusCode(), [Response::HTTP_OK, Response::HTTP_NOT_FOUND], true)) {
+        if (! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
             return false;
         }
 
-        if (mb_strpos((string) $response->headers->get('Content-Type'), 'text/html') === false) {
+        $pageCache = resolve(PageCache::class);
+
+        if (! $pageCache->shouldCachePage($request, $response)) {
             return false;
         }
 
-        return ! resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface((string) $response->getContent());
+        if ($response->getStatusCode() !== Response::HTTP_NOT_FOUND && ! FrontendContext::shouldCachePage()) {
+            return false;
+        }
+
+        $pageCache->cache($request, $response);
+
+        return true;
     }
 
-    private function writeRefreshedCacheFile(StaleCachedUrl $staleCachedUrl, Response $response): void
+    private function staleRefreshClaimIsCurrent(Request $request): bool
     {
-        if ($response->getStatusCode() !== Response::HTTP_OK) {
-            return;
+        $staleCachedUrlId = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE);
+        $claimToken = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
+
+        if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
+            return false;
         }
 
-        if (! is_string($staleCachedUrl->cache_path) || $staleCachedUrl->cache_path === '') {
-            return;
+        return StaleCachedUrl::query()
+            ->whereKey((int) $staleCachedUrlId)
+            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+            ->where('claim_token', $claimToken)
+            ->exists();
+    }
+
+    private function assertStaleCachedUrlClaimIsCurrent(StaleCachedUrl $staleCachedUrl): void
+    {
+        $claimToken = $staleCachedUrl->claim_token;
+
+        if (! is_string($claimToken) || $claimToken === '') {
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; stale row claim was missing.', $staleCachedUrl->url));
         }
 
-        $content = (string) $response->getContent();
+        $claimIsCurrent = StaleCachedUrl::query()
+            ->whereKey($staleCachedUrl->getKey())
+            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+            ->where('claim_token', $claimToken)
+            ->exists();
 
-        if (config('capell-html-cache.minify_html', true) === true) {
-            $content = resolve(HtmlMinifier::class)->minify($content);
+        if (! $claimIsCurrent) {
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; stale row claim is no longer current.', $staleCachedUrl->url));
         }
-
-        resolve(HtmlCacheStore::class)->replace($staleCachedUrl->cache_path, $content);
     }
 
     private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl): void

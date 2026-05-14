@@ -11,6 +11,7 @@ use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
@@ -21,6 +22,12 @@ use Symfony\Component\HttpFoundation\Response;
 final class HtmlCacheMiddleware
 {
     public const BYPASS_CACHE_READ_ATTRIBUTE = 'capell.html_cache.bypass_cache_read';
+
+    public const CACHE_WRITE_SUCCEEDED_ATTRIBUTE = 'capell.html_cache.cache_write_succeeded';
+
+    public const STALE_CACHE_ID_ATTRIBUTE = 'capell.html_cache.stale_cache_id';
+
+    public const STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
 
     private const INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
@@ -73,6 +80,7 @@ final class HtmlCacheMiddleware
         }
 
         $cached = $this->cacheResponse($pageCache, $request, $response);
+        $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, $cached);
 
         if ($cached) {
             $this->stripConfiguredCookies($response);
@@ -158,6 +166,10 @@ final class HtmlCacheMiddleware
 
     private function cacheResponse(PageCache $pageCache, Request $request, Response $response): bool
     {
+        if (! $this->staleRefreshClaimIsCurrent($request)) {
+            return false;
+        }
+
         if (config('capell-html-cache.write_enabled', true) !== true) {
             return false;
         }
@@ -177,6 +189,26 @@ final class HtmlCacheMiddleware
         $pageCache->cache($request, $response);
 
         return true;
+    }
+
+    private function staleRefreshClaimIsCurrent(Request $request): bool
+    {
+        $staleCachedUrlId = $request->attributes->get(self::STALE_CACHE_ID_ATTRIBUTE);
+        $claimToken = $request->attributes->get(self::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
+
+        if ($staleCachedUrlId === null && $claimToken === null) {
+            return true;
+        }
+
+        if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
+            return false;
+        }
+
+        return StaleCachedUrl::query()
+            ->whereKey((int) $staleCachedUrlId)
+            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+            ->where('claim_token', $claimToken)
+            ->exists();
     }
 
     private function cacheHitResponse(string $content, int $statusCode): Response

@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $error_cache_path
  * @property string|null $reason
  * @property string $status
+ * @property string|null $claim_token
  * @property int $attempts
  * @property CarbonImmutable|null $processed_at
  * @property CarbonImmutable|null $failed_at
@@ -52,6 +53,8 @@ final class StaleCachedUrl extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    public const STATUS_EXHAUSTED = 'exhausted';
+
     /** @var array<string> */
     protected $fillable = [
         'url',
@@ -65,6 +68,7 @@ final class StaleCachedUrl extends Model
         'error_cache_path',
         'reason',
         'status',
+        'claim_token',
         'attempts',
         'processed_at',
         'failed_at',

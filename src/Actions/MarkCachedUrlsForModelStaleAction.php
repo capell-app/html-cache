@@ -10,7 +10,7 @@ use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static int run(Model $model, string $reason = 'model_changed')
+ * @method static int run(Model|string $model, int|string|null $modelKey = null, string $reason = 'model_changed')
  */
 final class MarkCachedUrlsForModelStaleAction
 {
@@ -19,13 +19,16 @@ final class MarkCachedUrlsForModelStaleAction
 
     public bool $jobDeleteWhenMissingModels = true;
 
-    public function handle(Model $model, string $reason = 'model_changed'): int
+    public function handle(Model|string $model, int|string|null $modelKey = null, string $reason = 'model_changed'): int
     {
+        [$morphClass, $key] = $this->modelIdentifier($model, $modelKey);
+
         $cachedModelUrls = CachedModelUrl::query()
             ->with('siteDomain')
-            ->where('cacheable_type', $model->getMorphClass())
-            ->where('cacheable_id', (int) $model->getKey())
-            ->get();
+            ->where('cacheable_type', $morphClass)
+            ->where('cacheable_id', $key)
+            ->orderBy('id')
+            ->lazyById();
 
         $marked = 0;
         $seenKeys = [];
@@ -49,8 +52,22 @@ final class MarkCachedUrlsForModelStaleAction
         return $marked;
     }
 
-    public function getJobUniqueId(Model $model): string
+    public function getJobUniqueId(Model|string $model, int|string|null $modelKey = null): string
     {
-        return 'mark-stale-cached-model-urls-' . $model->getMorphClass() . '-' . $model->getKey();
+        [$morphClass, $key] = $this->modelIdentifier($model, $modelKey);
+
+        return 'mark-stale-cached-model-urls-' . $morphClass . '-' . $key;
+    }
+
+    /**
+     * @return array{0: string, 1: int}
+     */
+    private function modelIdentifier(Model|string $model, int|string|null $modelKey): array
+    {
+        if ($model instanceof Model) {
+            return [$model->getMorphClass(), (int) $model->getKey()];
+        }
+
+        return [$model, (int) $modelKey];
     }
 }

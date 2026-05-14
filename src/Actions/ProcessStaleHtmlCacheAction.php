@@ -6,6 +6,9 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -21,19 +24,30 @@ final class ProcessStaleHtmlCacheAction
 
     public function handle(?int $limit = null): int
     {
-        $batchSize = $limit ?? $this->configuredBatchSize(config('capell-html-cache.invalidation.batch_size', 100));
+        $batchSize = max(1, $limit ?? $this->configuredBatchSize(config('capell-html-cache.invalidation.batch_size', 100)));
         $processed = 0;
+        $emptyPasses = 0;
 
-        StaleCachedUrl::query()
-            ->where('status', StaleCachedUrl::STATUS_PENDING)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->limit(max(1, $batchSize))
-            ->get()
-            ->each(function (StaleCachedUrl $staleCachedUrl) use (&$processed): void {
-                $this->processStaleCachedUrl($staleCachedUrl);
-                $processed++;
+        while ($processed < $batchSize && $emptyPasses < 2) {
+            $candidates = $this->nextEligibleStaleUrls($batchSize - $processed);
+
+            if ($candidates->isEmpty()) {
+                break;
+            }
+
+            $processedThisPass = 0;
+
+            $candidates->each(function (StaleCachedUrl $staleCachedUrl) use (&$processed, &$processedThisPass): void {
+                if ($this->processStaleCachedUrl($staleCachedUrl)) {
+                    $processed++;
+                    $processedThisPass++;
+                }
             });
+
+            if ($processedThisPass === 0) {
+                $emptyPasses++;
+            }
+        }
 
         return $processed;
     }
@@ -51,30 +65,200 @@ final class ProcessStaleHtmlCacheAction
         return 100;
     }
 
-    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl): void
+    /**
+     * @return Collection<int, StaleCachedUrl>
+     */
+    private function nextEligibleStaleUrls(int $limit): Collection
     {
-        $staleCachedUrl->forceFill([
-            'status' => StaleCachedUrl::STATUS_PROCESSING,
-            'attempts' => $staleCachedUrl->attempts + 1,
-            'failed_at' => null,
-            'last_error' => null,
-        ])->save();
+        if (StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PENDING)->exists()) {
+            return StaleCachedUrl::query()
+                ->where('status', StaleCachedUrl::STATUS_PENDING)
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->limit($limit)
+                ->get();
+        }
+
+        return $this->retryableStaleUrlsQuery()
+            ->orderBy('failed_at')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * @return Builder<StaleCachedUrl>
+     */
+    private function retryableStaleUrlsQuery(): Builder
+    {
+        $now = CarbonImmutable::now();
+        $processingTimeoutAt = $now->subMinutes($this->configuredProcessingTimeoutMinutes());
+
+        return StaleCachedUrl::query()
+            ->where(function (Builder $query) use ($now, $processingTimeoutAt): void {
+                $query
+                    ->where(function (Builder $query) use ($now): void {
+                        $query
+                            ->where('status', StaleCachedUrl::STATUS_FAILED)
+                            ->where('attempts', '<', $this->configuredMaxAttempts())
+                            ->where(function (Builder $query) use ($now): void {
+                                $query
+                                    ->whereNull('failed_at')
+                                    ->orWhere('failed_at', '<=', $now->subMinutes($this->retryBackoffMinutes()));
+                            });
+                    })
+                    ->orWhere(function (Builder $query) use ($processingTimeoutAt): void {
+                        $query
+                            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+                            ->where('updated_at', '<=', $processingTimeoutAt);
+                    });
+            });
+    }
+
+    /**
+     * @return Builder<StaleCachedUrl>
+     */
+    private function eligibleStaleUrlsQuery(): Builder
+    {
+        $now = CarbonImmutable::now();
+        $processingTimeoutAt = $now->subMinutes($this->configuredProcessingTimeoutMinutes());
+
+        return StaleCachedUrl::query()
+            ->where(function (Builder $query) use ($now, $processingTimeoutAt): void {
+                $query
+                    ->where('status', StaleCachedUrl::STATUS_PENDING)
+                    ->orWhere(function (Builder $query) use ($now): void {
+                        $query
+                            ->where('status', StaleCachedUrl::STATUS_FAILED)
+                            ->where('attempts', '<', $this->configuredMaxAttempts())
+                            ->where(function (Builder $query) use ($now): void {
+                                $query
+                                    ->whereNull('failed_at')
+                                    ->orWhere('failed_at', '<=', $now->subMinutes($this->retryBackoffMinutes()));
+                            });
+                    })
+                    ->orWhere(function (Builder $query) use ($processingTimeoutAt): void {
+                        $query
+                            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+                            ->where('updated_at', '<=', $processingTimeoutAt);
+                    });
+            });
+    }
+
+    private function configuredProcessingTimeoutMinutes(): int
+    {
+        $configuredTimeout = config('capell-html-cache.invalidation.processing_timeout_minutes', 15);
+
+        if (is_int($configuredTimeout)) {
+            return max(1, $configuredTimeout);
+        }
+
+        if (is_numeric($configuredTimeout)) {
+            return max(1, (int) $configuredTimeout);
+        }
+
+        return 15;
+    }
+
+    private function retryBackoffMinutes(): int
+    {
+        $configuredBackoff = config('capell-html-cache.invalidation.retry_backoff_minutes', 5);
+
+        if (is_int($configuredBackoff)) {
+            return max(1, $configuredBackoff);
+        }
+
+        if (is_numeric($configuredBackoff)) {
+            return max(1, (int) $configuredBackoff);
+        }
+
+        return 5;
+    }
+
+    private function configuredMaxAttempts(): int
+    {
+        $configuredMaxAttempts = config('capell-html-cache.invalidation.max_attempts', 5);
+
+        if (is_int($configuredMaxAttempts)) {
+            return max(1, $configuredMaxAttempts);
+        }
+
+        if (is_numeric($configuredMaxAttempts)) {
+            return max(1, (int) $configuredMaxAttempts);
+        }
+
+        return 5;
+    }
+
+    private function processStaleCachedUrl(StaleCachedUrl $staleCachedUrl): bool
+    {
+        if (! $this->claimStaleCachedUrl($staleCachedUrl)) {
+            return false;
+        }
+
+        $staleCachedUrl->refresh();
 
         try {
             RefreshCachedUrlAtomicallyAction::run($staleCachedUrl);
 
-            $staleCachedUrl->forceFill([
+            $this->completeClaim($staleCachedUrl, [
                 'status' => StaleCachedUrl::STATUS_PROCESSED,
+                'claim_token' => null,
                 'processed_at' => CarbonImmutable::now(),
                 'failed_at' => null,
                 'last_error' => null,
-            ])->save();
+            ]);
         } catch (Throwable $throwable) {
-            $staleCachedUrl->forceFill([
-                'status' => StaleCachedUrl::STATUS_FAILED,
+            $this->completeClaim($staleCachedUrl, [
+                'status' => $staleCachedUrl->attempts >= $this->configuredMaxAttempts()
+                    ? StaleCachedUrl::STATUS_EXHAUSTED
+                    : StaleCachedUrl::STATUS_FAILED,
+                'claim_token' => null,
                 'failed_at' => CarbonImmutable::now(),
                 'last_error' => Str::limit($throwable->getMessage(), 2000, ''),
-            ])->save();
+            ]);
         }
+
+        return true;
+    }
+
+    private function claimStaleCachedUrl(StaleCachedUrl $staleCachedUrl): bool
+    {
+        $claimToken = (string) Str::uuid();
+
+        $updated = $this->eligibleStaleUrlsQuery()
+            ->whereKey($staleCachedUrl->getKey())
+            ->update([
+                'status' => StaleCachedUrl::STATUS_PROCESSING,
+                'claim_token' => $claimToken,
+                'attempts' => DB::raw('attempts + 1'),
+                'failed_at' => null,
+                'last_error' => null,
+                'updated_at' => CarbonImmutable::now(),
+            ]);
+
+        return $updated === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function completeClaim(StaleCachedUrl $staleCachedUrl, array $attributes): bool
+    {
+        $claimToken = $staleCachedUrl->claim_token;
+
+        if (! is_string($claimToken) || $claimToken === '') {
+            return false;
+        }
+
+        return StaleCachedUrl::query()
+            ->whereKey($staleCachedUrl->getKey())
+            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
+            ->where('claim_token', $claimToken)
+            ->update([
+                ...$attributes,
+                'updated_at' => CarbonImmutable::now(),
+            ]) === 1;
     }
 }

@@ -15,6 +15,9 @@ return [
         'mode' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_MODE', 'instant'),
         'schedule' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_SCHEDULE', 'everyFiveMinutes'),
         'batch_size' => (int) Env::get('CAPELL_HTML_CACHE_INVALIDATION_BATCH_SIZE', 100),
+        'processing_timeout_minutes' => (int) Env::get('CAPELL_HTML_CACHE_PROCESSING_TIMEOUT_MINUTES', 15),
+        'retry_backoff_minutes' => (int) Env::get('CAPELL_HTML_CACHE_RETRY_BACKOFF_MINUTES', 5),
+        'max_attempts' => (int) Env::get('CAPELL_HTML_CACHE_MAX_ATTEMPTS', 5),
     ],
     'model_event_registration_mode' => Env::get('CAPELL_MODEL_EVENT_REGISTRATION_MODE', 'deferred'),
     'static_generation' => [

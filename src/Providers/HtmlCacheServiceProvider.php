@@ -69,7 +69,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasTranslations()
             ->hasViews('capell-html-cache')
             ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
-            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table');
+            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
+            ->hasMigration('2026_05_14_000002_add_claim_token_and_retry_indexes_to_stale_cached_urls_table');
     }
 
     public function registeringPackage(): void
@@ -97,7 +98,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
             $request = request();
             $domainPath = $request->getScheme() . '.' . $request->getHost();
-            $cachePath = $store->path($domainPath) ?? ($store->root() . $domainPath);
+            $cachePath = $store->path($domainPath)
+                ?? rtrim($store->root(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $domainPath;
 
             if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath)) {
                 mkdir($cachePath, 0755, true);
@@ -251,12 +253,18 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 return null;
             }
 
+            if ($siteDomain->wasChanged(['scheme', 'domain', 'path', 'site_id', 'language_id'])) {
+                $this->dispatchClearAllHtmlCacheImmediately();
+
+                return null;
+            }
+
             $this->dispatchClearAllHtmlCache($this->originalSiteDomainAttributes($siteDomain));
 
             return null;
         });
         SiteDomain::deleted(function (SiteDomain $siteDomain): mixed {
-            $this->dispatchClearAllHtmlCache();
+            $this->dispatchClearAllHtmlCacheImmediately();
 
             return null;
         });
@@ -321,27 +329,41 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         ClearAllHtmlCacheAction::dispatchAfterResponse();
     }
 
+    private function dispatchClearAllHtmlCacheImmediately(): void
+    {
+        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
+            ClearAllHtmlCacheAction::dispatchSync();
+
+            return;
+        }
+
+        ClearAllHtmlCacheAction::dispatchAfterResponse();
+    }
+
     private function dispatchClearCachedUrlsForModel(Model $model): void
     {
+        $morphClass = $model->getMorphClass();
+        $modelKey = (int) $model->getKey();
+
         if ($this->usesScheduledInvalidation()) {
             if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-                MarkCachedUrlsForModelStaleAction::dispatchSync($model);
+                MarkCachedUrlsForModelStaleAction::dispatchSync($morphClass, $modelKey);
 
                 return;
             }
 
-            MarkCachedUrlsForModelStaleAction::dispatchAfterResponse($model);
+            MarkCachedUrlsForModelStaleAction::dispatchAfterResponse($morphClass, $modelKey);
 
             return;
         }
 
         if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearCachedUrlsForModelAction::dispatchSync($model);
+            ClearCachedUrlsForModelAction::dispatchSync($morphClass, $modelKey);
 
             return;
         }
 
-        ClearCachedUrlsForModelAction::dispatchAfterResponse($model);
+        ClearCachedUrlsForModelAction::dispatchAfterResponse($morphClass, $modelKey);
     }
 
     private function registerCommands(): self

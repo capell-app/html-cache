@@ -19,8 +19,8 @@ final class HtmlCacheOverviewWidget extends StatsOverviewWidget implements Capel
 
     protected static string $settingsKey = 'html_cache_overview';
 
-    /** @var int|string|array<string, int|string|null> */
-    protected int|string|array $columnSpan = ['default' => 'full'];
+    /** @var int|string|array<string, int|null> */
+    protected int|string|array $columnSpan = 'full';
 
     protected static ?int $sort = 50;
 

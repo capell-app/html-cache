@@ -58,6 +58,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
+use RuntimeException;
 use Silber\PageCache\Console\ClearCache;
 use Spatie\LaravelPackageTools\Package;
 
@@ -75,9 +76,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasTranslations()
             ->hasViews('capell-html-cache')
             ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
-            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
-            ->hasMigration('2026_05_14_000002_add_claim_token_and_retry_indexes_to_stale_cached_urls_table')
-            ->hasMigration('2026_05_14_000003_add_dashboard_indexes_to_cached_model_urls_table');
+            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table');
     }
 
     public function registeringPackage(): void
@@ -108,8 +107,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             $cachePath = $store->path($domainPath)
                 ?? rtrim($store->root(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $domainPath;
 
-            if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath)) {
-                mkdir($cachePath, 0755, true);
+            if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath) && (! @mkdir($cachePath, 0755, true) && ! is_dir($cachePath))) {
+                throw new RuntimeException(sprintf('Unable to create HTML cache directory [%s].', $cachePath));
             }
 
             $instance->setCachePath($cachePath);

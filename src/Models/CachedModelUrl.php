@@ -41,7 +41,7 @@ final class CachedModelUrl extends Model
 {
     use HasFactory;
 
-    /** @var array<string> */
+    /** @var list<string> */
     protected $fillable = [
         'url',
         'url_hash',

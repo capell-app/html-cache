@@ -50,16 +50,7 @@ final class BuildHtmlCacheUrlRowsAction
             ->orderByDesc('last_hit_at')
             ->limit($limit)
             ->get()
-            ->map(fn (PageUrl $pageUrl): array => [
-                'id' => 'uncached-page-url-' . $pageUrl->id,
-                'state' => __('capell-html-cache::dashboard.uncached'),
-                'url' => $pageUrl->url,
-                'site' => (string) ($pageUrl->site?->name ?? __('capell-html-cache::dashboard.not_available')),
-                'hits' => number_format((int) $pageUrl->hit_count),
-                'last_hit' => $pageUrl->last_hit_at?->diffForHumans() ?? __('capell-html-cache::dashboard.never'),
-                'cached_at' => __('capell-html-cache::dashboard.not_cached'),
-                'last_seen' => $pageUrl->last_hit_at?->diffForHumans() ?? __('capell-html-cache::dashboard.never'),
-            ])
+            ->map($this->uncachedRow(...))
             ->values();
     }
 
@@ -75,20 +66,45 @@ final class BuildHtmlCacheUrlRowsAction
             ->selectRaw('MAX(cached_at) as cached_at')
             ->selectRaw('MAX(last_seen_at) as last_seen_at')
             ->groupBy('url_hash', 'url', 'site_id', 'language_id')
-            ->orderByDesc('last_seen_at')
+            ->latest('last_seen_at')
             ->limit($limit)
             ->get()
-            ->map(fn (CachedModelUrl $cachedUrl): array => [
-                'id' => 'cached-url-' . $cachedUrl->id,
-                'state' => __('capell-html-cache::dashboard.cached'),
-                'url' => $cachedUrl->url,
-                'site' => (string) ($cachedUrl->site?->name ?? __('capell-html-cache::dashboard.not_available')),
-                'hits' => __('capell-html-cache::dashboard.not_tracked'),
-                'last_hit' => __('capell-html-cache::dashboard.not_tracked'),
-                'cached_at' => $this->dateForHumans($cachedUrl->getAttribute('cached_at')),
-                'last_seen' => $this->dateForHumans($cachedUrl->getAttribute('last_seen_at')),
-            ])
+            ->map($this->cachedRow(...))
             ->values();
+    }
+
+    /**
+     * @return array{id: string, state: string, url: string, site: string, hits: string, last_hit: string, cached_at: string, last_seen: string}
+     */
+    private function uncachedRow(PageUrl $pageUrl): array
+    {
+        return [
+            'id' => 'uncached-page-url-' . $pageUrl->id,
+            'state' => (string) __('capell-html-cache::dashboard.uncached'),
+            'url' => $pageUrl->url,
+            'site' => $pageUrl->site?->name ?? (string) __('capell-html-cache::dashboard.not_available'),
+            'hits' => number_format($pageUrl->hit_count),
+            'last_hit' => $pageUrl->last_hit_at?->diffForHumans() ?? (string) __('capell-html-cache::dashboard.never'),
+            'cached_at' => (string) __('capell-html-cache::dashboard.not_cached'),
+            'last_seen' => $pageUrl->last_hit_at?->diffForHumans() ?? (string) __('capell-html-cache::dashboard.never'),
+        ];
+    }
+
+    /**
+     * @return array{id: string, state: string, url: string, site: string, hits: string, last_hit: string, cached_at: string, last_seen: string}
+     */
+    private function cachedRow(CachedModelUrl $cachedUrl): array
+    {
+        return [
+            'id' => 'cached-url-' . $cachedUrl->id,
+            'state' => (string) __('capell-html-cache::dashboard.cached'),
+            'url' => $cachedUrl->url,
+            'site' => (string) ($cachedUrl->site?->name ?? __('capell-html-cache::dashboard.not_available')),
+            'hits' => (string) __('capell-html-cache::dashboard.not_tracked'),
+            'last_hit' => (string) __('capell-html-cache::dashboard.not_tracked'),
+            'cached_at' => $this->dateForHumans($cachedUrl->getAttribute('cached_at')),
+            'last_seen' => $this->dateForHumans($cachedUrl->getAttribute('last_seen_at')),
+        ];
     }
 
     /**

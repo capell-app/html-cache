@@ -55,7 +55,7 @@ final class StaleCachedUrl extends Model
 
     public const STATUS_EXHAUSTED = 'exhausted';
 
-    /** @var array<string> */
+    /** @var list<string> */
     protected $fillable = [
         'url',
         'url_hash',

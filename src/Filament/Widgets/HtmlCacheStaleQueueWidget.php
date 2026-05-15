@@ -21,8 +21,8 @@ final class HtmlCacheStaleQueueWidget extends BaseWidget implements CapellWidget
 
     protected static string $settingsKey = 'html_cache_stale_queue';
 
-    /** @var int|string|array<string, int|string|null> */
-    protected int|string|array $columnSpan = ['default' => 'full', 'xl' => 1];
+    /** @var int|string|array<string, int|null> */
+    protected int|string|array $columnSpan = ['xl' => 1];
 
     protected static ?int $sort = 53;
 

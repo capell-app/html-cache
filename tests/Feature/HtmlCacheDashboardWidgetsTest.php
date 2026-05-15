@@ -94,7 +94,7 @@ it('registers HTML Cache dashboard widgets and settings contributor', function (
 });
 
 it('renders HTML Cache dashboard widgets', function (string $widgetClass): void {
-    Livewire::test($widgetClass)->assertOk();
+    Livewire::test($widgetClass)->assertSuccessful();
 })->with([
     HtmlCacheOverviewWidget::class,
     CacheCoverageUrlsWidget::class,
@@ -143,6 +143,7 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
             'last_seen_at' => now()->subHour(),
         ]);
     }
+
     CachedModelUrl::query()->create([
         'url' => 'https://example.com/cached',
         'url_hash' => hash('sha256', 'https://example.com/cached'),

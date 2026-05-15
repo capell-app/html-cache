@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -30,6 +31,16 @@ return new class extends Migration
             $table->index(['site_id', 'last_seen_at'], 'cached_model_urls_site_last_seen_index');
             $table->index('site_domain_id');
             $table->index('last_seen_at', 'cached_model_urls_last_seen_index');
+        });
+
+        if (Schema::getConnection()->getDriverName() === 'mysql') {
+            DB::statement('CREATE INDEX cached_model_urls_site_language_path_index ON cached_model_urls (site_id, language_id, path(191))');
+
+            return;
+        }
+
+        Schema::table('cached_model_urls', function (Blueprint $table): void {
+            $table->index(['site_id', 'language_id', 'path'], 'cached_model_urls_site_language_path_index');
         });
     }
 

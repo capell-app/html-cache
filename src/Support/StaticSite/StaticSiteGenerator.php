@@ -34,9 +34,9 @@ final class StaticSiteGenerator
     ): void {
         throw_unless($this->site->siteDomains, RuntimeException::class, 'No site domains found for static HTML generation.');
 
-        $this->site->siteDomains->each(
-            fn (SiteDomain $siteDomain): mixed => $this->processSiteDomain($siteDomain, $start, $prepare, $checkpoint, $end),
-        );
+        foreach ($this->site->siteDomains as $siteDomain) {
+            $this->processSiteDomain($siteDomain, $start, $prepare, $checkpoint, $end);
+        }
     }
 
     private function processSiteDomain(

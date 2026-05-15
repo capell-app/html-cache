@@ -52,6 +52,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+
+use function Pest\Laravel\artisan;
+
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -974,7 +977,9 @@ it('prevents a late stale refresh worker from writing after the row is reclaimed
 
     $staleCachedUrl->forceFill(['claim_token' => 'new-claim-token'])->save();
 
-    expect(fn (): mixed => RefreshCachedUrlAtomicallyAction::run($lateWorkerStaleCachedUrl))
+    expect(function () use ($lateWorkerStaleCachedUrl): void {
+        RefreshCachedUrlAtomicallyAction::run($lateWorkerStaleCachedUrl);
+    })
         ->toThrow(RuntimeException::class);
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
@@ -1015,7 +1020,9 @@ it('prevents a late stale refresh worker from deleting cache files after the row
 
     $staleCachedUrl->forceFill(['claim_token' => 'new-claim-token'])->save();
 
-    expect(fn (): mixed => RefreshCachedUrlAtomicallyAction::run($lateWorkerStaleCachedUrl))
+    expect(function () use ($lateWorkerStaleCachedUrl): void {
+        RefreshCachedUrlAtomicallyAction::run($lateWorkerStaleCachedUrl);
+    })
         ->toThrow(RuntimeException::class);
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
@@ -1360,7 +1367,7 @@ it('processes stale cache command with the requested limit', function (): void {
         ]);
     }
 
-    test()->artisan('capell:html-cache:process-stale', ['--limit' => 1])
+    artisan('capell:html-cache:process-stale', ['--limit' => 1])
         ->expectsOutput('Processed 1 stale HTML cache URL(s).')
         ->assertSuccessful();
 

@@ -136,7 +136,7 @@ final class PageCache extends Cache
         return $filename;
     }
 
-    protected function getDirectoryAndFileNames($request, $response): ?array
+    protected function getDirectoryAndFileNames($request, $response): array
     {
         /** @var Request $laravelRequest */
         $laravelRequest = $request;
@@ -146,7 +146,7 @@ final class PageCache extends Cache
         $segments = $this->safeRequestSegments($laravelRequest);
 
         if ($segments === null) {
-            return null;
+            return [$this->getCachePath('__invalid__'), 'pc__invalid__pc', $this->guessFileExtension($laravelResponse)];
         }
 
         $filename = $this->aliasFilename(array_pop($segments));

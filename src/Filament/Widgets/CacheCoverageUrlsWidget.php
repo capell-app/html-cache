@@ -21,8 +21,8 @@ final class CacheCoverageUrlsWidget extends BaseWidget implements CapellWidgetCo
 
     protected static string $settingsKey = 'html_cache_coverage_urls';
 
-    /** @var int|string|array<string, int|string|null> */
-    protected int|string|array $columnSpan = ['default' => 'full', 'xl' => 1];
+    /** @var int|string|array<string, int|null> */
+    protected int|string|array $columnSpan = ['xl' => 1];
 
     protected static ?int $sort = 51;
 

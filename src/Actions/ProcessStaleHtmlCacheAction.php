@@ -157,7 +157,7 @@ final class ProcessStaleHtmlCacheAction
 
         $failedLimit = $limit;
 
-        if ($limit > 1 && $this->timedOutProcessingStaleUrlsQuery()->exists()) {
+        if ($this->timedOutProcessingStaleUrlsQuery()->exists()) {
             $failedLimit = $limit - 1;
         }
 

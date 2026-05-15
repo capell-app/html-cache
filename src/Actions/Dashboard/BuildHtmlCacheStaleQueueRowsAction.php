@@ -28,17 +28,25 @@ final class BuildHtmlCacheStaleQueueRowsAction
                 StaleCachedUrl::STATUS_PENDING,
                 StaleCachedUrl::STATUS_PROCESSING,
             ])
-            ->orderByDesc('updated_at')
+            ->latest('updated_at')
             ->limit($limit)
             ->get()
-            ->map(fn (StaleCachedUrl $staleUrl): array => [
-                'id' => 'stale-url-' . $staleUrl->id,
-                'url' => $staleUrl->url,
-                'status' => __('capell-html-cache::dashboard.status_' . $staleUrl->status),
-                'attempts' => $staleUrl->attempts,
-                'reason' => $staleUrl->reason ?? __('capell-html-cache::dashboard.not_available'),
-                'updated' => $staleUrl->updated_at?->diffForHumans() ?? __('capell-html-cache::dashboard.not_available'),
-            ])
+            ->map($this->staleUrlRow(...))
             ->values();
+    }
+
+    /**
+     * @return array{id: string, url: string, status: string, attempts: int, reason: string, updated: string}
+     */
+    private function staleUrlRow(StaleCachedUrl $staleUrl): array
+    {
+        return [
+            'id' => 'stale-url-' . $staleUrl->id,
+            'url' => $staleUrl->url,
+            'status' => (string) __('capell-html-cache::dashboard.status_' . $staleUrl->status),
+            'attempts' => $staleUrl->attempts,
+            'reason' => $staleUrl->reason ?? (string) __('capell-html-cache::dashboard.not_available'),
+            'updated' => $staleUrl->updated_at?->diffForHumans() ?? (string) __('capell-html-cache::dashboard.not_available'),
+        ];
     }
 }

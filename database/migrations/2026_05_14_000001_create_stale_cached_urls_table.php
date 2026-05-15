@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('error_cache_path', 2048)->nullable();
             $table->string('reason', 120)->nullable();
             $table->string('status', 40)->default('pending');
+            $table->string('claim_token', 64)->nullable();
             $table->unsignedInteger('attempts')->default(0);
             $table->timestamp('processed_at')->nullable();
             $table->timestamp('failed_at')->nullable();
@@ -33,6 +34,8 @@ return new class extends Migration
             $table->index(['site_id', 'language_id'], 'stale_cached_urls_site_language_index');
             $table->index('site_domain_id');
             $table->index('url_hash');
+            $table->index(['status', 'failed_at', 'created_at'], 'stale_cached_urls_status_failed_created_index');
+            $table->index(['status', 'updated_at', 'created_at'], 'stale_cached_urls_status_updated_created_index');
         });
     }
 

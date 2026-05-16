@@ -148,11 +148,11 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        if ($request->query->has('signature') || $request->headers->has('Authorization')) {
+        if ($request->query->has('signature')) {
             return true;
         }
 
-        return false;
+        return $request->headers->has('Authorization');
     }
 
     private function shouldForceCacheReadBypass(Request $request): bool

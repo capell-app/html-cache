@@ -168,6 +168,7 @@ it('reuses matching public html safety inspection results in middleware response
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE, true);
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE, hash('xxh128', $content));
+
     app()->instance('request', $request);
 
     $inspector = htmlCacheMiddlewareFakeSafetyInspector(containsAuthoringSurface: true);
@@ -215,6 +216,7 @@ it('rescans middleware public html when the remembered safety inspection hash do
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE, true);
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE, hash('xxh128', '<main>previous safe html</main>'));
+
     app()->instance('request', $request);
 
     $inspector = htmlCacheMiddlewareFakeSafetyInspector(containsAuthoringSurface: true);

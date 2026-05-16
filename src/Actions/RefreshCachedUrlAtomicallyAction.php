@@ -190,16 +190,12 @@ final class RefreshCachedUrlAtomicallyAction
     {
         $normalized = str_replace('\\', '/', $cachePath);
 
-        if ($normalized === '' || str_starts_with($normalized, '/') || preg_match('/^[A-Za-z]:\//', $normalized) === 1 || str_contains($normalized, "\0")) {
-            throw new RuntimeException('Unable to refresh stale HTML cache; stale row cache path was invalid.');
-        }
+        throw_if($normalized === '' || str_starts_with($normalized, '/') || preg_match('/^[A-Za-z]:\//', $normalized) === 1 || str_contains($normalized, "\0"), RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
 
         $segments = array_values(array_filter(explode('/', $normalized), static fn (string $segment): bool => $segment !== ''));
 
         foreach ($segments as $segment) {
-            if ($segment === '..') {
-                throw new RuntimeException('Unable to refresh stale HTML cache; stale row cache path was invalid.');
-            }
+            throw_if($segment === '..', RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
         }
 
         return implode('/', $segments);

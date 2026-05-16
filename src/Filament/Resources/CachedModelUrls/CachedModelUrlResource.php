@@ -69,7 +69,7 @@ final class CachedModelUrlResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return (string) __('capell-html-cache::admin.navigation_group');
+        return (string) __('capell-admin::navigation.group_monitoring');
     }
 
     public static function getPages(): array

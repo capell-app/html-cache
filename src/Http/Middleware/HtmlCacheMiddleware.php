@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Http\Middleware;
 use Capell\Core\Contracts\Pageable;
 use Capell\Core\Models\Language;
 use Capell\Core\Models\Site;
+use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
@@ -73,7 +74,7 @@ final class HtmlCacheMiddleware
 
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $next($request));
 
-        if ($this->containsAuthoringSurface($response)) {
+        if ($this->containsAuthoringSurface($request, $response)) {
             $response->headers->set('X-Frontend-Cache', 'BYPASS');
 
             return $this->privateNoStore($response);
@@ -91,13 +92,25 @@ final class HtmlCacheMiddleware
         return $this->applyCacheHeaders($request, $response, forcePublic: $cached);
     }
 
-    private function containsAuthoringSurface(Response $response): bool
+    private function containsAuthoringSurface(Request $request, Response $response): bool
     {
         if (mb_strpos((string) $response->headers->get('Content-Type'), 'text/html') === false) {
             return false;
         }
 
-        return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface((string) $response->getContent());
+        $content = (string) $response->getContent();
+
+        if ($this->hasMatchingSafeInspection($request, $content)) {
+            return false;
+        }
+
+        return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
+    }
+
+    private function hasMatchingSafeInspection(Request $request, string $content): bool
+    {
+        return $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE) === true
+            && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
     private function privateNoStore(Response $response): Response
@@ -130,12 +143,16 @@ final class HtmlCacheMiddleware
             return true;
         }
 
+        if (config('capell-html-cache.cache_skip_authenticated', true) === true
+            && ($this->hasIncomingSessionCookie($request) || $request->user() !== null)) {
+            return true;
+        }
+
         if ($request->query->has('signature') || $request->headers->has('Authorization')) {
             return true;
         }
 
-        return config('capell-html-cache.cache_skip_authenticated', true) === true
-            && ($request->user() !== null || $this->hasIncomingSessionCookie($request));
+        return false;
     }
 
     private function shouldForceCacheReadBypass(Request $request): bool
@@ -324,6 +341,10 @@ final class HtmlCacheMiddleware
         }
 
         if (! in_array($response->getStatusCode(), [Response::HTTP_OK, Response::HTTP_NOT_FOUND], true)) {
+            return $response;
+        }
+
+        if (! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
             return $response;
         }
 

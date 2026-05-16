@@ -8,6 +8,7 @@ use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphPivot;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -81,6 +82,10 @@ final class RetrievedModelStore implements RenderedModelTracker
      */
     private function collectRecursive(Model $model, array &$visited, ?string $overrideModelType = null): void
     {
+        if ($model instanceof MorphPivot) {
+            return;
+        }
+
         $modelType = $overrideModelType ?? $model->getMorphClass();
         $modelKey = $model->getKey();
 

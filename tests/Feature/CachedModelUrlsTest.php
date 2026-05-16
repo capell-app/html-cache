@@ -42,11 +42,14 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Illuminate\Database\Eloquent\Relations\MorphPivot;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -70,6 +73,10 @@ function htmlCacheMapTestComponent(int $siteId, string $modelType): mixed
 function bindHtmlCacheFrontendContext(?Pageable $page = null): void
 {
     config()->set('capell-html-cache.enabled', true);
+
+    if ($page instanceof EloquentModel) {
+        $page->loadMissing('type');
+    }
 
     app()->instance(CapellFrontendContext::class, new CapellFrontendContext(
         new class($page) implements FrontendContextReader
@@ -132,6 +139,25 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
     ));
     Frontend::clearResolvedInstance(CapellFrontendContext::class);
 }
+
+it('ignores morph pivot relations when tracking rendered models', function (): void {
+    Relation::requireMorphMap();
+
+    $page = new Page;
+    $page->id = 123;
+    $page->exists = true;
+
+    $pivot = new MorphPivot;
+    $pivot->setRawAttributes(['tag_id' => 1], true);
+    $pivot->exists = true;
+
+    $page->setRelation('pivot', $pivot);
+
+    $store = new RetrievedModelStore;
+    $store->track($page);
+
+    expect($store->tracked($page->getMorphClass()))->toBe(1);
+});
 
 it('records rendered models against a cached url and removes stale model links', function (): void {
     [$siteDomain, $page] = EloquentModel::withoutEvents(function (): array {
@@ -720,6 +746,44 @@ it('keeps the previous cached html when stale refresh fails', function (): void 
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('response status was 500');
+});
+
+it('rejects stale refresh cache paths outside the page cache disk root', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+
+    bindHtmlCacheFrontendContext($page);
+    Route::get('/about', fn (): mixed => response('fresh cached page', 200, ['Content-Type' => 'text/html']));
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => '../outside.html',
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
+        ->and(file_exists(Storage::disk('page_cache')->path('../outside.html')))->toBeFalse()
+        ->and(Storage::disk('page_cache')->allFiles())->toBe([])
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($staleCachedUrl->last_error)->toContain('cache path was invalid');
 });
 
 it('blocks unsafe public html during stale refresh and keeps the old cache file', function (): void {

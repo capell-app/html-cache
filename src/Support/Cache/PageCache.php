@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
@@ -41,7 +42,7 @@ final class PageCache extends Cache
         [$path, $filename, $extension] = $cacheLocation;
         $content = (string) $response->getContent();
 
-        if ($extension === 'html' && $this->containsAuthoringSurface($content)) {
+        if ($extension === 'html' && $this->containsAuthoringSurface($laravelRequest, $content)) {
             return;
         }
 
@@ -120,7 +121,7 @@ final class PageCache extends Cache
             return false;
         }
 
-        if ($this->containsAuthoringSurface((string) $response->getContent())) {
+        if ($this->containsAuthoringSurface($request, (string) $response->getContent())) {
             return false;
         }
 
@@ -237,9 +238,19 @@ final class PageCache extends Cache
         return $session->has('roadmap-status');
     }
 
-    private function containsAuthoringSurface(string $content): bool
+    private function containsAuthoringSurface(Request $request, string $content): bool
     {
+        if ($this->hasMatchingSafeInspection($request, $content)) {
+            return false;
+        }
+
         return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
+    }
+
+    private function hasMatchingSafeInspection(Request $request, string $content): bool
+    {
+        return $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE) === true
+            && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
     private function writeCacheFile(Request $request, string $path, string $content): void

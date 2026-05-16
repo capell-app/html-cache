@@ -9,6 +9,7 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Cookie;
 
 uses(HtmlCacheTestCase::class);
 
@@ -50,6 +51,29 @@ it('does not write public html cache for sensitive extension output', function (
 
     expect(Storage::disk('page_cache')->allFiles())->toBe([])
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('keeps session cookies on non-cacheable extension output', function (): void {
+    Storage::fake('page_cache');
+
+    config()->set('session.cookie', 'capell_session');
+
+    $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    recordHtmlCacheExtensionContribution(cacheable: false);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('form html', 200, ['Content-Type' => 'text/html'])
+            ->withCookie(new Cookie('capell_session', 'session-value'))
+            ->withCookie(new Cookie('XSRF-TOKEN', 'csrf-value')),
+    );
+
+    $cookies = collect($response->headers->getCookies())->map->getName()->all();
+
+    expect(Storage::disk('page_cache')->allFiles())->toBe([])
+        ->and($cookies)->toContain('capell_session')
+        ->and($cookies)->toContain('XSRF-TOKEN');
 });
 
 it('adds cacheable extension tags to the surrogate key header', function (): void {

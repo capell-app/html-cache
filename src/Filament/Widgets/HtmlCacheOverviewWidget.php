@@ -9,6 +9,7 @@ use Capell\Admin\Filament\Concerns\GatedByRoleAndSettings;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheDashboardStatsAction;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Override;
 
 final class HtmlCacheOverviewWidget extends StatsOverviewWidget implements CapellWidgetContract
 {
@@ -24,6 +25,7 @@ final class HtmlCacheOverviewWidget extends StatsOverviewWidget implements Capel
 
     protected static ?int $sort = 50;
 
+    #[Override]
     protected function getStats(): array
     {
         $stats = BuildHtmlCacheDashboardStatsAction::run();

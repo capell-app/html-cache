@@ -57,6 +57,7 @@ class MaintenanceCachePage extends Page implements HasActions
         return __('capell-html-cache::admin.navigation_group');
     }
 
+    #[Override]
     public function getTitle(): string|Htmlable
     {
         return __('capell-html-cache::admin.maintenance_cache');
@@ -108,6 +109,7 @@ class MaintenanceCachePage extends Page implements HasActions
     }
 
     /** @return array<int, Action> */
+    #[Override]
     protected function getHeaderActions(): array
     {
         return [

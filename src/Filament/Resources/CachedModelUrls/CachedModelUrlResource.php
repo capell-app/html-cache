@@ -62,16 +62,19 @@ final class CachedModelUrlResource extends Resource
         return self::canViewCacheMap();
     }
 
+    #[Override]
     public static function getNavigationLabel(): string
     {
         return (string) __('capell-html-cache::admin.cached_model_urls');
     }
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return (string) __('capell-admin::navigation.group_monitoring');
     }
 
+    #[Override]
     public static function getPages(): array
     {
         return [

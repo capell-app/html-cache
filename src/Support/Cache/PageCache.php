@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Override;
 use RuntimeException;
 use Silber\PageCache\Cache;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
@@ -21,10 +22,11 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 final class PageCache extends Cache
 {
-    public const ERROR_EXTENSION = '.404.html';
+    public const string ERROR_EXTENSION = '.404.html';
 
-    public const ERROR_PAGE = '404-error.html';
+    public const string ERROR_PAGE = '404-error.html';
 
+    #[Override]
     public function cache(SymfonyRequest $request, SymfonyResponse $response): void
     {
         /** @var Request $laravelRequest */
@@ -128,6 +130,7 @@ final class PageCache extends Cache
         return ! $request->headers->has('x-livewire');
     }
 
+    #[Override]
     protected function aliasFilename($filename): string
     {
         if (in_array($filename, [null, '', 'index'], true)) {
@@ -137,6 +140,7 @@ final class PageCache extends Cache
         return $filename;
     }
 
+    #[Override]
     protected function getDirectoryAndFileNames($request, $response): array
     {
         /** @var Request $laravelRequest */

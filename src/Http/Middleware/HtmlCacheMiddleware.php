@@ -22,15 +22,15 @@ use Symfony\Component\HttpFoundation\Response;
 
 final class HtmlCacheMiddleware
 {
-    public const BYPASS_CACHE_READ_ATTRIBUTE = 'capell.html_cache.bypass_cache_read';
+    public const string BYPASS_CACHE_READ_ATTRIBUTE = 'capell.html_cache.bypass_cache_read';
 
-    public const CACHE_WRITE_SUCCEEDED_ATTRIBUTE = 'capell.html_cache.cache_write_succeeded';
+    public const string CACHE_WRITE_SUCCEEDED_ATTRIBUTE = 'capell.html_cache.cache_write_succeeded';
 
-    public const STALE_CACHE_ID_ATTRIBUTE = 'capell.html_cache.stale_cache_id';
+    public const string STALE_CACHE_ID_ATTRIBUTE = 'capell.html_cache.stale_cache_id';
 
-    public const STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
+    public const string STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
 
-    private const INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
+    private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
     public function handle(Request $request, Closure $next): Response
     {

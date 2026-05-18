@@ -11,7 +11,7 @@ use Throwable;
 
 final class ModelEventRegistrar
 {
-    private const REQUEST_FLAG = 'capell.html_cache.model_events_registered';
+    private const string REQUEST_FLAG = 'capell.html_cache.model_events_registered';
 
     /** @var array<class-string, true> */
     private static array $registeredModelClasses = [];

@@ -79,9 +79,9 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
     }
 
     app()->instance(CapellFrontendContext::class, new CapellFrontendContext(
-        new class($page) implements FrontendContextReader
+        new readonly class($page) implements FrontendContextReader
         {
-            public function __construct(private readonly ?Pageable $page) {}
+            public function __construct(private ?Pageable $page) {}
 
             public function site(): ?Site
             {

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Override;
 
 /**
  * @property int $id
@@ -45,15 +46,15 @@ final class StaleCachedUrl extends Model
 {
     use HasFactory;
 
-    public const STATUS_PENDING = 'pending';
+    public const string STATUS_PENDING = 'pending';
 
-    public const STATUS_PROCESSING = 'processing';
+    public const string STATUS_PROCESSING = 'processing';
 
-    public const STATUS_PROCESSED = 'processed';
+    public const string STATUS_PROCESSED = 'processed';
 
-    public const STATUS_FAILED = 'failed';
+    public const string STATUS_FAILED = 'failed';
 
-    public const STATUS_EXHAUSTED = 'exhausted';
+    public const string STATUS_EXHAUSTED = 'exhausted';
 
     /** @var list<string> */
     protected $fillable = [
@@ -104,6 +105,7 @@ final class StaleCachedUrl extends Model
     }
 
     /** @return array<string, string> */
+    #[Override]
     protected function casts(): array
     {
         return [

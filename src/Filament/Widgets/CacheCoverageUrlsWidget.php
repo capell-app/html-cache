@@ -11,6 +11,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
 use Illuminate\Support\Collection;
+use Override;
 
 final class CacheCoverageUrlsWidget extends BaseWidget implements CapellWidgetContract
 {
@@ -26,6 +27,7 @@ final class CacheCoverageUrlsWidget extends BaseWidget implements CapellWidgetCo
 
     protected static ?int $sort = 51;
 
+    #[Override]
     public function table(Table $table): Table
     {
         return $table

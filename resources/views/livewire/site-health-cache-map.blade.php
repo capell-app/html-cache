@@ -1,4 +1,7 @@
-<x-filament::section :heading="__('capell-html-cache::admin.cache_map')">
+<x-filament::section
+    :heading="__('capell-html-cache::admin.cache_map')"
+    class="capell-site-health-cache-map"
+>
     @php
         $overview = $this->overview;
         $selectedResource = $this->selectedResource();

@@ -164,7 +164,7 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
     {
         $options = [];
 
-        foreach ($this->overview->modelSummaries as $summary) {
+        foreach ($this->overview()->modelSummaries as $summary) {
             $options[$summary->modelType] = $summary->label;
         }
 
@@ -186,7 +186,7 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
 
     public function selectedResource(): ?CacheMapResourceSummaryData
     {
-        foreach ($this->resourceOptions as $resource) {
+        foreach ($this->resourceOptions() as $resource) {
             if ($resource->key === $this->selectedResourceKey) {
                 return $resource;
             }

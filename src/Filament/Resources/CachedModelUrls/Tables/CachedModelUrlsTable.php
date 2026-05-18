@@ -34,7 +34,7 @@ final class CachedModelUrlsTable
             ->columns([
                 TextColumn::make('url')
                     ->label(__('capell-html-cache::admin.url'))
-                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('url_hash', CachedModelUrl::hashUrl($search)))
+                    ->searchable(query: self::applyUrlHashSearch(...))
                     ->copyable()
                     ->limit(80)
                     ->wrap(),
@@ -127,6 +127,11 @@ final class CachedModelUrlsTable
                             ->send();
                     }),
             ]);
+    }
+
+    protected static function applyUrlHashSearch(Builder $query, string $search): Builder
+    {
+        return $query->where('url_hash', CachedModelUrl::hashUrl($search));
     }
 
     /**

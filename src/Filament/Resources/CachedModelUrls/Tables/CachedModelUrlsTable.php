@@ -129,7 +129,7 @@ final class CachedModelUrlsTable
             ]);
     }
 
-    protected static function applyUrlHashSearch(Builder $query, string $search): Builder
+    private static function applyUrlHashSearch(Builder $query, string $search): Builder
     {
         return $query->where('url_hash', CachedModelUrl::hashUrl($search));
     }

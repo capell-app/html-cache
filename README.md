@@ -9,7 +9,7 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 - Surfaces: Filament admin, Livewire, console, queue, database
 - Service providers: `packages/html-cache/src/Providers/HtmlCacheServiceProvider.php`
 - Capell dependencies: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`
-- Third-party dependencies: `laravel/framework`, `lorisleiva/laravel-actions`, `silber/page-cache`, `spatie/laravel-data`, `spatie/laravel-package-tools`
+- Third-party dependencies: `laravel/framework`, `lorisleiva/laravel-actions`, `spatie/laravel-data`, `spatie/laravel-package-tools`
 
 ## What It Adds
 

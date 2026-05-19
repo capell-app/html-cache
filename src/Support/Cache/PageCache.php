@@ -10,23 +10,61 @@ use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Illuminate\Contracts\Container\Container;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
-use Override;
 use RuntimeException;
-use Silber\PageCache\Cache;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
-final class PageCache extends Cache
+final class PageCache
 {
     public const string ERROR_EXTENSION = '.404.html';
 
     public const string ERROR_PAGE = '404-error.html';
 
-    #[Override]
+    private ?Container $container = null;
+
+    private ?string $cachePath = null;
+
+    public function __construct(
+        private readonly Filesystem $files,
+    ) {}
+
+    public function setContainer(Container $container): self
+    {
+        $this->container = $container;
+
+        return $this;
+    }
+
+    public function setCachePath(string $path): self
+    {
+        $this->cachePath = rtrim($path, '\/');
+
+        return $this;
+    }
+
+    public function getCachePath(?string ...$paths): string
+    {
+        $base = $this->cachePath ?? $this->getDefaultCachePath();
+
+        if ($base === null) {
+            throw new RuntimeException('HTML cache path not set.');
+        }
+
+        $segments = array_values(array_filter(
+            $paths,
+            static fn (?string $path): bool => $path !== null && $path !== '',
+        ));
+
+        return $this->join([$base, ...$segments]);
+    }
+
     public function cache(SymfonyRequest $request, SymfonyResponse $response): void
     {
         /** @var Request $laravelRequest */
@@ -130,7 +168,24 @@ final class PageCache extends Cache
         return ! $request->headers->has('x-livewire');
     }
 
-    #[Override]
+    public function forget(string $slug): bool
+    {
+        $deleted = false;
+
+        foreach (['html', 'json', 'xml'] as $extension) {
+            $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
+        }
+
+        $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION)) || $deleted;
+
+        return $deleted;
+    }
+
+    public function clear(?string $path = null): bool
+    {
+        return $this->files->deleteDirectory($this->getCachePath($path), preserve: true);
+    }
+
     protected function aliasFilename($filename): string
     {
         if (in_array($filename, [null, '', 'index'], true)) {
@@ -140,7 +195,6 @@ final class PageCache extends Cache
         return $filename;
     }
 
-    #[Override]
     protected function getDirectoryAndFileNames($request, $response): array
     {
         /** @var Request $laravelRequest */
@@ -158,6 +212,46 @@ final class PageCache extends Cache
         $extension = $this->guessFileExtension($laravelResponse);
 
         return [$this->getCachePath(implode('/', $segments)), $filename, $extension];
+    }
+
+    protected function guessFileExtension(SymfonyResponse $response): string
+    {
+        $contentType = $response->headers->get('Content-Type');
+
+        if ($response instanceof JsonResponse || $contentType === 'application/json') {
+            return 'json';
+        }
+
+        if (in_array($contentType, ['text/xml', 'application/xml'], true)) {
+            return 'xml';
+        }
+
+        return 'html';
+    }
+
+    /**
+     * @param  list<string>  $paths
+     */
+    protected function join(array $paths): string
+    {
+        $trimmed = array_map(
+            static fn (string $path): string => trim($path, '/'),
+            $paths,
+        );
+
+        $target = implode('/', array_filter($trimmed, static fn (string $path): bool => $path !== ''));
+        $source = $paths[0] ?? '';
+
+        return str_starts_with($source, '/') ? '/' . $target : $target;
+    }
+
+    private function getDefaultCachePath(): ?string
+    {
+        if ($this->container?->bound('path.public') === true) {
+            return $this->container->make('path.public') . '/page-cache';
+        }
+
+        return null;
     }
 
     private function getFileFromRequest(Request $request, string $extension = '.html'): string

@@ -18,6 +18,8 @@ use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
 
 final class HtmlCacheMiddleware
@@ -35,6 +37,10 @@ final class HtmlCacheMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
+
+        if ($this->shouldBypassForAccessGate($request)) {
+            return $this->privateNoStore($next($request));
+        }
 
         if (resolve(CacheBypassResolver::class)->shouldBypass()) {
             return $next($request);
@@ -116,8 +122,56 @@ final class HtmlCacheMiddleware
     private function privateNoStore(Response $response): Response
     {
         $response->headers->set('Cache-Control', 'private, no-store');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
 
         return $response;
+    }
+
+    private function shouldBypassForAccessGate(Request $request): bool
+    {
+        return $request->attributes->get('access_gate.protected') === true
+            || $this->hasAccessGateBrowserToken($request)
+            || $this->hasActiveAccessGateArea();
+    }
+
+    private function hasAccessGateBrowserToken(Request $request): bool
+    {
+        $cookieName = config('access-gate.cookies.browser_token.name', 'capell_access_gate_browser_token');
+
+        if (! is_string($cookieName) || $cookieName === '') {
+            return false;
+        }
+
+        if ($request->cookies->has($cookieName)) {
+            return true;
+        }
+
+        $cookieHeader = $request->headers->get('Cookie');
+
+        return is_string($cookieHeader) && str_contains($cookieHeader, $cookieName . '=');
+    }
+
+    private function hasActiveAccessGateArea(): bool
+    {
+        $connectionName = config('access-gate.connection');
+        $schema = is_string($connectionName) && $connectionName !== ''
+            ? Schema::connection($connectionName)
+            : Schema::getFacadeRoot();
+
+        if (! $schema->hasTable('access_gate_areas')) {
+            return false;
+        }
+
+        $defaultAreaKey = config('access-gate.install.default_area.key', 'capell-preview');
+        $query = is_string($connectionName) && $connectionName !== ''
+            ? DB::connection($connectionName)->table('access_gate_areas')
+            : DB::table('access_gate_areas');
+
+        return $query
+            ->where('key', is_string($defaultAreaKey) && $defaultAreaKey !== '' ? $defaultAreaKey : 'capell-preview')
+            ->where('status', 'active')
+            ->exists();
     }
 
     private function shouldBypassHttpCache(Request $request, Response $response): bool

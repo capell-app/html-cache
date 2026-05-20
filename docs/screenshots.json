@@ -1,0 +1,93 @@
+{
+    "package": "html-cache",
+    "composerName": "capell-app/html-cache",
+    "generatedFor": "deployment-screenshot-runner",
+    "requiresInstalledPackage": true,
+    "outputDirectory": "public/docs/screenshots/packages/html-cache",
+    "entries": [
+        {
+            "id": "html-cache-maintenance-cache-page",
+            "title": "HTML Cache maintenance cache page.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "admin-page",
+            "target": "/admin/maintenance-cache",
+            "required": true,
+            "notes": "Capture the maintenance cache controls after at least one site exists.",
+            "useCase": "An administrator clears, warms, or regenerates cached HTML for a site.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-maintenance-cache-page.png"
+        },
+        {
+            "id": "html-cache-cached-model-urls",
+            "title": "Cached model URLs resource index.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "admin-resource",
+            "target": null,
+            "required": true,
+            "notes": "Capture after warming a public page so cache map rows exist.",
+            "useCase": "An administrator reviews model-to-URL cache map rows after a public page has been warmed.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-cached-model-urls.png"
+        },
+        {
+            "id": "html-cache-dashboard-widgets",
+            "title": "HTML Cache dashboard widgets.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "dashboard-widgets",
+            "target": "/admin",
+            "required": true,
+            "notes": "Capture cache overview, cache coverage URLs, and stale queue widgets.",
+            "useCase": "An administrator checks cache overview, coverage, and stale queue widgets.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-dashboard-widgets.png"
+        },
+        {
+            "id": "html-cache-site-health-cache-map",
+            "title": "HTML Cache site health cache map.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "admin-page",
+            "target": "/admin/site-health",
+            "required": true,
+            "notes": "Capture package diagnostics and public output safety checks on the core Site Health page.",
+            "useCase": "An operator reviews cache-map diagnostics and public-output safety checks in Site Health.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-site-health-cache-map.png"
+        },
+        {
+            "id": "html-cache-page-table-extension",
+            "title": "Page table cache indicator.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "admin-resource",
+            "target": "/admin/pages",
+            "required": true,
+            "notes": "Capture the core Pages resource with the cache table extension visible.",
+            "useCase": "An editor sees cache state indicators directly in the core Pages resource.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-page-table-extension.png"
+        },
+        {
+            "id": "html-cache-public-cache-hit",
+            "title": "Anonymous public cache hit.",
+            "package": "html-cache",
+            "surface": "frontend",
+            "targetType": "frontend-url",
+            "target": null,
+            "required": true,
+            "notes": "Capture anonymous public output and verify no authoring markers, editor URLs, or session cookies are exposed.",
+            "useCase": "An anonymous visitor receives cached public HTML with no authoring markers, editor URLs, or session cookies.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-public-cache-hit.png"
+        },
+        {
+            "id": "html-cache-maintenance-page",
+            "title": "Static maintenance page output.",
+            "package": "html-cache",
+            "surface": "frontend",
+            "targetType": "frontend-url",
+            "target": null,
+            "required": true,
+            "notes": "Capture generated maintenance HTML for a site/domain after using the maintenance cache page.",
+            "useCase": "An anonymous visitor sees the generated static maintenance page for a site/domain.",
+            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-maintenance-page.png"
+        }
+    ]
+}

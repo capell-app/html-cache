@@ -54,7 +54,7 @@ class MaintenanceCachePage extends Page implements HasActions
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return __('capell-html-cache::admin.navigation_group');
+        return __('capell-admin::navigation.group_monitoring');
     }
 
     #[Override]

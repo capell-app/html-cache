@@ -53,9 +53,7 @@ final class PageCache
     {
         $base = $this->cachePath ?? $this->getDefaultCachePath();
 
-        if ($base === null) {
-            throw new RuntimeException('HTML cache path not set.');
-        }
+        throw_if($base === null, RuntimeException::class, 'HTML cache path not set.');
 
         $segments = array_values(array_filter(
             $paths,
@@ -176,7 +174,9 @@ final class PageCache
             $deleted = $this->files->delete($this->getCachePath($slug . '.' . $extension)) || $deleted;
         }
 
-        $deleted = $this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION)) || $deleted;
+        if ($this->files->delete($this->getCachePath($slug . self::ERROR_EXTENSION))) {
+            return true;
+        }
 
         return $deleted;
     }
@@ -186,7 +186,7 @@ final class PageCache
         return $this->files->deleteDirectory($this->getCachePath($path), preserve: true);
     }
 
-    protected function aliasFilename($filename): string
+    private function aliasFilename(?string $filename): string
     {
         if (in_array($filename, [null, '', 'index'], true)) {
             return 'pc__index__pc';
@@ -195,7 +195,7 @@ final class PageCache
         return $filename;
     }
 
-    protected function getDirectoryAndFileNames($request, $response): array
+    private function getDirectoryAndFileNames($request, $response): array
     {
         /** @var Request $laravelRequest */
         $laravelRequest = $request;
@@ -214,7 +214,7 @@ final class PageCache
         return [$this->getCachePath(implode('/', $segments)), $filename, $extension];
     }
 
-    protected function guessFileExtension(SymfonyResponse $response): string
+    private function guessFileExtension(SymfonyResponse $response): string
     {
         $contentType = $response->headers->get('Content-Type');
 
@@ -232,7 +232,7 @@ final class PageCache
     /**
      * @param  list<string>  $paths
      */
-    protected function join(array $paths): string
+    private function join(array $paths): string
     {
         $trimmed = array_map(
             static fn (string $path): string => trim($path, '/'),

@@ -25,11 +25,7 @@ final class ClearHtmlCacheCommand extends Command
             return Command::SUCCESS;
         }
 
-        if ($this->option('recursive') === true) {
-            $cleared = $cache->clear($slug);
-        } else {
-            $cleared = $cache->forget($slug);
-        }
+        $cleared = $this->option('recursive') === true ? $cache->clear($slug) : $cache->forget($slug);
 
         $cleared
             ? $this->info(sprintf('HTML cache cleared for "%s".', $slug))

@@ -17,6 +17,7 @@ use Capell\HtmlCache\Actions\ListCacheMapResourceOptionsAction;
 use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
+use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\CachedModelUrlResource;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
@@ -65,6 +66,15 @@ it('does not register the cached model urls resource as an admin page', function
     );
 
     expect(CapellAdmin::getAdminSurfaceContributions(AdminSurfaceContributionType::Resource))->toBe([]);
+});
+
+it('keeps html cache monitoring links contained', function (): void {
+    expect(MaintenanceCachePage::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
+        ->and(MaintenanceCachePage::getNavigationSort())->toBe(10)
+        ->and(MaintenanceCachePage::getNavigationParentItem())->toBeNull()
+        ->and(CachedModelUrlResource::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
+        ->and(CachedModelUrlResource::getNavigationSort())->toBe(11)
+        ->and(CachedModelUrlResource::getNavigationParentItem())->toBe((string) __('capell-html-cache::admin.maintenance_cache'));
 });
 
 it('builds a cache map overview grouped by model and top resource impact', function (): void {

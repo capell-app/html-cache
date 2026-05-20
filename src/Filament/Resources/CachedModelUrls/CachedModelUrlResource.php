@@ -24,6 +24,8 @@ final class CachedModelUrlResource extends Resource
 
     protected static string|BackedEnum|null $activeNavigationIcon = Heroicon::DocumentMagnifyingGlass;
 
+    protected static ?int $navigationSort = 11;
+
     protected static ?string $recordTitleAttribute = 'url';
 
     #[Override]
@@ -72,6 +74,12 @@ final class CachedModelUrlResource extends Resource
     public static function getNavigationGroup(): ?string
     {
         return (string) __('capell-admin::navigation.group_monitoring');
+    }
+
+    #[Override]
+    public static function getNavigationParentItem(): ?string
+    {
+        return __('capell-html-cache::admin.maintenance_cache');
     }
 
     #[Override]

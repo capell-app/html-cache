@@ -127,6 +127,7 @@ it('bypasses cached html for access gated protected requests', function (): void
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set('access_gate.protected', true);
+
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
 
@@ -151,6 +152,7 @@ it('bypasses cached html for access gate browser token requests even when authen
     ]);
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->cookies->set('capell_access_gate_browser_token', 'token-value');
+
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
 

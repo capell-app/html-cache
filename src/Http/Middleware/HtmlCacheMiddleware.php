@@ -130,9 +130,15 @@ final class HtmlCacheMiddleware
 
     private function shouldBypassForAccessGate(Request $request): bool
     {
-        return $request->attributes->get('access_gate.protected') === true
-            || $this->hasAccessGateBrowserToken($request)
-            || $this->hasActiveAccessGateArea();
+        if ($request->attributes->get('access_gate.protected') === true) {
+            return true;
+        }
+
+        if ($this->hasAccessGateBrowserToken($request)) {
+            return true;
+        }
+
+        return $this->hasActiveAccessGateArea();
     }
 
     private function hasAccessGateBrowserToken(Request $request): bool

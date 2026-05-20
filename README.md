@@ -15,6 +15,8 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 
 - Static HTML cache, dependency indexing, and cache administration for Capell.
 - Admin resources: `CachedModelUrlResource`.
+- Admin page: `MaintenanceCachePage`.
+- Dashboard widgets for cache overview, cache coverage, and stale regeneration queue.
 - Livewire components: `SiteHealthCacheMap`.
 - Package setup or maintenance commands.
 
@@ -39,7 +41,9 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 ## Admin Surface
 
 - Resources: `CachedModelUrlResource`.
-- Pages: `ListCachedModelUrls`.
+- Pages: `MaintenanceCachePage`, `ListCachedModelUrls`.
+- Widgets: `HtmlCacheOverviewWidget`, `CacheCoverageUrlsWidget`, `HtmlCacheStaleQueueWidget`.
+- Extenders: page table cache indicator, site header maintenance/cache action, Site Health cache map.
 
 ## Runtime Surface
 
@@ -77,7 +81,9 @@ Generated files are written under `maintenance/` on the `page_cache` disk. The m
 
 ## Docs
 
+- [overview.md](docs/overview.md)
 - [cache-invalidation.md](docs/cache-invalidation.md)
+- [screenshots.json](docs/screenshots.json)
 
 ## Testing
 

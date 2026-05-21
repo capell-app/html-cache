@@ -43,6 +43,8 @@ use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Database\ConnectionResolverInterface;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemManager;
@@ -61,36 +63,36 @@ uses(HtmlCacheTestCase::class);
 
 function htmlCacheResidualCoverageSiteDomain(string $domain = 'example.test'): SiteDomain
 {
-    Model::setConnectionResolver(app('db'));
+    Model::setConnectionResolver(resolve(ConnectionResolverInterface::class));
 
-    $language = Language::forceCreate([
+    $language = Language::query()->forceCreate([
         'name' => 'English',
         'code' => 'en',
         'default' => true,
         'status' => true,
     ]);
-    $siteBlueprint = Blueprint::forceCreate([
+    $siteBlueprint = Blueprint::query()->forceCreate([
         'name' => 'Site',
         'type' => 'site',
         'key' => 'html-cache-site-' . $domain,
         'default' => true,
         'status' => true,
     ]);
-    $themeBlueprint = Blueprint::forceCreate([
+    $themeBlueprint = Blueprint::query()->forceCreate([
         'name' => 'Theme',
         'type' => 'theme',
         'key' => 'html-cache-theme-' . $domain,
         'default' => true,
         'status' => true,
     ]);
-    $theme = Theme::forceCreate([
+    $theme = Theme::query()->forceCreate([
         'name' => 'Test Theme',
         'blueprint_id' => $themeBlueprint->id,
         'key' => 'html-cache-theme-' . $domain,
         'default' => true,
         'status' => true,
     ]);
-    $site = Site::forceCreate([
+    $site = Site::query()->forceCreate([
         'name' => 'Test Site',
         'blueprint_id' => $siteBlueprint->id,
         'theme_id' => $theme->id,
@@ -99,7 +101,7 @@ function htmlCacheResidualCoverageSiteDomain(string $domain = 'example.test'): S
         'status' => true,
     ]);
 
-    return SiteDomain::forceCreate([
+    return SiteDomain::query()->forceCreate([
         'site_id' => $site->id,
         'language_id' => $language->id,
         'domain' => $domain,
@@ -112,16 +114,16 @@ function htmlCacheResidualCoverageSiteDomain(string $domain = 'example.test'): S
 
 function htmlCacheResidualCoveragePage(SiteDomain $siteDomain): Page
 {
-    Model::setConnectionResolver(app('db'));
+    Model::setConnectionResolver(resolve(ConnectionResolverInterface::class));
 
-    $pageBlueprint = Blueprint::forceCreate([
+    $pageBlueprint = Blueprint::query()->forceCreate([
         'name' => 'Page',
         'type' => 'page',
         'key' => 'html-cache-page-' . $siteDomain->id,
         'default' => true,
         'status' => true,
     ]);
-    $layout = Layout::forceCreate([
+    $layout = Layout::query()->forceCreate([
         'name' => 'Default',
         'key' => 'html-cache-layout-' . $siteDomain->id,
         'site_id' => $siteDomain->site_id,
@@ -129,7 +131,7 @@ function htmlCacheResidualCoveragePage(SiteDomain $siteDomain): Page
         'status' => true,
     ]);
 
-    return Page::forceCreate([
+    return Page::query()->forceCreate([
         'uuid' => (string) Str::uuid(),
         'name' => 'Cached Page',
         'blueprint_id' => $pageBlueprint->id,
@@ -164,11 +166,11 @@ it('tracks static site extension handlers and rejects sites without domains', fu
 
     $registry->clear();
 
-    $orphanSite = Site::forceCreate([
+    $orphanSite = Site::query()->forceCreate([
         'name' => 'No Domain Site',
-        'blueprint_id' => $site->blueprint_id,
-        'theme_id' => $site->theme_id,
-        'language_id' => $site->language_id,
+        'blueprint_id' => $site->getAttribute('blueprint_id'),
+        'theme_id' => $site->getAttribute('theme_id'),
+        'language_id' => $site->getAttribute('language_id'),
         'status' => true,
     ]);
 
@@ -179,11 +181,11 @@ it('tracks static site extension handlers and rejects sites without domains', fu
 
 it('updates static generation cache counters even when generation fails', function (): void {
     $siteWithDomain = htmlCacheResidualCoverageSiteDomain('cache-counter.test')->site;
-    $site = Site::forceCreate([
+    $site = Site::query()->forceCreate([
         'name' => 'Cache Counter Site',
-        'blueprint_id' => $siteWithDomain->blueprint_id,
-        'theme_id' => $siteWithDomain->theme_id,
-        'language_id' => $siteWithDomain->language_id,
+        'blueprint_id' => $siteWithDomain->getAttribute('blueprint_id'),
+        'theme_id' => $siteWithDomain->getAttribute('theme_id'),
+        'language_id' => $siteWithDomain->getAttribute('language_id'),
         'status' => true,
     ]);
 
@@ -232,15 +234,13 @@ it('visits static urls internally with host and port server headers', function (
 });
 
 it('logs invalid internal static urls instead of dispatching them', function (): void {
-    Log::spy();
+    Log::shouldReceive('warning')
+        ->once()
+        ->with('StaticSiteGenerator: rejected invalid internal url', ['url' => '/relative-only']);
 
     $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
 
     $method->invoke(new StaticSiteGenerator(new Site), '/relative-only');
-
-    Log::shouldHaveReceived('warning')
-        ->once()
-        ->with('StaticSiteGenerator: rejected invalid internal url', ['url' => '/relative-only']);
 });
 
 it('notifies or clears cached page urls for changed models', function (): void {
@@ -280,7 +280,7 @@ it('sends a clear-cache notification when automatic cache clearing is disabled',
 it('resolves cached page rows for page urls and pageable records', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('cached-page.test');
     $page = htmlCacheResidualCoveragePage($siteDomain);
-    $pageUrl = PageUrl::forceCreate([
+    $pageUrl = PageUrl::query()->forceCreate([
         'site_id' => $siteDomain->site_id,
         'language_id' => $siteDomain->language_id,
         'pageable_type' => $page->getMorphClass(),
@@ -289,6 +289,7 @@ it('resolves cached page rows for page urls and pageable records', function (): 
         'status' => true,
     ]);
     $pageUrl->setRelation('siteDomain', $siteDomain);
+
     $page->setRelation('pageUrls', collect([$pageUrl]));
 
     $cachedModelUrl = CachedModelUrl::query()->create([
@@ -341,7 +342,7 @@ it('strips session cookies only from public cacheable responses', function (): v
     config(['session.cookie' => 'capell_session']);
 
     $middleware = new PreventSessionCookieOnCacheableRequests;
-    $request = Request::create('/cached', 'GET');
+    $request = Request::create('/cached', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $response = new Response('ok', Response::HTTP_OK, ['Cache-Control' => 'public, max-age=60']);
     $response->headers->setCookie(new Cookie('capell_session', 'secret'));
     $response->headers->setCookie(new Cookie('XSRF-TOKEN', 'token'));
@@ -355,7 +356,7 @@ it('strips session cookies only from public cacheable responses', function (): v
     $privateResponse->headers->setCookie(new Cookie('capell_session', 'secret'));
 
     $handledPrivate = $middleware->handle(
-        Request::create('/cached', 'GET'),
+        Request::create('/cached', Symfony\Component\HttpFoundation\Request::METHOD_GET),
         fn (Request $nextRequest): Response => $privateResponse,
     );
 
@@ -381,7 +382,7 @@ it('tracks retrieved models recursively and flushes them from middleware', funct
     app()->instance(RetrievedModelStore::class, new RetrievedModelStore);
 
     $response = (new EnsureModelEventsRegistered)->handle(
-        Request::create('https://retrieved.test/page', 'GET'),
+        Request::create('https://retrieved.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET),
         fn (Request $request): Response => new Response('ok'),
     );
 
@@ -422,7 +423,7 @@ it('flushes retrieved models through sync and async registration modes', functio
 });
 
 it('registers model retrieval hooks once per request', function (): void {
-    $request = Request::create('https://events.test/page', 'GET');
+    $request = Request::create('https://events.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
 
     CapellCore::registerModels([Page::class]);
@@ -498,7 +499,7 @@ it('covers page cache notification trait and page table extension helpers', func
 it('covers static generation and page deletion actions directly', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('delete-action.test');
     $page = htmlCacheResidualCoveragePage($siteDomain);
-    $pageUrl = PageUrl::forceCreate([
+    $pageUrl = PageUrl::query()->forceCreate([
         'site_id' => $siteDomain->site_id,
         'language_id' => $siteDomain->language_id,
         'pageable_type' => $page->getMorphClass(),
@@ -507,6 +508,7 @@ it('covers static generation and page deletion actions directly', function (): v
         'status' => true,
     ]);
     $pageUrl->setRelation('siteDomain', $siteDomain);
+
     $page->setRelation('pageUrls', collect([$pageUrl]));
 
     CachedModelUrl::query()->create([
@@ -568,6 +570,7 @@ it('wraps html cache storage and maintenance page storage operations', function 
 
     $store->put('../index.html', 'home');
     $store->replace('nested/page.html', 'page');
+
     $maintenanceStore->put('maintenance/index.html', 'down');
 
     expect($store->exists('index.html'))->toBeTrue()
@@ -642,6 +645,8 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
 
     $user = new class extends User
     {
+        use HasFactory;
+
         protected $table = 'users';
 
         public function hasPermissionTo(mixed $permission): bool
@@ -668,6 +673,8 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
 it('builds maintenance admin actions for permitted users', function (): void {
     $user = new class extends User
     {
+        use HasFactory;
+
         protected $table = 'users';
 
         public function hasPermissionTo(mixed $permission): bool
@@ -736,7 +743,7 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
     config(['capell-html-cache.enabled' => true]);
 
     $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
-    $request = Request::create('/docs/page', 'GET');
+    $request = Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $html = ' <html><body>Safe</body></html> ';
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE, true);
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE, hash('xxh128', $html));
@@ -744,21 +751,21 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
     expect($cache->shouldCachePage($request, new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeTrue();
 
     $cache->cache($request, new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html']));
-    $cache->cache(Request::create('/feed', 'GET'), new Response('<xml />', Response::HTTP_OK, ['Content-Type' => 'text/xml']));
-    $cache->cache(Request::create('/data', 'GET'), new Response('{"ok":true}', Response::HTTP_OK, ['Content-Type' => 'application/json']));
-    $cache->cache(Request::create('/missing', 'GET'), new Response('missing', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']));
+    $cache->cache(Request::create('/feed', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('<xml />', Response::HTTP_OK, ['Content-Type' => 'text/xml']));
+    $cache->cache(Request::create('/data', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('{"ok":true}', Response::HTTP_OK, ['Content-Type' => 'application/json']));
+    $cache->cache(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('missing', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']));
 
-    $invalidRequest = Request::create('/unsafe/..', 'GET');
+    $invalidRequest = Request::create('/unsafe/..', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $cache->cache($invalidRequest, new Response('invalid', Response::HTTP_OK, ['Content-Type' => 'text/html']));
 
     expect($cache->getCachePage($request))->toBe('<html><body>Safe</body></html>')
-        ->and($cache->getCacheErrorPage(Request::create('/missing', 'GET')))->toBe('missing')
+        ->and($cache->getCacheErrorPage(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET)))->toBe('missing')
         ->and(File::exists($cachePath . '/feed.xml'))->toBeTrue()
         ->and(File::exists($cachePath . '/data.json'))->toBeTrue()
         ->and(File::exists($cachePath . '/__invalid__/pc__invalid__pc.html'))->toBeTrue()
-        ->and($cache->shouldCachePage(Request::create('/docs/page?x=1', 'GET'), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
-        ->and($cache->shouldCachePage(Request::create('/docs/page', 'POST'), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
-        ->and($cache->shouldCachePage(Request::create('/docs/page', 'GET', server: ['HTTP_X_INERTIA' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
-        ->and($cache->shouldCachePage(Request::create('/docs/page', 'GET'), new Response('json', Response::HTTP_OK, ['Content-Type' => 'application/json'])))->toBeFalse()
-        ->and($cache->shouldCachePage(Request::create('/docs/page', 'GET', server: ['HTTP_X_LIVEWIRE' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse();
+        ->and($cache->shouldCachePage(Request::create('/docs/page?x=1', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
+        ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_POST), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
+        ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_INERTIA' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
+        ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('json', Response::HTTP_OK, ['Content-Type' => 'application/json'])))->toBeFalse()
+        ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_LIVEWIRE' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse();
 });

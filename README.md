@@ -11,6 +11,18 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 - Capell dependencies: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`
 - Third-party dependencies: `laravel/framework`, `lorisleiva/laravel-actions`, `spatie/laravel-data`, `spatie/laravel-package-tools`
 
+## Why It Helps Your Capell Workflow
+
+- Adds static HTML cache indexing, dependency tracking, and admin cache controls for Capell public pages.
+- Helps operators see stale cached URLs and refresh affected pages without manually clearing broad caches.
+- Protects public-output safety by keeping cached HTML suitable for anonymous visitors, admins, crawlers, and static exports.
+
+## Best Used With
+
+- [Frontend Authoring](../frontend-authoring/README.md)
+- [Frontend Optimizer](../frontend-optimizer/README.md)
+- [Diagnostics](../diagnostics/README.md)
+
 ## What It Adds
 
 - Static HTML cache, dependency indexing, and cache administration for Capell.
@@ -81,6 +93,7 @@ Generated files are written under `maintenance/` on the `page_cache` disk. The m
 
 ## Docs
 
+- [docs index](docs/README.md)
 - [overview.md](docs/overview.md)
 - [cache-invalidation.md](docs/cache-invalidation.md)
 - [screenshots.json](docs/screenshots.json)

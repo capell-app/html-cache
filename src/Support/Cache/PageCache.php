@@ -191,7 +191,10 @@ final class PageCache
         return $filename;
     }
 
-    private function getDirectoryAndFileNames($request, $response): array
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function getDirectoryAndFileNames(SymfonyRequest $request, SymfonyResponse $response): array
     {
         /** @var Request $laravelRequest */
         $laravelRequest = $request;

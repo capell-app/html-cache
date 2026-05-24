@@ -18,6 +18,9 @@ final class GenerateStaticSitesAction
 
     private string $cacheKey = HtmlCacheKey::GeneratingStaticSite->value;
 
+    /**
+     * @param  Collection<array-key, mixed>  $sites
+     */
     public function handle(Collection $sites): void
     {
         Cache::put($this->cacheKey, $sites->count(), now()->addMinutes(20));

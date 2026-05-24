@@ -9,6 +9,7 @@ use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -40,6 +41,7 @@ use Override;
  */
 final class CachedModelUrl extends Model
 {
+    /** @use HasFactory<Factory<static>> */
     use HasFactory;
 
     /** @var list<string> */
@@ -84,6 +86,9 @@ final class CachedModelUrl extends Model
         return class_basename($this->cacheable_type) . ' #' . $this->cacheable_id;
     }
 
+    /**
+     * @return MorphTo<Model, $this>
+     */
     public function cacheable(): MorphTo
     {
         return $this->morphTo();

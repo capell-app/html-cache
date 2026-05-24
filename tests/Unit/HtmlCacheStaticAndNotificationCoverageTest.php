@@ -44,6 +44,7 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\ConnectionResolverInterface;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
@@ -463,7 +464,7 @@ it('covers page cache notification trait and page table extension helpers', func
     {
         use HasPageCacheNotification;
 
-        /** @var list<array{event: string, params: array<string, mixed>}> */
+        /** @var list<array{event: string, params: array<array-key, mixed>}> */
         public array $events = [];
 
         public function dispatch(string $event, mixed ...$params): void
@@ -645,6 +646,7 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
 
     $user = new class extends User
     {
+        /** @use HasFactory<Factory<static>> */
         use HasFactory;
 
         protected $table = 'users';
@@ -673,6 +675,7 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
 it('builds maintenance admin actions for permitted users', function (): void {
     $user = new class extends User
     {
+        /** @use HasFactory<Factory<static>> */
         use HasFactory;
 
         protected $table = 'users';

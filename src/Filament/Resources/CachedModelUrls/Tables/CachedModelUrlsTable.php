@@ -14,10 +14,14 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Livewire\Component;
 
 final class CachedModelUrlsTable
 {
+    /**
+     * @param  Builder<CachedModelUrl>|null  $query
+     */
     public static function configure(Table $table, ?Builder $query = null, bool $isSiteScoped = false, bool $showFilters = true): Table
     {
         if ($query instanceof Builder) {
@@ -128,6 +132,10 @@ final class CachedModelUrlsTable
             ]);
     }
 
+    /**
+     * @param  Builder<Model>  $query
+     * @return Builder<Model>
+     */
     private static function applyUrlHashSearch(Builder $query, string $search): Builder
     {
         return $query->where('url_hash', CachedModelUrl::hashUrl($search));

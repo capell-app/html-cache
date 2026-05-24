@@ -19,6 +19,9 @@ final class ClearCachedPageUrlsAction
     use AsJob;
     use AsObject;
 
+    /**
+     * @param  Collection<array-key, mixed>  $urls
+     */
     public function handle(Collection $urls): int
     {
         $cleared = 0;

@@ -10,7 +10,7 @@ use Capell\HtmlCache\Data\CacheMap\CacheMapOverviewData;
 use Capell\HtmlCache\Data\CacheMap\CacheMapResourceSummaryData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 /**
@@ -62,7 +62,7 @@ final class BuildCacheMapOverviewAction
      */
     private function topResources(Builder $baseQuery): array
     {
-        /** @var EloquentCollection<int, CachedModelUrl> $rows */
+        /** @var Collection<int, CachedModelUrl> $rows */
         $rows = (clone $baseQuery)
             ->select('cacheable_type', 'cacheable_id')
             ->selectRaw('MIN(id) as sample_id')
@@ -118,6 +118,9 @@ final class BuildCacheMapOverviewAction
         return base64_encode($modelType . '|' . $resourceId);
     }
 
+    /**
+     * @return Builder<CachedModelUrl>
+     */
     private function baseQuery(?int $siteId): Builder
     {
         /** @var Builder<CachedModelUrl> $query */

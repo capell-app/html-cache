@@ -22,6 +22,9 @@ final class NotifyClearCachedPagesAction
     use AsFake;
     use AsObject;
 
+    /**
+     * @param  Collection<array-key, mixed>  $models
+     */
     public function handle(Collection $models): void
     {
         $cachedUrls = $models

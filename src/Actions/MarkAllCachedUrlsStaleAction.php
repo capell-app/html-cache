@@ -14,7 +14,7 @@ use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static int run(string $reason = 'all_changed', ?array $cachePathSiteDomainAttributes = null)
+ * @method static int run(string $reason = 'all_changed', ?array<string, mixed> $cachePathSiteDomainAttributes = null)
  */
 final class MarkAllCachedUrlsStaleAction
 {

@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run(string $url, array $models, ?CarbonInterface $seenAt = null)
+ * @method static void run(string $url, array<string, array<int, int|string>> $models, ?CarbonInterface $seenAt = null)
  */
 final class RecordCachedModelUrlsAction
 {

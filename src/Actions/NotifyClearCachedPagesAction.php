@@ -15,7 +15,7 @@ use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run(Collection $models)
+ * @method static void run(Collection<int, mixed> $models)
  */
 final class NotifyClearCachedPagesAction
 {
@@ -23,12 +23,11 @@ final class NotifyClearCachedPagesAction
     use AsObject;
 
     /**
-     * @param  Collection<array-key, mixed>  $models
+     * @param  Collection<int, Model>  $models
      */
     public function handle(Collection $models): void
     {
         $cachedUrls = $models
-            ->filter(fn (mixed $model): bool => $model instanceof Model)
             ->flatMap(fn (Model $model): array => CachedModelUrl::query()
                 ->where('cacheable_type', $model->getMorphClass())
                 ->where('cacheable_id', (int) $model->getKey())

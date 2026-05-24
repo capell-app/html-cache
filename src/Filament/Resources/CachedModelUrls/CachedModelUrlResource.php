@@ -71,13 +71,13 @@ final class CachedModelUrlResource extends Resource
     }
 
     #[Override]
-    public static function getNavigationGroup(): ?string
+    public static function getNavigationGroup(): string
     {
         return (string) __('capell-admin::navigation.group_monitoring');
     }
 
     #[Override]
-    public static function getNavigationParentItem(): ?string
+    public static function getNavigationParentItem(): string
     {
         return __('capell-html-cache::admin.maintenance_cache');
     }
@@ -102,11 +102,6 @@ final class CachedModelUrlResource extends Resource
             return true;
         }
 
-        if (method_exists($actor, 'hasPermissionTo')) {
-            return $actor->hasPermissionTo(HtmlCachePermission::ViewCachedModelUrls->value) === true;
-        }
-
-        return method_exists($actor, 'can')
-            && $actor->can(HtmlCachePermission::ViewCachedModelUrls->value) === true;
+        return $actor->hasPermissionTo(HtmlCachePermission::ViewCachedModelUrls->value) === true;
     }
 }

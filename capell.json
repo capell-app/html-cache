@@ -13,25 +13,20 @@
         "bundle": "foundation"
     },
     "namespace": "Capell\\HtmlCache",
-    "surfaces": [
-        "admin",
-        "frontend"
-    ],
+    "surfaces": ["admin", "frontend"],
     "dependencies": {
         "requires": [
             "capell-app/admin",
             "capell-app/core",
             "capell-app/frontend"
         ],
-        "optional": [],
+        "supports": [],
         "conflicts": []
     },
     "providers": {
         "metadata": [],
         "install": [],
-        "runtime": [
-            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"
-        ],
+        "runtime": ["Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"],
         "admin": [],
         "frontend": []
     },
@@ -48,23 +43,15 @@
         "doctor": null
     },
     "settings": [],
-    "permissions": [
-        "capell-html-cache.view",
-        "capell-html-cache.clear"
-    ],
+    "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
     "capabilities": [],
     "performance": {
         "frontendRenderBudgetMs": 20,
         "adminQueryBudget": 40,
-        "cacheTags": [
-            "html-cache"
-        ],
+        "cacheTags": ["html-cache"],
         "cacheSafety": {
             "cacheable": false,
-            "variesBy": [
-                "site",
-                "locale"
-            ],
+            "variesBy": ["site", "locale"],
             "sensitiveOutput": false,
             "invalidationSources": [],
             "queueInvalidation": true
@@ -94,21 +81,11 @@
                 "caption": "HTML Cache extension preview"
             }
         ],
-        "categories": [
-            "admin",
-            "foundation",
-            "frontend"
-        ]
+        "categories": ["admin", "foundation", "frontend"]
     },
-    "scopes": [
-        "backend",
-        "frontend"
-    ],
+    "scopes": ["backend", "frontend"],
     "order": 45,
     "contributionTraceability": {
-        "deferredContributions": [
-            "admin-page",
-            "route"
-        ]
+        "deferredContributions": ["admin-page", "route"]
     }
 }

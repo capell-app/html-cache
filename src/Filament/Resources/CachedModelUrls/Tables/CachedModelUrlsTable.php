@@ -6,7 +6,6 @@ namespace Capell\HtmlCache\Filament\Resources\CachedModelUrls\Tables;
 
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
-use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -182,10 +181,6 @@ final class CachedModelUrlsTable
 
         if (SiteScope::isGlobalActor($actor)) {
             return true;
-        }
-
-        if (! method_exists($actor, 'can') || $actor->can(HtmlCachePermission::ClearCachedModelUrls->value) !== true) {
-            return false;
         }
 
         return $record->site === null || SiteScope::actorCanUseSite($actor, $record->site);

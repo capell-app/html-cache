@@ -25,7 +25,7 @@ final class ExtensionCacheSafetyResolver
     {
         return collect($this->contributions())
             ->flatMap(fn (ExtensionRenderContributionData $contribution): array => $contribution->cacheTags)
-            ->filter(fn (mixed $tag): bool => is_string($tag) && $tag !== '')
+            ->filter(fn (mixed $tag): bool => $tag !== '')
             ->map(fn (string $tag): string => $this->normalizeTag($tag))
             ->unique()
             ->values()

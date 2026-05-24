@@ -73,10 +73,6 @@ final class PageCache
 
         $cacheLocation = $this->getDirectoryAndFileNames($laravelRequest, $laravelResponse);
 
-        if ($cacheLocation === null) {
-            return;
-        }
-
         [$path, $filename, $extension] = $cacheLocation;
         $content = (string) $response->getContent();
 
@@ -409,7 +405,7 @@ final class PageCache
         $directory = dirname($path);
         $temporaryPath = tempnam($directory, basename($path) . '.tmp.');
 
-        if (! is_string($temporaryPath) || $temporaryPath === '') {
+        if ($temporaryPath === false) {
             throw new RuntimeException(sprintf('Unable to create temporary cache file for "%s".', $path));
         }
 

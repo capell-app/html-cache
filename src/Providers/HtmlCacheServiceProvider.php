@@ -142,7 +142,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerOptimization();
     }
 
-    private function isPackageInstalled(): bool
+    protected function isPackageInstalled(): bool
     {
         return CapellCore::isPackageInstalled(self::$packageName);
     }

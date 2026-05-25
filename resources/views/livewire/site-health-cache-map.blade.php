@@ -18,12 +18,12 @@
                     class="rounded-lg border border-gray-200 p-4 dark:border-gray-700"
                 >
                     <div
-                        class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                        class="text-xs font-medium tracking-wide text-gray-500 uppercase dark:text-gray-400"
                     >
                         {{ __('capell-html-cache::admin.cache_map_cached_urls') }}
                     </div>
                     <div
-                        class="mt-2 text-3xl font-semibold tabular-nums text-gray-950 dark:text-white"
+                        class="mt-2 text-3xl font-semibold text-gray-950 tabular-nums dark:text-white"
                     >
                         {{ $overview->totalUrls }}
                     </div>
@@ -33,12 +33,12 @@
                     class="rounded-lg border border-gray-200 p-4 dark:border-gray-700"
                 >
                     <div
-                        class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                        class="text-xs font-medium tracking-wide text-gray-500 uppercase dark:text-gray-400"
                     >
                         {{ __('capell-html-cache::admin.cache_map_dependencies') }}
                     </div>
                     <div
-                        class="mt-2 text-3xl font-semibold tabular-nums text-gray-950 dark:text-white"
+                        class="mt-2 text-3xl font-semibold text-gray-950 tabular-nums dark:text-white"
                     >
                         {{ $overview->totalDependencies }}
                     </div>
@@ -48,12 +48,12 @@
                     class="rounded-lg border border-gray-200 p-4 dark:border-gray-700"
                 >
                     <div
-                        class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                        class="text-xs font-medium tracking-wide text-gray-500 uppercase dark:text-gray-400"
                     >
                         {{ __('capell-html-cache::admin.cache_map_model_groups') }}
                     </div>
                     <div
-                        class="mt-2 text-3xl font-semibold tabular-nums text-gray-950 dark:text-white"
+                        class="mt-2 text-3xl font-semibold text-gray-950 tabular-nums dark:text-white"
                     >
                         {{ count($overview->modelSummaries) }}
                     </div>
@@ -97,7 +97,7 @@
                                 </div>
                             </div>
                             <span
-                                class="rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold tabular-nums text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                                class="rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 tabular-nums dark:bg-gray-800 dark:text-gray-300"
                             >
                                 {{ $resource->urlCount }}
                             </span>

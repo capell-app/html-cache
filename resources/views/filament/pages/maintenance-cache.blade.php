@@ -20,7 +20,7 @@
                     >
                         {{ __('capell-html-cache::admin.manifest_path') }}
                     </dt>
-                    <dd class="mt-1 break-all text-sm">
+                    <dd class="mt-1 text-sm break-all">
                         {{ resolve(MaintenanceManifestStore::class)->path() }}
                     </dd>
                 </div>

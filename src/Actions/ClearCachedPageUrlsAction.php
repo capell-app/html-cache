@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Models\Site;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -11,7 +12,7 @@ use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static int run(Collection<int, string> $urls, ?EloquentCollection<int, \Capell\Core\Models\Site> $sites = null)
+ * @method static int run(Collection<int, string> $urls, ?EloquentCollection<int, Site> $sites = null)
  */
 final class ClearCachedPageUrlsAction
 {

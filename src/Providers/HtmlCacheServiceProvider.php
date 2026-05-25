@@ -59,6 +59,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
+use Override;
 use RuntimeException;
 use Spatie\LaravelPackageTools\Package;
 
@@ -142,6 +143,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerOptimization();
     }
 
+    #[Override]
     protected function isPackageInstalled(): bool
     {
         return CapellCore::isPackageInstalled(self::$packageName);

@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run(Collection<int, \Capell\Core\Models\Site> $sites)
+ * @method static void run(Collection<int, Site> $sites)
  */
 final class GenerateStaticSitesAction
 {

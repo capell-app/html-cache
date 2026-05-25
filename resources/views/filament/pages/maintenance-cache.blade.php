@@ -1,3 +1,7 @@
+@php
+    use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
+@endphp
+
 <x-filament-panels::page>
     <div class="space-y-4">
         <section

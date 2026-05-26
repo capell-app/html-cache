@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Filament\Resources\CachedModelUrls\Tables;
 
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
+use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -16,6 +17,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Livewire\Component;
+use Spatie\Permission\Exceptions\PermissionDoesNotExist;
 
 final class CachedModelUrlsTable
 {
@@ -191,6 +193,12 @@ final class CachedModelUrlsTable
             return true;
         }
 
-        return $record->site === null || SiteScope::actorCanUseSite($actor, $record->site);
+        try {
+            $canClearCacheMap = $actor->hasPermissionTo(HtmlCachePermission::ClearCachedModelUrls->value) === true;
+        } catch (PermissionDoesNotExist) {
+            $canClearCacheMap = false;
+        }
+
+        return $canClearCacheMap && ($record->site === null || SiteScope::actorCanUseSite($actor, $record->site));
     }
 }

@@ -62,17 +62,10 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
         return null;
     }
 
-    public function getTableRecord(?string $key): Model
+    public function getTableRecord(?string $key): ?Model
     {
         if ($key === null) {
-            return (new CachedModelUrl)->forceFill([
-                'id' => 0,
-                'url' => '',
-                'url_hash' => '',
-                'path' => '/',
-                'cacheable_type' => CachedModelUrl::class,
-                'cacheable_id' => 0,
-            ]);
+            return null;
         }
 
         /** @var Builder<CachedModelUrl> $query */

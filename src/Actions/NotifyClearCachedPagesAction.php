@@ -23,11 +23,12 @@ final class NotifyClearCachedPagesAction
     use AsObject;
 
     /**
-     * @param  Collection<int, Model>  $models
+     * @param  Collection<int, mixed>  $models
      */
     public function handle(Collection $models): void
     {
         $cachedUrls = $models
+            ->filter(fn (mixed $model): bool => $model instanceof Model)
             ->flatMap(fn (Model $model): array => CachedModelUrl::query()
                 ->where('cacheable_type', $model->getMorphClass())
                 ->where('cacheable_id', (int) $model->getKey())

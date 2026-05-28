@@ -18,8 +18,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
-use function Pest\Laravel\artisan;
-
 require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
@@ -902,7 +900,7 @@ it('processes stale cache command with the requested limit', function (): void {
         ]);
     }
 
-    artisan('capell:html-cache:process-stale', ['--limit' => 1])
+    $this->artisan('capell:html-cache:process-stale', ['--limit' => 1])
         ->expectsOutput('Processed 1 stale HTML cache URL(s).')
         ->assertSuccessful();
 

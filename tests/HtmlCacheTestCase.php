@@ -72,7 +72,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
 
         CapellCore::registerPackage(
             HtmlCacheServiceProvider::$packageName,
-            path: realpath(__DIR__ . '/../'),
+            path: realpath(__DIR__ . '/../') ?: null,
         );
         CapellCore::forcePackageInstalled(CapellAdminServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(FrontendServiceProvider::$packageName);

@@ -30,6 +30,7 @@ use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
+use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
@@ -397,6 +398,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ClearHtmlCacheCommand::class,
+                DiagnoseHtmlCacheCommand::class,
                 ProcessStaleHtmlCacheCommand::class,
                 StaticSiteCommand::class,
             ]);

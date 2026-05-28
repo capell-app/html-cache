@@ -12,6 +12,9 @@ use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
@@ -31,6 +34,8 @@ final class HtmlCacheMiddleware
     public const string STALE_CACHE_ID_ATTRIBUTE = 'capell.html_cache.stale_cache_id';
 
     public const string STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
+
+    public const string ELIGIBILITY_REPORT_ATTRIBUTE = 'capell.html_cache.eligibility_report';
 
     private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
@@ -54,6 +59,10 @@ final class HtmlCacheMiddleware
 
         if (! $forceCacheReadBypass && $this->shouldBypassCacheRead($request)) {
             $response = $next($request);
+            $request->attributes->set(
+                self::ELIGIBILITY_REPORT_ATTRIBUTE,
+                BuildHtmlCacheEligibilityReportAction::run($request, $response),
+            );
 
             if ($this->shouldBypassHttpCache($request, $response)) {
                 return $this->privateNoStore($response);
@@ -243,23 +252,10 @@ final class HtmlCacheMiddleware
 
     private function cacheResponse(PageCache $pageCache, Request $request, Response $response): bool
     {
-        if (! $this->staleRefreshClaimIsCurrent($request)) {
-            return false;
-        }
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+        $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
 
-        if (config('capell-html-cache.write_enabled', true) !== true) {
-            return false;
-        }
-
-        if (! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
-            return false;
-        }
-
-        if (! $pageCache->shouldCachePage($request, $response)) {
-            return false;
-        }
-
-        if ($response->getStatusCode() !== Response::HTTP_NOT_FOUND && ! FrontendContext::shouldCachePage()) {
+        if (! $report instanceof HtmlCacheEligibilityReportData || ! $report->eligible) {
             return false;
         }
 
@@ -307,7 +303,11 @@ final class HtmlCacheMiddleware
             return $this->privateNoStore($response);
         }
 
-        if (! $forcePublic && ! resolve(ExtensionCacheSafetyResolver::class)->isPublicCacheSafe()) {
+        if (! $forcePublic && $this->eligibilityReport($request)->hasReason(HtmlCacheEligibilityReason::PackageCacheBlocking)) {
+            return $this->privateNoStore($response);
+        }
+
+        if (! $forcePublic && $this->eligibilityReport($request)->hasReason(HtmlCacheEligibilityReason::PackageSensitiveOutput)) {
             return $this->privateNoStore($response);
         }
 
@@ -378,6 +378,20 @@ final class HtmlCacheMiddleware
         if ($keys !== []) {
             $response->headers->set('Surrogate-Key', implode(' ', $keys));
         }
+    }
+
+    private function eligibilityReport(Request $request): HtmlCacheEligibilityReportData
+    {
+        $report = $request->attributes->get(self::ELIGIBILITY_REPORT_ATTRIBUTE);
+
+        if ($report instanceof HtmlCacheEligibilityReportData) {
+            return $report;
+        }
+
+        $report = BuildHtmlCacheEligibilityReportAction::run($request);
+        $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
+
+        return $report;
     }
 
     private function hasSessionCookie(Request $request): bool

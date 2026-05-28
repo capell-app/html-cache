@@ -44,7 +44,7 @@
     },
     "settings": [],
     "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
-    "capabilities": [],
+    "capabilities": ["cache-blocking"],
     "performance": {
         "frontendRenderBudgetMs": 20,
         "adminQueryBudget": 40,

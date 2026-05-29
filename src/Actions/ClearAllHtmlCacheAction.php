@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run()
+ * @method static HtmlCacheClearResult run()
  */
 final class ClearAllHtmlCacheAction
 {
@@ -19,9 +20,14 @@ final class ClearAllHtmlCacheAction
 
     public bool $jobDeleteWhenMissingModels = true;
 
-    public function handle(): void
+    public function handle(): HtmlCacheClearResult
     {
-        resolve(HtmlCacheStore::class)->deleteAll();
-        CachedModelUrl::query()->delete();
+        $result = resolve(HtmlCacheStore::class)->deleteAll();
+
+        if ($result->successful()) {
+            CachedModelUrl::query()->delete();
+        }
+
+        return $result;
     }
 }

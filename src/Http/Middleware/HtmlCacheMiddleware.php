@@ -261,8 +261,8 @@ final class HtmlCacheMiddleware
 
         try {
             $pageCache->cache($request, $response);
-        } catch (Throwable $exception) {
-            report($exception);
+        } catch (Throwable $throwable) {
+            report($throwable);
 
             return false;
         }

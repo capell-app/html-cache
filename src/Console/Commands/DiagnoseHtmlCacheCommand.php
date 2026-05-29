@@ -21,7 +21,7 @@ final class DiagnoseHtmlCacheCommand extends Command
     public function handle(): int
     {
         $url = $this->url();
-        $request = Request::create($url, 'GET');
+        $request = Request::create($url, \Symfony\Component\HttpFoundation\Request::METHOD_GET);
         $pageUrl = $this->pageUrl($request);
         $report = BuildHtmlCacheEligibilityReportAction::run($request, pageUrl: $pageUrl);
 

@@ -15,7 +15,6 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
-use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
@@ -262,26 +261,6 @@ final class HtmlCacheMiddleware
         $pageCache->cache($request, $response);
 
         return true;
-    }
-
-    private function staleRefreshClaimIsCurrent(Request $request): bool
-    {
-        $staleCachedUrlId = $request->attributes->get(self::STALE_CACHE_ID_ATTRIBUTE);
-        $claimToken = $request->attributes->get(self::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
-
-        if ($staleCachedUrlId === null && $claimToken === null) {
-            return true;
-        }
-
-        if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
-            return false;
-        }
-
-        return StaleCachedUrl::query()
-            ->whereKey((int) $staleCachedUrlId)
-            ->where('status', StaleCachedUrl::STATUS_PROCESSING)
-            ->where('claim_token', $claimToken)
-            ->exists();
     }
 
     private function cacheHitResponse(string $content, int $statusCode): Response

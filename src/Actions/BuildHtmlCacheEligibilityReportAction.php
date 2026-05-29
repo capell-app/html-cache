@@ -41,6 +41,7 @@ final class BuildHtmlCacheEligibilityReportAction
         ];
 
         $reasons = $this->deduplicateReasons($reasons);
+
         $cachedUrl = $this->latestCachedUrl($request);
         $staleCachedUrl = $this->latestStaleCachedUrl($request);
         $cacheState = $this->cacheState($request, $cachedUrl, $staleCachedUrl);
@@ -201,6 +202,29 @@ final class BuildHtmlCacheEligibilityReportAction
         }
 
         return $reasons;
+    }
+
+    /**
+     * @param  list<HtmlCacheEligibilityReason>  $reasons
+     * @return list<HtmlCacheEligibilityReason>
+     */
+    private function deduplicateReasons(array $reasons): array
+    {
+        $seen = [];
+        $deduplicated = [];
+
+        foreach ($reasons as $reason) {
+            $key = $reason->value;
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $deduplicated[] = $reason;
+        }
+
+        return $deduplicated;
     }
 
     private function containsAuthoringSurface(Response $response): bool

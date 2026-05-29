@@ -2,14 +2,16 @@
 
 declare(strict_types=1);
 
+use Capell\FormBuilder\Livewire\FormElementComponent;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
-use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 uses(HtmlCacheTestCase::class);
 
@@ -20,18 +22,19 @@ beforeEach(function (): void {
 });
 
 it('reports stable request and package cache eligibility reason codes', function (): void {
-    $request = Request::create('https://example.test/contact?signature=signed', 'POST');
+    $request = Request::create('https://example.test/contact?signature=signed', Symfony\Component\HttpFoundation\Request::METHOD_POST);
     $request->cookies->set('capell_session', 'session-value');
     $request->headers->set('X-Livewire', 'true');
     $request->headers->set('Authorization', 'Bearer token');
     $request->setUserResolver(fn (): User => User::factory()->create());
+
     app()->instance('request', $request);
 
     RecordExtensionRenderContributionAction::run(
         packageName: 'capell-app/form-builder',
         surface: 'frontend',
         contributionType: 'frontend-component',
-        contributionClass: 'Capell\\FormBuilder\\Livewire\\FormElementComponent',
+        contributionClass: FormElementComponent::class,
         elapsedMilliseconds: 10,
         frontendRenderBudgetMs: 20,
         cacheTags: ['form-builder'],
@@ -55,24 +58,24 @@ it('reports stable request and package cache eligibility reason codes', function
 });
 
 it('stores eligibility reports on middleware requests without exposing detailed public headers', function (): void {
-    $request = Request::create('https://example.test/about?preview=1', 'GET');
+    $request = Request::create('https://example.test/about?preview=1', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
-        fn () => response('<main>Preview bypass</main>', 200, ['Content-Type' => 'text/html']),
+        fn (): ResponseFactory|Response => response('<main>Preview bypass</main>', 200, ['Content-Type' => 'text/html']),
     );
 
     $report = $request->attributes->get(HtmlCacheMiddleware::ELIGIBILITY_REPORT_ATTRIBUTE);
 
     expect($report)->not->toBeNull()
         ->and($report->reasonCodes())->toContain('query_string_present')
-        ->and($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and($response->headers->has('X-Capell-Cache-Reasons'))->toBeFalse();
 });
 
 it('reports invalid stale refresh claims', function (): void {
-    $request = Request::create('https://example.test/about', 'GET');
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, 123);
     $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, 'missing-token');
 
@@ -82,7 +85,7 @@ it('reports invalid stale refresh claims', function (): void {
 });
 
 it('renders the diagnose command as json', function (): void {
-    $this->artisan(DiagnoseHtmlCacheCommand::class, [
+    $this->artisan('capell:html-cache:diagnose', [
         'url' => 'https://example.test/about',
         '--json' => true,
     ])

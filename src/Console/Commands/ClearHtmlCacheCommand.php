@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Console\Commands;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Console\Command;
+use Throwable;
 
 final class ClearHtmlCacheCommand extends Command
 {
@@ -19,8 +20,29 @@ final class ClearHtmlCacheCommand extends Command
         $slug = $this->argument('slug');
 
         if (! is_string($slug) || $slug === '') {
-            ClearAllHtmlCacheAction::run();
-            $this->info('HTML cache cleared.');
+            try {
+                $result = ClearAllHtmlCacheAction::run();
+            } catch (Throwable $throwable) {
+                $this->error(sprintf(
+                    'Unable to clear the HTML cache. Check filesystem permissions for [%s]. %s',
+                    public_path('page-cache'),
+                    $throwable->getMessage(),
+                ));
+
+                return Command::FAILURE;
+            }
+
+            if (! $result->successful()) {
+                $this->error(sprintf(
+                    'Unable to clear the HTML cache. Check filesystem permissions for [%s]. Failed paths: %s',
+                    public_path('page-cache'),
+                    implode(', ', $result->failures()),
+                ));
+
+                return Command::FAILURE;
+            }
+
+            $this->info(sprintf('HTML cache cleared (%d item(s) removed).', $result->deletedCount()));
 
             return Command::SUCCESS;
         }

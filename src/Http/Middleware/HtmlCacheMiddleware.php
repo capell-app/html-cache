@@ -23,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class HtmlCacheMiddleware
 {
@@ -258,7 +259,13 @@ final class HtmlCacheMiddleware
             return false;
         }
 
-        $pageCache->cache($request, $response);
+        try {
+            $pageCache->cache($request, $response);
+        } catch (Throwable $throwable) {
+            report($throwable);
+
+            return false;
+        }
 
         return true;
     }

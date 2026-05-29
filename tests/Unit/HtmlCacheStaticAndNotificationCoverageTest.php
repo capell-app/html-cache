@@ -605,6 +605,39 @@ it('returns null for missing html cache storage metadata and sanitizes deletes',
         ->and($store->exists('folder/keep.html'))->toBeFalse();
 });
 
+it('reports html cache files and directories that could not be deleted', function (): void {
+    $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('directories')->once()->withNoArgs()->andReturn(['http.example.test']);
+    $disk->shouldReceive('deleteDirectory')->once()->with('http.example.test')->andReturnFalse();
+    $disk->shouldReceive('files')->once()->withNoArgs()->andReturn(['orphan.html']);
+    $disk->shouldReceive('delete')->once()->with('orphan.html')->andReturnFalse();
+
+    $manager = Mockery::mock(FilesystemManager::class);
+    $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
+
+    $result = (new HtmlCacheStore($manager))->deleteAll();
+
+    expect($result->successful())->toBeFalse()
+        ->and($result->failedDirectories)->toBe(['http.example.test'])
+        ->and($result->failedFiles)->toBe(['orphan.html']);
+});
+
+it('returns a clear console failure when the html cache root cannot be inspected', function (): void {
+    $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('exists')->zeroOrMoreTimes()->andReturnFalse();
+    $disk->shouldReceive('directories')->once()->andThrow(new RuntimeException('Permission denied'));
+    $disk->shouldReceive('path')->andReturn('/tmp/page-cache');
+
+    $manager = Mockery::mock(FilesystemManager::class);
+    $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
+
+    app()->instance(HtmlCacheStore::class, new HtmlCacheStore($manager));
+
+    test()->artisan('capell:html-cache:clear')
+        ->expectsOutputToContain('Unable to clear the HTML cache. Check filesystem permissions')
+        ->assertFailed();
+});
+
 it('wraps html cache store listing failures with useful runtime exceptions', function (): void {
     $disk = Mockery::mock(FilesystemContract::class);
     $disk->shouldReceive('directories')->andThrow(new RuntimeException('disk missing'));

@@ -126,6 +126,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     public function packageBooted(): void
     {
+        $this
+            ->registerCommands()
+            ->registerOptimization();
+
         if (! $this->isPackageInstalled()) {
             return;
         }
@@ -138,10 +142,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerDashboardSettingsContributor()
             ->registerDashboardWidgets()
             ->registerModelInvalidationHooks()
-            ->registerCommands()
             ->registerScheduledInvalidation()
-            ->ensurePermissions()
-            ->registerOptimization();
+            ->ensurePermissions();
     }
 
     #[Override]

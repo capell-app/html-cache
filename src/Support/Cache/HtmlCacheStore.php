@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Facades\File;
@@ -107,15 +108,43 @@ final class HtmlCacheStore
         return $this->disk->deleteDirectory($directory);
     }
 
-    public function deleteAll(): void
+    public function deleteAll(): HtmlCacheClearResult
     {
+        $deletedDirectories = [];
+        $deletedFiles = [];
+        $failedDirectories = [];
+        $failedFiles = [];
+
         foreach ($this->directories() as $directory) {
-            $this->deleteDirectory($directory);
+            try {
+                if ($this->deleteDirectory($directory)) {
+                    $deletedDirectories[] = $directory;
+                } else {
+                    $failedDirectories[] = $directory;
+                }
+            } catch (Throwable $throwable) {
+                $failedDirectories[] = sprintf('%s (%s)', $directory, $throwable->getMessage());
+            }
         }
 
         foreach ($this->files() as $file) {
-            $this->delete($file);
+            try {
+                if ($this->delete($file)) {
+                    $deletedFiles[] = $file;
+                } else {
+                    $failedFiles[] = $file;
+                }
+            } catch (Throwable $throwable) {
+                $failedFiles[] = sprintf('%s (%s)', $file, $throwable->getMessage());
+            }
         }
+
+        return new HtmlCacheClearResult(
+            deletedDirectories: $deletedDirectories,
+            deletedFiles: $deletedFiles,
+            failedDirectories: $failedDirectories,
+            failedFiles: $failedFiles,
+        );
     }
 
     private function safeRootPath(): string

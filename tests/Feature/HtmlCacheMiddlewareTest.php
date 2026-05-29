@@ -186,6 +186,28 @@ it('does not write cached html when the response contains authoring markers', fu
         ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
 });
 
+it('does not fail public responses when a cache write fails', function (): void {
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+
+    app()->instance('request', $request);
+    resolve(PageCache::class)->setCachePath('/dev/null');
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->getContent())->toBe('fresh html')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
+        ->and($request->attributes->get(HtmlCacheMiddleware::CACHE_WRITE_SUCCEEDED_ATTRIBUTE))->toBeFalse()
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
 it('reuses matching public html safety inspection results before caching', function (): void {
     $content = '<main>safe public html</main>';
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);

@@ -15,6 +15,7 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 
 uses(HtmlCacheTestCase::class);
 
@@ -41,6 +42,19 @@ it('gates maintenance cache administration to global actors or maintenance manag
 
     test()->actingAs($maintenanceManager);
     expect(MaintenanceCachePage::canAccess())->toBeTrue();
+});
+
+it('renders the maintenance cache page with the frontend manifest store import', function (): void {
+    EnsureHtmlCachePermissionsAction::run();
+
+    $maintenanceManager = User::factory()->create();
+    $maintenanceManager->givePermissionTo(HtmlCachePermission::ManageMaintenance->value);
+
+    test()->actingAs($maintenanceManager);
+
+    Livewire::test(MaintenanceCachePage::class)
+        ->assertSuccessful()
+        ->assertSee(__('capell-html-cache::admin.manifest_path'));
 });
 
 it('does not create system pages while building site header actions', function (): void {

@@ -246,7 +246,7 @@ final class RefreshCachedUrlAtomicallyAction
     {
         $temporaryPath = tempnam(dirname($path), basename($path) . '.tmp.');
 
-        if (! is_string($temporaryPath) || $temporaryPath === '') {
+        if ($temporaryPath === false) {
             throw new RuntimeException(sprintf('Unable to create temporary cache file for "%s".', $path));
         }
 

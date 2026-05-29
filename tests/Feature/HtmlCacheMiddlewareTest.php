@@ -61,7 +61,7 @@ it('bypasses cached html for requests with a session cookie by default', functio
         fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe('fresh html')
+    capell_expect($response->getContent())->toBe('fresh html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
@@ -88,7 +88,7 @@ it('can serve cached html for requests with a session cookie when configured', f
         fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe('cached html')
+    capell_expect($response->getContent())->toBe('cached html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('public');
 });
@@ -112,7 +112,7 @@ it('bypasses cached html for authenticated requests without a session cookie by 
         fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe('fresh html')
+    capell_expect($response->getContent())->toBe('fresh html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
@@ -136,7 +136,7 @@ it('bypasses cached html for access gated protected requests', function (): void
         fn (): Response => response('protected html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe('protected html')
+    capell_expect($response->getContent())->toBe('protected html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
@@ -161,7 +161,7 @@ it('bypasses cached html for access gate browser token requests even when authen
         fn (): Response => response('token html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe('token html')
+    capell_expect($response->getContent())->toBe('token html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
@@ -181,7 +181,7 @@ it('does not write cached html when the response contains authoring markers', fu
         fn (): Response => response('<div data-capell-editor="1"></div>', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
+    capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
         ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
 });
@@ -201,8 +201,8 @@ it('reuses matching public html safety inspection results before caching', funct
         response($content, 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($shouldCache)->toBeTrue()
-        ->and($inspector->calls)->toBe(0);
+    capell_expect($shouldCache)->toBeTrue();
+    capell_expect($inspector->calls)->toBe(0);
 });
 
 it('reuses matching public html safety inspection results in middleware response handling', function (): void {
@@ -229,9 +229,9 @@ it('reuses matching public html safety inspection results in middleware response
         fn (): Response => response($content, 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getContent())->toBe($content)
-        ->and($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
-        ->and($inspector->calls)->toBe(0);
+    capell_expect($response->getContent())->toBe($content);
+    capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('MISS');
+    capell_expect($inspector->calls)->toBe(0);
 });
 
 it('rescans public html when the remembered safety inspection hash does not match', function (): void {
@@ -249,8 +249,8 @@ it('rescans public html when the remembered safety inspection hash does not matc
         response($content, 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($shouldCache)->toBeFalse()
-        ->and($inspector->calls)->toBe(1);
+    capell_expect($shouldCache)->toBeFalse();
+    capell_expect($inspector->calls)->toBe(1);
 });
 
 it('rescans middleware public html when the remembered safety inspection hash does not match', function (): void {
@@ -277,10 +277,10 @@ it('rescans middleware public html when the remembered safety inspection hash do
         fn (): Response => response($content, 200, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
-        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([])
-        ->and($inspector->calls)->toBe(1);
+    capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS');
+    capell_expect((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+    capell_expect(Storage::disk('page_cache')->allFiles())->toBe([]);
+    capell_expect($inspector->calls)->toBe(1);
 });
 
 it('returns cached 404 html with a 404 status code', function (): void {
@@ -299,7 +299,7 @@ it('returns cached 404 html with a 404 status code', function (): void {
         fn (): Response => response('fresh missing', 404, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getStatusCode())->toBe(404)
+    capell_expect($response->getStatusCode())->toBe(404)
         ->and($response->getContent())->toBe('missing cached html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT');
 });
@@ -322,7 +322,7 @@ it('can bypass cache reads for internal stale refresh requests while still allow
         fn (): Response => response('fresh missing html', 404, ['Content-Type' => 'text/html']),
     );
 
-    expect($response->getStatusCode())->toBe(404)
+    capell_expect($response->getStatusCode())->toBe(404)
         ->and($response->getContent())->toBe('fresh missing html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
         ->and(Storage::disk('page_cache')->exists('https.example.test/missing.404.html'))->toBeTrue();
@@ -350,14 +350,14 @@ it('strips configured cookies from anonymous cache hits', function (): void {
         },
     );
 
-    expect($response->getContent())->toBe('cached html')
+    capell_expect($response->getContent())->toBe('cached html')
         ->and($response->headers->getCookies())->toBe([]);
 });
 
 it('wraps web middleware before stripping cacheable response cookies', function (): void {
     $middleware = resolve(FrontendRouteMiddlewareRegistry::class)->all();
 
-    expect(array_search('frontend.no_session_cookies_on_cache', $middleware, true))
+    capell_expect(array_search('frontend.no_session_cookies_on_cache', $middleware, true))
         ->toBeLessThan(array_search('web', $middleware, true))
         ->and(array_search('frontend.cache', $middleware, true))
         ->toBeGreaterThan(array_search('web', $middleware, true));

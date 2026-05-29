@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 /**
- * @method static array run(string $modelType, ?int $siteId = null, ?string $search = null, int $limit = 5)
+ * @method static array<array-key, mixed> run(string $modelType, ?int $siteId = null, ?string $search = null, int $limit = 5)
  */
 final class ListCacheMapResourceOptionsAction
 {

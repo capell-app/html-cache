@@ -54,7 +54,7 @@ it('exposes the selected site and cache map widget on site health', function ():
         ->and($page->siteOptions())->toHaveKey($siteDomain->site_id)
         ->and(collect($page->siteHealthWidgets())->map(fn (object $widget): string => $widget->key())->all())->toContain('html-cache-map')
         ->and(resolve(HtmlCacheSiteHealthWidget::class)->component())->toBe('capell-html-cache.site-health-cache-map')
-        ->and(view()->exists('capell-html-cache::livewire.site-health-cache-map'))->toBeTrue();
+        ->and(view()->getFinder()->find('capell-html-cache::livewire.site-health-cache-map'))->toContain('packages/html-cache/resources/views');
 });
 
 it('does not register the cached model urls resource as an admin page', function (): void {

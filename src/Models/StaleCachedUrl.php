@@ -9,6 +9,7 @@ use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -44,6 +45,7 @@ use Override;
  */
 final class StaleCachedUrl extends Model
 {
+    /** @use HasFactory<Factory<static>> */
     use HasFactory;
 
     public const string STATUS_PENDING = 'pending';

@@ -62,10 +62,7 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
         return null;
     }
 
-    /**
-     * @return Model|array<string, mixed>|null
-     */
-    public function getTableRecord(?string $key): Model|array|null
+    public function getTableRecord(?string $key): ?Model
     {
         if ($key === null) {
             return null;

@@ -7,6 +7,8 @@ namespace Capell\HtmlCache\Tests;
 use Aimeos\Nestedset\NestedSetServiceProvider;
 use BladeUI\Heroicons\BladeHeroiconsServiceProvider;
 use BladeUI\Icons\BladeIconsServiceProvider;
+use Capell\Admin\Providers\AdminServiceProvider as CapellAdminServiceProvider;
+use Capell\Admin\Providers\Filament\AdminPanelProvider;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Macros\BlueprintMacros;
 use Capell\Core\Models\Media;
@@ -42,6 +44,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
             ...parent::getPackageProviders($app),
             BladeIconsServiceProvider::class,
             BladeHeroiconsServiceProvider::class,
+            CapellAdminServiceProvider::class,
             ActionsServiceProvider::class,
             FilamentServiceProvider::class,
             FormsServiceProvider::class,
@@ -49,6 +52,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
             SupportServiceProvider::class,
             TablesServiceProvider::class,
             WidgetsServiceProvider::class,
+            AdminPanelProvider::class,
             FrontendServiceProvider::class,
             PaginateRouteServiceProvider::class,
             LivewireServiceProvider::class,
@@ -68,8 +72,9 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
 
         CapellCore::registerPackage(
             HtmlCacheServiceProvider::$packageName,
-            path: realpath(__DIR__ . '/../'),
+            path: realpath(__DIR__ . '/../') ?: null,
         );
+        CapellCore::forcePackageInstalled(CapellAdminServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(FrontendServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(HtmlCacheServiceProvider::$packageName);
     }

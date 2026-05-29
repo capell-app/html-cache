@@ -20,6 +20,9 @@ use Livewire\Attributes\On;
  */
 trait HasPageCacheNotification
 {
+    /**
+     * @param  array<int, string>|null  $urls
+     */
     #[On('refresh-cache')]
     public function refreshPageCache(?array $urls = null): void
     {
@@ -44,6 +47,9 @@ trait HasPageCacheNotification
         $this->dispatch('close-notification', id: 'clear-page-cache');
     }
 
+    /**
+     * @param  array<int, mixed>|Model  $models
+     */
     public function notifyPageCached(array|Model $models): void
     {
         if (! is_array($models)) {

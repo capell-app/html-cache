@@ -20,7 +20,7 @@
             "capell-app/core",
             "capell-app/frontend"
         ],
-        "optional": [],
+        "supports": [],
         "conflicts": []
     },
     "providers": {
@@ -44,7 +44,7 @@
     },
     "settings": [],
     "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
-    "capabilities": [],
+    "capabilities": ["cache-blocking"],
     "performance": {
         "frontendRenderBudgetMs": 20,
         "adminQueryBudget": 40,
@@ -74,7 +74,13 @@
     },
     "marketplace": {
         "summary": "Static HTML cache, dependency indexing, and cache administration for Capell.",
-        "screenshots": [],
+        "screenshots": [
+            {
+                "path": "docs/assets/marketplace/extension-card.jpg",
+                "alt": "HTML Cache extension preview image",
+                "caption": "HTML Cache extension preview"
+            }
+        ],
         "categories": ["admin", "foundation", "frontend"]
     },
     "scopes": ["backend", "frontend"],

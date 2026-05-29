@@ -33,5 +33,24 @@
     "config": {
         "sort-packages": true
     },
-    "prefer-stable": true
+    "prefer-stable": true,
+    "homepage": "https://github.com/capell-app/html-cache",
+    "keywords": [
+        "capell",
+        "cms",
+        "laravel",
+        "cache",
+        "frontend"
+    ],
+    "authors": [
+        {
+            "name": "Capell Team",
+            "email": "team@capell.app",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "source": "https://github.com/capell-app/capell-packages",
+        "docs": "https://docs.capell.app/packages/html-cache"
+    }
 }

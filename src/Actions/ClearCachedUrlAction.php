@@ -26,8 +26,8 @@ final class ClearCachedUrlAction
     {
         $selectedCachedModelUrl = $url instanceof CachedModelUrl ? $url : null;
         $selectedCachedModelUrl?->loadMissing('siteDomain');
-        $url = $selectedCachedModelUrl?->url ?? $url;
-        $path = $selectedCachedModelUrl?->path ?? resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
+        $url = $selectedCachedModelUrl->url ?? $url;
+        $path = $selectedCachedModelUrl->path ?? resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
         $cachedModelUrls = $this->cachedModelUrls($url, $selectedCachedModelUrl);
         $siteDomain ??= $selectedCachedModelUrl?->siteDomain;
 

@@ -77,15 +77,10 @@ class MaintenanceSiteHeaderActionExtender implements SiteHeaderActionExtender
             return true;
         }
 
-        if (method_exists($actor, 'hasPermissionTo')) {
-            try {
-                return $actor->hasPermissionTo(HtmlCachePermission::ManageMaintenance->value) === true;
-            } catch (PermissionDoesNotExist) {
-                return false;
-            }
+        try {
+            return $actor->hasPermissionTo(HtmlCachePermission::ManageMaintenance->value) === true;
+        } catch (PermissionDoesNotExist) {
+            return false;
         }
-
-        return method_exists($actor, 'can')
-            && $actor->can(HtmlCachePermission::ManageMaintenance->value) === true;
     }
 }

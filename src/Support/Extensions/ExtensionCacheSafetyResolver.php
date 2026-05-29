@@ -6,18 +6,56 @@ namespace Capell\HtmlCache\Support\Extensions;
 
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
 use Capell\Frontend\Data\Performance\ExtensionRenderContributionData;
+use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 
 final class ExtensionCacheSafetyResolver
 {
     public function isPublicCacheSafe(): bool
     {
-        foreach ($this->contributions() as $contribution) {
-            if (! $contribution->cacheable || $contribution->sensitiveOutput) {
-                return false;
+        return $this->blockingContributions() === [];
+    }
+
+    /**
+     * @return list<ExtensionRenderContributionData>
+     */
+    public function blockingContributions(): array
+    {
+        return collect($this->contributions())
+            ->filter(fn (ExtensionRenderContributionData $contribution): bool => ! $contribution->cacheable || $contribution->sensitiveOutput)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function blockingPackageNames(): array
+    {
+        return collect($this->blockingContributions())
+            ->map(fn (ExtensionRenderContributionData $contribution): string => $contribution->packageName)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<HtmlCacheEligibilityReason>
+     */
+    public function blockingReasonCodes(): array
+    {
+        $reasons = [];
+
+        foreach ($this->blockingContributions() as $contribution) {
+            if (! $contribution->cacheable) {
+                $reasons[] = HtmlCacheEligibilityReason::PackageCacheBlocking;
+            }
+
+            if ($contribution->sensitiveOutput) {
+                $reasons[] = HtmlCacheEligibilityReason::PackageSensitiveOutput;
             }
         }
 
-        return true;
+        return array_values(array_unique($reasons, SORT_REGULAR));
     }
 
     /** @return list<string> */
@@ -25,7 +63,7 @@ final class ExtensionCacheSafetyResolver
     {
         return collect($this->contributions())
             ->flatMap(fn (ExtensionRenderContributionData $contribution): array => $contribution->cacheTags)
-            ->filter(fn (mixed $tag): bool => is_string($tag) && $tag !== '')
+            ->filter(fn (mixed $tag): bool => $tag !== '')
             ->map(fn (string $tag): string => $this->normalizeTag($tag))
             ->unique()
             ->values()

@@ -1,3 +1,7 @@
+@php
+    use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
+@endphp
+
 <x-filament-panels::page>
     <div class="space-y-4">
         <section
@@ -20,7 +24,7 @@
                     >
                         {{ __('capell-html-cache::admin.manifest_path') }}
                     </dt>
-                    <dd class="mt-1 break-all text-sm">
+                    <dd class="mt-1 text-sm break-all">
                         {{ resolve(MaintenanceManifestStore::class)->path() }}
                     </dd>
                 </div>

@@ -15,13 +15,16 @@ use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static void run(Collection $models)
+ * @method static void run(Collection<int, mixed> $models)
  */
 final class NotifyClearCachedPagesAction
 {
     use AsFake;
     use AsObject;
 
+    /**
+     * @param  Collection<int, mixed>  $models
+     */
     public function handle(Collection $models): void
     {
         $cachedUrls = $models

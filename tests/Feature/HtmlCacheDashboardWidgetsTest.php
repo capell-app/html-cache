@@ -21,17 +21,23 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Collection as SupportCollection;
 use Livewire\Livewire;
 
 uses(HtmlCacheTestCase::class);
 
+/**
+ * @param  Collection<array-key, mixed>  $assignedSiteIds
+ */
 function createHtmlCacheDashboardWidgetUser(SupportCollection $assignedSiteIds): Authenticatable
 {
     $user = new class extends Authenticatable implements FilamentUser
     {
+        /** @use HasFactory<Factory<static>> */
         use HasFactory;
 
         /** @var SupportCollection<int, int> */

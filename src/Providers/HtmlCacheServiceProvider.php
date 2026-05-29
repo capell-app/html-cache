@@ -30,6 +30,7 @@ use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
+use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
@@ -59,6 +60,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
+use Override;
 use RuntimeException;
 use Spatie\LaravelPackageTools\Package;
 
@@ -142,7 +144,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerOptimization();
     }
 
-    private function isPackageInstalled(): bool
+    #[Override]
+    protected function isPackageInstalled(): bool
     {
         return CapellCore::isPackageInstalled(self::$packageName);
     }
@@ -395,6 +398,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ClearHtmlCacheCommand::class,
+                DiagnoseHtmlCacheCommand::class,
                 ProcessStaleHtmlCacheCommand::class,
                 StaticSiteCommand::class,
             ]);

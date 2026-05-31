@@ -189,8 +189,12 @@ it('lists the top five cache map resources for the selected model and search', f
         'last_seen_at' => now(),
     ]);
 
-    $topOptions = ListCacheMapResourceOptionsAction::run($pages->first()->getMorphClass(), (int) $siteDomain->site_id);
-    $searchOptions = ListCacheMapResourceOptionsAction::run($pages->first()->getMorphClass(), (int) $siteDomain->site_id, 'Needle');
+    $firstPage = $pages->first();
+
+    throw_unless($firstPage instanceof Page, RuntimeException::class, 'Expected cache map resource option test page to exist.');
+
+    $topOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $siteDomain->site_id);
+    $searchOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $siteDomain->site_id, 'Needle');
 
     expect($topOptions)->toHaveCount(5)
         ->and(collect($topOptions)->pluck('label')->all())->not->toContain('Other site page')

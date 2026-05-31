@@ -38,7 +38,7 @@ final class BuildCacheMapOverviewAction
      */
     private function modelSummaries(Builder $baseQuery): array
     {
-        return (clone $baseQuery)
+        return array_values((clone $baseQuery)
             ->select('cacheable_type')
             ->selectRaw('COUNT(*) as dependency_count')
             ->selectRaw('COUNT(DISTINCT url_hash) as url_count')
@@ -53,7 +53,7 @@ final class BuildCacheMapOverviewAction
                 urlCount: (int) $row->getAttribute('url_count'),
             ))
             ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -76,10 +76,10 @@ final class BuildCacheMapOverviewAction
             ->limit(8)
             ->get();
 
-        return $rows
+        return array_values($rows
             ->map(fn (CachedModelUrl $row): CacheMapResourceSummaryData => $this->resourceSummary($row))
             ->values()
-            ->all();
+            ->all());
     }
 
     private function resourceSummary(CachedModelUrl $row): CacheMapResourceSummaryData

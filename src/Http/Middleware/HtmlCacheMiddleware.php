@@ -76,13 +76,13 @@ final class HtmlCacheMiddleware
         if (! $forceCacheReadBypass) {
             $cachedPage = $pageCache->getCachePage($request);
 
-            if ($cachedPage !== false) {
+            if (is_string($cachedPage)) {
                 return $this->cacheHitResponse($cachedPage, 200);
             }
 
             $cachedErrorPage = $pageCache->getCacheErrorPage($request);
 
-            if ($cachedErrorPage !== false) {
+            if (is_string($cachedErrorPage)) {
                 return $this->cacheHitResponse($cachedErrorPage, 404);
             }
         }

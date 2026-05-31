@@ -291,18 +291,31 @@ it('registers html cache middleware into the real frontend route middleware stac
 
     expect($route)->not->toBeNull();
 
+    throw_if($route === null, RuntimeException::class, 'Expected frontend route to be registered.');
+
     $middleware = $route->gatherMiddleware();
+    $frontendCachePosition = array_search('frontend.cache', $middleware, true);
+    $webPosition = array_search('web', $middleware, true);
+    $frontendResolvePosition = array_search('frontend.resolve', $middleware, true);
+    $modelEventsPosition = array_search('frontend.model_events', $middleware, true);
+    $anonymousCacheableRenderPosition = array_search('frontend.anonymous_cacheable_render', $middleware, true);
+
+    assert(is_int($frontendCachePosition));
+    assert(is_int($webPosition));
+    assert(is_int($frontendResolvePosition));
+    assert(is_int($modelEventsPosition));
+    assert(is_int($anonymousCacheableRenderPosition));
 
     expect($middleware)
         ->toContain('frontend.cache')
         ->toContain('frontend.model_events')
         ->toContain('frontend.no_session_cookies_on_cache')
-        ->and(array_search('frontend.cache', $middleware, true))
-        ->toBeGreaterThan(array_search('web', $middleware, true))
-        ->and(array_search('frontend.cache', $middleware, true))
-        ->toBeLessThan(array_search('frontend.resolve', $middleware, true))
-        ->and(array_search('frontend.model_events', $middleware, true))
-        ->toBeGreaterThan(array_search('frontend.anonymous_cacheable_render', $middleware, true));
+        ->and($frontendCachePosition)
+        ->toBeGreaterThan($webPosition)
+        ->and($frontendCachePosition)
+        ->toBeLessThan($frontendResolvePosition)
+        ->and($modelEventsPosition)
+        ->toBeGreaterThan($anonymousCacheableRenderPosition);
 });
 
 it('clears stale cached url rows when the url no longer resolves to a site domain', function (): void {

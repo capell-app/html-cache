@@ -25,7 +25,7 @@ final class RetrievedModelStore implements RenderedModelTracker
     }
 
     /**
-     * @param  class-string  $modelClass
+     * @param  class-string<Model>  $modelClass
      */
     public function trackByClass(Model $model, string $modelClass): void
     {

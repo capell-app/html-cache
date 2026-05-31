@@ -175,6 +175,9 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
 
     $stats = BuildHtmlCacheDashboardStatsAction::run();
     $rows = BuildHtmlCacheUrlRowsAction::run('coverage', 6);
+    $lastRow = $rows->last();
+
+    throw_unless(is_array($lastRow), RuntimeException::class, 'Expected cache traffic row to exist.');
 
     expect($stats->pageUrls)->toBe(2)
         ->and($stats->cachedPageUrls)->toBe(1)
@@ -187,7 +190,7 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
             'https://example.com/cached',
             'https://example.com/cached',
         ])
-        ->and($rows->last()['hits'])->toBe(__('capell-html-cache::dashboard.not_tracked'));
+        ->and($lastRow['hits'])->toBe(__('capell-html-cache::dashboard.not_tracked'));
 });
 
 it('builds stale queue rows with translated states from scoped rows', function (): void {
@@ -217,8 +220,11 @@ it('builds stale queue rows with translated states from scoped rows', function (
     ]);
 
     $rows = BuildHtmlCacheStaleQueueRowsAction::run();
+    $firstRow = $rows->first();
+
+    throw_unless(is_array($firstRow), RuntimeException::class, 'Expected stale queue row to exist.');
 
     expect($rows)->toHaveCount(1)
-        ->and($rows->first()['status'])->toBe(__('capell-html-cache::dashboard.status_failed'))
-        ->and($rows->first()['url'])->toBe('https://example.com/failing');
+        ->and($firstRow['status'])->toBe(__('capell-html-cache::dashboard.status_failed'))
+        ->and($firstRow['url'])->toBe('https://example.com/failing');
 });

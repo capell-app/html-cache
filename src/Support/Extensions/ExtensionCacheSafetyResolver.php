@@ -20,10 +20,10 @@ final class ExtensionCacheSafetyResolver
      */
     public function blockingContributions(): array
     {
-        return collect($this->contributions())
+        return array_values(collect($this->contributions())
             ->filter(fn (ExtensionRenderContributionData $contribution): bool => ! $contribution->cacheable || $contribution->sensitiveOutput)
             ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -31,11 +31,11 @@ final class ExtensionCacheSafetyResolver
      */
     public function blockingPackageNames(): array
     {
-        return collect($this->blockingContributions())
+        return array_values(collect($this->blockingContributions())
             ->map(fn (ExtensionRenderContributionData $contribution): string => $contribution->packageName)
             ->unique()
             ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -61,13 +61,13 @@ final class ExtensionCacheSafetyResolver
     /** @return list<string> */
     public function cacheTags(): array
     {
-        return collect($this->contributions())
+        return array_values(collect($this->contributions())
             ->flatMap(fn (ExtensionRenderContributionData $contribution): array => $contribution->cacheTags)
             ->filter(fn (mixed $tag): bool => $tag !== '')
             ->map(fn (string $tag): string => $this->normalizeTag($tag))
             ->unique()
             ->values()
-            ->all();
+            ->all());
     }
 
     /** @return list<ExtensionRenderContributionData> */

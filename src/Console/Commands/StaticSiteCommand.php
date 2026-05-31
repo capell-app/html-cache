@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Console\Commands;
 
+use Capell\Core\Models\Language;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
@@ -37,8 +38,10 @@ final class StaticSiteCommand extends Command
                     refresh: $this->option('refresh') === true,
                 ))->process(
                     start: function (Site $site, SiteDomain $domain): void {
+                        $language = $domain->language;
+
                         $this->newLine();
-                        $this->comment(sprintf('%s(%d) - %s', $site->name, $site->id, $domain->language->name));
+                        $this->comment(sprintf('%s(%d) - %s', $site->name, $site->id, $language instanceof Language ? $language->name : ''));
                     },
                     prepare: function (int $total, SiteDomain $siteDomain): void {
                         $this->line(sprintf('Total URLs: %d for domain: %s', $total, $siteDomain->full_url));

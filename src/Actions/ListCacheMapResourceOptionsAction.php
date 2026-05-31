@@ -44,7 +44,7 @@ final class ListCacheMapResourceOptionsAction
             ->orderBy('cacheable_id')
             ->get();
 
-        return $rows
+        return array_values($rows
             ->map(fn (CachedModelUrl $row): CacheMapResourceSummaryData => new CacheMapResourceSummaryData(
                 key: $this->resourceKey($row->cacheable_type, $row->cacheable_id),
                 modelType: $row->cacheable_type,
@@ -57,7 +57,7 @@ final class ListCacheMapResourceOptionsAction
             ->filter(fn (CacheMapResourceSummaryData $resource): bool => $this->matchesSearch($resource, $search))
             ->take($limit)
             ->values()
-            ->all();
+            ->all());
     }
 
     private function resourceLabel(string $modelType, int $resourceId): string

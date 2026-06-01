@@ -3,7 +3,7 @@
     "composerName": "capell-app/html-cache",
     "generatedFor": "deployment-screenshot-runner",
     "requiresInstalledPackage": true,
-    "outputDirectory": "public/docs/screenshots/packages/html-cache",
+    "outputDirectory": "packages/html-cache/docs/screenshots",
     "entries": [
         {
             "id": "html-cache-maintenance-cache-page",
@@ -15,7 +15,7 @@
             "required": true,
             "notes": "Capture the maintenance cache controls after at least one site exists.",
             "useCase": "An administrator clears, warms, or regenerates cached HTML for a site.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-maintenance-cache-page.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-maintenance-cache-page.png"
         },
         {
             "id": "html-cache-cached-model-urls",
@@ -27,7 +27,7 @@
             "required": true,
             "notes": "Capture after warming a public page so cache map rows exist.",
             "useCase": "An administrator reviews model-to-URL cache map rows after a public page has been warmed.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-cached-model-urls.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-cached-model-urls.png"
         },
         {
             "id": "html-cache-dashboard-widgets",
@@ -39,7 +39,7 @@
             "required": true,
             "notes": "Capture cache overview, cache coverage URLs, and stale queue widgets.",
             "useCase": "An administrator checks cache overview, coverage, and stale queue widgets.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-dashboard-widgets.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-dashboard-widgets.png"
         },
         {
             "id": "html-cache-site-health-cache-map",
@@ -51,7 +51,7 @@
             "required": true,
             "notes": "Capture package diagnostics and public output safety checks on the core Site Health page.",
             "useCase": "An operator reviews cache-map diagnostics and public-output safety checks in Site Health.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-site-health-cache-map.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-site-health-cache-map.png"
         },
         {
             "id": "html-cache-page-table-extension",
@@ -63,7 +63,7 @@
             "required": true,
             "notes": "Capture the core Pages resource with the cache table extension visible.",
             "useCase": "An editor sees cache state indicators directly in the core Pages resource.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-page-table-extension.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-page-table-extension.png"
         },
         {
             "id": "html-cache-public-cache-hit",
@@ -75,7 +75,7 @@
             "required": true,
             "notes": "Capture anonymous public output and verify no authoring markers, editor URLs, or session cookies are exposed.",
             "useCase": "An anonymous visitor receives cached public HTML with no authoring markers, editor URLs, or session cookies.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-public-cache-hit.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-public-cache-hit.png"
         },
         {
             "id": "html-cache-maintenance-page",
@@ -87,7 +87,7 @@
             "required": true,
             "notes": "Capture generated maintenance HTML for a site/domain after using the maintenance cache page.",
             "useCase": "An anonymous visitor sees the generated static maintenance page for a site/domain.",
-            "screenshotPath": "public/docs/screenshots/packages/html-cache/html-cache-maintenance-page.png"
+            "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-maintenance-page.png"
         }
     ]
 }

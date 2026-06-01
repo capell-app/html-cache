@@ -14,6 +14,7 @@ use Capell\Core\Models\Theme;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
+use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\GenerateStaticSitesAction;
@@ -41,6 +42,7 @@ use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\ConnectionResolverInterface;
@@ -51,6 +53,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -61,6 +64,55 @@ use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Response;
 
 uses(HtmlCacheTestCase::class);
+
+/**
+ * @param  SupportCollection<int, int>  $assignedSiteIds
+ */
+function htmlCacheMaintenanceUser(SupportCollection $assignedSiteIds, bool $canManageMaintenance = true, bool $isGlobalAdmin = false): User
+{
+    $user = new class extends User
+    {
+        /** @use HasFactory<Factory<static>> */
+        use HasFactory;
+
+        /** @var SupportCollection<int, int> */
+        public SupportCollection $assignedSiteIds;
+
+        public bool $canManageMaintenance = true;
+
+        public bool $globalAdmin = false;
+
+        protected $table = 'users';
+
+        public function hasPermissionTo(mixed $permission): bool
+        {
+            return $this->canManageMaintenance;
+        }
+
+        /** @return SupportCollection<int, int> */
+        public function getAssignedSiteIds(): SupportCollection
+        {
+            return $this->assignedSiteIds;
+        }
+
+        public function isGlobalAdmin(): bool
+        {
+            return $this->globalAdmin;
+        }
+    };
+
+    $user->forceFill([
+        'name' => 'Maintenance User',
+        'email' => fake()->unique()->safeEmail(),
+        'password' => bcrypt('password'),
+    ]);
+    $user->assignedSiteIds = $assignedSiteIds;
+    $user->canManageMaintenance = $canManageMaintenance;
+    $user->globalAdmin = $isGlobalAdmin;
+    $user->save();
+
+    return $user;
+}
 
 function htmlCacheResidualCoverageSiteDomain(string $domain = 'example.test'): SiteDomain
 {
@@ -551,8 +603,12 @@ it('covers cache map component record and selection state helpers', function ():
     $component->selectedModelType = $page->getMorphClass();
     $component->selectedResourceKey = 'not-valid';
 
+    $cachedRecord = $component->getTableRecord((string) $cached->id);
+
+    throw_unless($cachedRecord instanceof CachedModelUrl, RuntimeException::class, 'Expected cached model URL table record to resolve.');
+
     expect($component->getTableRecord(null))->toBeNull()
-        ->and($component->getTableRecord((string) $cached->id)->is($cached))->toBeTrue()
+        ->and($cachedRecord->is($cached))->toBeTrue()
         ->and($component->getTableRecord('999999'))->toBeInstanceOf(CachedModelUrl::class)
         ->and($component->selectedResource())->toBeNull()
         ->and($component->clearedCacheMapRecordKeys)->toBe([(string) $cached->id]);
@@ -674,35 +730,13 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
         ->and(MaintenanceCachePage::getNavigationLabel())->toBeString()->not->toBe('')
         ->and(MaintenanceCachePage::getNavigationGroup())->toBeString()->not->toBe('')
         ->and($page->getTitle())->toBeString()->not->toBe('')
-        ->and($page->sites()->pluck('id'))->toContain($siteDomain->site_id)
+        ->and($page->sites())->toHaveCount(0)
         ->and($page->manifest())->toHaveKey('global_active');
 
-    $user = new class extends User
-    {
-        /** @use HasFactory<Factory<static>> */
-        use HasFactory;
+    $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $siteDomain->site_id])));
 
-        protected $table = 'users';
-
-        public function hasPermissionTo(mixed $permission): bool
-        {
-            return true;
-        }
-
-        public function isGlobalAdmin(): bool
-        {
-            return false;
-        }
-    };
-    $user->forceFill([
-        'name' => 'Maintenance User',
-        'email' => 'maintenance@example.test',
-        'password' => bcrypt('password'),
-    ])->save();
-
-    $this->actingAs($user);
-
-    expect(MaintenanceCachePage::canAccess())->toBeTrue();
+    expect(MaintenanceCachePage::canAccess())->toBeTrue()
+        ->and($page->sites()->pluck('id'))->toContain($siteDomain->site_id);
 });
 
 it('builds maintenance admin actions for permitted users', function (): void {
@@ -743,7 +777,10 @@ it('builds maintenance cache page header actions', function (): void {
 
 it('toggles and generates site maintenance cache state', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-toggle.test');
+    $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $siteDomain->site_id])));
+
     $page = new MaintenanceCachePage;
+    resolve(MaintenanceManifestStore::class)->setSiteActive((int) $siteDomain->site_id, false);
 
     $page->toggleSite((int) $siteDomain->site_id);
 
@@ -756,6 +793,27 @@ it('toggles and generates site maintenance cache state', function (): void {
     $page->generateSite((int) $siteDomain->site_id);
 
     expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.domains'))->not->toBe([]);
+});
+
+it('scopes maintenance cache page site operations to assigned sites', function (): void {
+    $assignedSiteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-assigned.test');
+    $unassignedSiteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-unassigned.test');
+    $page = new MaintenanceCachePage;
+    resolve(MaintenanceManifestStore::class)->setSiteActive((int) $assignedSiteDomain->site_id, false);
+
+    $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $assignedSiteDomain->site_id])));
+
+    expect($page->sites()->pluck('id'))
+        ->toContain($assignedSiteDomain->site_id)
+        ->not->toContain($unassignedSiteDomain->site_id);
+
+    $page->toggleSite((int) $assignedSiteDomain->site_id);
+
+    expect(data_get($page->manifest(), 'sites.' . $assignedSiteDomain->site_id . '.active'))->toBeTrue()
+        ->and(fn (): null => $page->toggleSite((int) $unassignedSiteDomain->site_id))
+        ->toThrow(AuthorizationException::class)
+        ->and(fn (): null => $page->generateSite((int) $unassignedSiteDomain->site_id))
+        ->toThrow(AuthorizationException::class);
 });
 
 it('caches public html, json, xml, not found, and invalid request paths', function (): void {

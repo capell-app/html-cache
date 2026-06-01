@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
+use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
@@ -17,6 +19,9 @@ use Symfony\Component\HttpFoundation\Cookie;
 
 uses(HtmlCacheTestCase::class);
 
+/**
+ * @return object{calls: int}
+ */
 function htmlCacheMiddlewareFakeSafetyInspector(bool $containsAuthoringSurface): object
 {
     return new class($containsAuthoringSurface)
@@ -256,6 +261,101 @@ it('reuses matching public html safety inspection results in middleware response
     capell_expect($inspector->calls)->toBe(0);
 });
 
+it('rejects cache eligibility for unsafe request and response states', function (): void {
+    $pageCache = resolve(PageCache::class);
+    $htmlResponse = response('<main>Public</main>', 200, ['Content-Type' => 'text/html']);
+
+    app()->instance(CacheBypassResolver::class, new readonly class implements CacheBypassResolver
+    {
+        public function shouldBypass(): bool
+        {
+            return true;
+        }
+    });
+
+    expect($pageCache->shouldCachePage(Request::create('https://example.test/about'), $htmlResponse))->toBeFalse();
+
+    app()->forgetInstance(CacheBypassResolver::class);
+
+    $withQuery = Request::create('https://example.test/about?preview=1');
+    $postRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_POST);
+    $inertiaRequest = Request::create('https://example.test/about');
+    $inertiaRequest->headers->set('X-Inertia-Version', 'asset-version');
+
+    $livewireRequest = Request::create('https://example.test/about');
+    $livewireRequest->headers->set('x-livewire', 'true');
+
+    $sessionRequest = Request::create('https://example.test/about');
+    $sessionRequest->setLaravelSession(session()->driver());
+
+    session()->put('_old_input', ['email' => 'ben@example.test']);
+
+    expect($pageCache->shouldCachePage(Request::create('https://example.test/about?without_html_cache=1'), $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage($withQuery, $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage($postRequest, $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage($inertiaRequest, $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage($sessionRequest, $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage(Request::create('https://example.test/about'), response('error', 500, ['Content-Type' => 'text/html'])))->toBeFalse()
+        ->and($pageCache->shouldCachePage(Request::create('https://example.test/about'), response()->json(['ok' => true])))->toBeFalse()
+        ->and($pageCache->shouldCachePage($livewireRequest, $htmlResponse))->toBeFalse();
+});
+
+it('writes and forgets error cache files using the public page cache API', function (): void {
+    Storage::fake('page_cache');
+
+    $request = Request::create('https://example.test/');
+    $pageCache = resolve(PageCache::class);
+
+    $pageCache->cache($request, response('not found', 404, ['Content-Type' => 'text/html']));
+
+    expect($pageCache->getCacheErrorPage($request))->toBe('not found')
+        ->and($pageCache->forget('pc__index__pc'))->toBeTrue()
+        ->and($pageCache->getCacheErrorPage($request))->toBeFalse();
+});
+
+it('atomically replaces cache files only for the current stale cache claim', function (): void {
+    Storage::fake('page_cache');
+
+    $pageCache = resolve(PageCache::class);
+    $validRequest = Request::create('https://example.test/about');
+    $validStaleUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/about',
+        'url_hash' => 'about-hash',
+        'path' => '/about',
+        'stale_key' => 'about-hash:about',
+        'cache_path' => 'about.html',
+        'error_cache_path' => 'about.404.html',
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PROCESSING,
+        'claim_token' => 'valid-claim',
+    ]);
+    $validRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $validStaleUrl->getKey());
+    $validRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, 'valid-claim');
+
+    $pageCache->cache($validRequest, response('fresh about', 200, ['Content-Type' => 'text/html']));
+
+    $invalidRequest = Request::create('https://example.test/contact');
+    $invalidStaleUrl = StaleCachedUrl::query()->create([
+        'url' => 'https://example.test/contact',
+        'url_hash' => 'contact-hash',
+        'path' => '/contact',
+        'stale_key' => 'contact-hash:contact',
+        'cache_path' => 'contact.html',
+        'error_cache_path' => 'contact.404.html',
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+        'claim_token' => 'old-claim',
+    ]);
+    $invalidRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $invalidStaleUrl->getKey());
+    $invalidRequest->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, 'new-claim');
+
+    $pageCache->cache($invalidRequest, response('fresh contact', 200, ['Content-Type' => 'text/html']));
+
+    expect(file_get_contents($pageCache->getCachePath('about.html')))->toBe('fresh about')
+        ->and(file_exists($pageCache->getCachePath('contact.html')))->toBeFalse()
+        ->and(glob($pageCache->getCachePath('contact.html.tmp.*')) ?: [])->toBe([]);
+});
+
 it('rescans public html when the remembered safety inspection hash does not match', function (): void {
     $content = '<main data-capell-editor="1">unsafe public html</main>';
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
@@ -379,8 +479,20 @@ it('strips configured cookies from anonymous cache hits', function (): void {
 it('wraps web middleware before stripping cacheable response cookies', function (): void {
     $middleware = resolve(FrontendRouteMiddlewareRegistry::class)->all();
 
-    capell_expect(array_search('frontend.no_session_cookies_on_cache', $middleware, true))
-        ->toBeLessThan(array_search('web', $middleware, true))
-        ->and(array_search('frontend.cache', $middleware, true))
-        ->toBeGreaterThan(array_search('web', $middleware, true));
+    $noSessionCookiesPosition = array_search('frontend.no_session_cookies_on_cache', $middleware, true);
+    $frontendCachePosition = array_search('frontend.cache', $middleware, true);
+    $webPosition = array_search('web', $middleware, true);
+
+    expect($noSessionCookiesPosition)->toBeInt();
+    expect($frontendCachePosition)->toBeInt();
+    expect($webPosition)->toBeInt();
+
+    assert(is_int($noSessionCookiesPosition));
+    assert(is_int($frontendCachePosition));
+    assert(is_int($webPosition));
+
+    capell_expect($noSessionCookiesPosition)
+        ->toBeLessThan($webPosition)
+        ->and($frontendCachePosition)
+        ->toBeGreaterThan($webPosition);
 });

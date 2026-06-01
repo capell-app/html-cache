@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
@@ -405,13 +406,6 @@ final class PageCache
 
     private function temporaryPathForAtomicReplace(string $path): string
     {
-        $directory = dirname($path);
-        $temporaryPath = tempnam($directory, basename($path) . '.tmp.');
-
-        if ($temporaryPath === false) {
-            throw new RuntimeException(sprintf('Unable to create temporary cache file for "%s".', $path));
-        }
-
-        return $temporaryPath;
+        return dirname($path) . DIRECTORY_SEPARATOR . basename($path) . '.tmp.' . Str::uuid()->toString();
     }
 }

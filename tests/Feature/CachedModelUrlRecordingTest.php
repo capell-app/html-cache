@@ -291,18 +291,31 @@ it('registers html cache middleware into the real frontend route middleware stac
 
     expect($route)->not->toBeNull();
 
+    throw_if($route === null, RuntimeException::class, 'Expected frontend route to be registered.');
+
     $middleware = $route->gatherMiddleware();
+    $frontendCachePosition = array_search('frontend.cache', $middleware, true);
+    $webPosition = array_search('web', $middleware, true);
+    $frontendResolvePosition = array_search('frontend.resolve', $middleware, true);
+    $modelEventsPosition = array_search('frontend.model_events', $middleware, true);
+    $anonymousCacheableRenderPosition = array_search('frontend.anonymous_cacheable_render', $middleware, true);
+
+    assert(is_int($frontendCachePosition));
+    assert(is_int($webPosition));
+    assert(is_int($frontendResolvePosition));
+    assert(is_int($modelEventsPosition));
+    assert(is_int($anonymousCacheableRenderPosition));
 
     expect($middleware)
         ->toContain('frontend.cache')
         ->toContain('frontend.model_events')
         ->toContain('frontend.no_session_cookies_on_cache')
-        ->and(array_search('frontend.cache', $middleware, true))
-        ->toBeGreaterThan(array_search('web', $middleware, true))
-        ->and(array_search('frontend.cache', $middleware, true))
-        ->toBeLessThan(array_search('frontend.resolve', $middleware, true))
-        ->and(array_search('frontend.model_events', $middleware, true))
-        ->toBeGreaterThan(array_search('frontend.anonymous_cacheable_render', $middleware, true));
+        ->and($frontendCachePosition)
+        ->toBeGreaterThan($webPosition)
+        ->and($frontendCachePosition)
+        ->toBeLessThan($frontendResolvePosition)
+        ->and($modelEventsPosition)
+        ->toBeGreaterThan($anonymousCacheableRenderPosition);
 });
 
 it('clears stale cached url rows when the url no longer resolves to a site domain', function (): void {
@@ -401,6 +414,55 @@ it('clears cached urls for a deleted model without restoring the model from the 
 
     expect(ClearCachedUrlsForModelAction::dispatchSync($morphClass, $pageKey))->toBe(0)
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
+});
+
+it('clears cached urls for a page and other urls that recorded the page as a dependency', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create([
+            'visible_from' => now()->subDay(),
+            'visible_until' => null,
+        ]);
+    $ownUrl = 'https://example.test/unpublished-page';
+    $dependentUrl = 'https://example.test/page-that-uses-unpublished-page';
+    $ownCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/unpublished-page', $siteDomain);
+    $dependentCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/page-that-uses-unpublished-page', $siteDomain);
+
+    Storage::disk('page_cache')->put($ownCachePath, 'cached unpublished page');
+    Storage::disk('page_cache')->put($dependentCachePath, 'cached dependent page');
+
+    foreach ([
+        [$ownUrl, '/unpublished-page'],
+        [$dependentUrl, '/page-that-uses-unpublished-page'],
+    ] as [$url, $path]) {
+        CachedModelUrl::query()->create([
+            'url' => $url,
+            'url_hash' => CachedModelUrl::hashUrl($url),
+            'path' => $path,
+            'site_id' => $siteDomain->site_id,
+            'site_domain_id' => $siteDomain->getKey(),
+            'language_id' => $siteDomain->language_id,
+            'cacheable_type' => $page->getMorphClass(),
+            'cacheable_id' => $page->getKey(),
+            'cached_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+    }
+
+    $page->visible_until = now();
+    $page->save();
+
+    expect(Storage::disk('page_cache')->exists($ownCachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($dependentCachePath))->toBeFalse()
+        ->and(CachedModelUrl::query()->whereIn('url', [$ownUrl, $dependentUrl])->exists())->toBeFalse();
 });
 
 it('clears all cached urls when a site domain changes', function (): void {

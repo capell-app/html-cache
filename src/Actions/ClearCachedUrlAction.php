@@ -24,15 +24,23 @@ final class ClearCachedUrlAction
 
     public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false): bool
     {
-        $selectedCachedModelUrl = $url instanceof CachedModelUrl ? $url : null;
+        if ($url instanceof CachedModelUrl) {
+            $selectedCachedModelUrl = $url;
+            $urlString = $url->url;
+            $path = $url->path;
+        } else {
+            $selectedCachedModelUrl = null;
+            $urlString = $url;
+            $path = null;
+        }
+
         $selectedCachedModelUrl?->loadMissing('siteDomain');
-        $url = $selectedCachedModelUrl->url ?? $url;
-        $path = $selectedCachedModelUrl->path ?? resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
-        $cachedModelUrls = $this->cachedModelUrls($url, $selectedCachedModelUrl);
+        $path ??= resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($urlString);
+        $cachedModelUrls = $this->cachedModelUrls($urlString, $selectedCachedModelUrl);
         $siteDomain ??= $selectedCachedModelUrl?->siteDomain;
 
         if (! $siteDomain instanceof SiteDomain) {
-            $resolved = LoadSiteDomainFromUrlAction::run($url);
+            $resolved = LoadSiteDomainFromUrlAction::run($urlString);
 
             if (is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain) {
                 $siteDomain = $resolved[0];
@@ -57,7 +65,7 @@ final class ClearCachedUrlAction
         $cachedModelUrls->each->delete();
 
         if ($refresh) {
-            VisitUrlAction::dispatch($url);
+            VisitUrlAction::dispatch($urlString);
         }
 
         return true;

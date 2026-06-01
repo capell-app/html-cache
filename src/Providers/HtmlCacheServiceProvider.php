@@ -54,7 +54,9 @@ use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
+use Capell\HtmlCache\Support\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
+use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
@@ -141,6 +143,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerAdminExtenders()
             ->registerDashboardSettingsContributor()
             ->registerDashboardWidgets()
+            ->registerGeneratedOutputCoverage()
             ->registerModelInvalidationHooks()
             ->registerScheduledInvalidation()
             ->ensurePermissions();
@@ -256,6 +259,18 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         CapellAdmin::registerDashboardWidget(HtmlCacheOverviewWidget::class, DashboardEnum::Main);
         CapellAdmin::registerDashboardWidget(CacheCoverageUrlsWidget::class, DashboardEnum::Main);
         CapellAdmin::registerDashboardWidget(HtmlCacheStaleQueueWidget::class, DashboardEnum::Main);
+
+        return $this;
+    }
+
+    private function registerGeneratedOutputCoverage(): self
+    {
+        if (! interface_exists(GeneratedOutputCoverageSource::class)) {
+            return $this;
+        }
+
+        $this->app->singleton(HtmlCacheGeneratedOutputCoverageSource::class);
+        $this->app->tag([HtmlCacheGeneratedOutputCoverageSource::class], GeneratedOutputCoverageSource::TAG);
 
         return $this;
     }

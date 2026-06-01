@@ -68,7 +68,7 @@ final class StaticSiteGenerator
             ),
         ]);
 
-        return $siteDomain->page_urls_count;
+        return (int) $siteDomain->page_urls_count;
     }
 
     private function processExtensionHandlers(SiteDomain $siteDomain, ?Closure $checkpoint): int

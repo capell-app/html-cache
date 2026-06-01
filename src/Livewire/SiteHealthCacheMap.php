@@ -178,7 +178,7 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
             return [];
         }
 
-        return ListCacheMapResourceOptionsAction::run($this->selectedModelType, $this->siteId, $this->resourceSearch);
+        return array_values(ListCacheMapResourceOptionsAction::run($this->selectedModelType, $this->siteId, $this->resourceSearch));
     }
 
     public function selectedResource(): ?CacheMapResourceSummaryData

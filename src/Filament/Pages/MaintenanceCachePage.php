@@ -7,7 +7,6 @@ namespace Capell\HtmlCache\Filament\Pages;
 use BackedEnum;
 use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\Site;
-use Capell\Frontend\Actions\GenerateAllMaintenancePageCachesAction;
 use Capell\Frontend\Actions\GenerateMaintenancePageCacheAction;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
@@ -17,8 +16,10 @@ use Filament\Actions\Contracts\HasActions;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Http\MaintenanceModeBypassCookie;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
@@ -66,7 +67,7 @@ class MaintenanceCachePage extends Page implements HasActions
     /** @return Collection<int, Site> */
     public function sites(): Collection
     {
-        return Site::query()
+        return $this->accessibleSitesQuery()
             ->with(['siteDomains', 'language'])
             ->ordered()
             ->get();
@@ -80,11 +81,11 @@ class MaintenanceCachePage extends Page implements HasActions
 
     public function toggleSite(int $siteId): void
     {
+        $site = $this->authorizedSite($siteId);
         $manifest = $this->manifest();
         $current = data_get($manifest, 'sites.' . $siteId . '.active') === true;
 
         if (! $current && data_get($manifest, 'sites.' . $siteId . '.domains', []) === []) {
-            $site = Site::query()->findOrFail($siteId);
             GenerateMaintenancePageCacheAction::run($site);
         }
 
@@ -98,7 +99,7 @@ class MaintenanceCachePage extends Page implements HasActions
 
     public function generateSite(int $siteId): void
     {
-        $site = Site::query()->findOrFail($siteId);
+        $site = $this->authorizedSite($siteId);
 
         GenerateMaintenancePageCacheAction::run($site);
 
@@ -118,7 +119,7 @@ class MaintenanceCachePage extends Page implements HasActions
                 ->icon('heroicon-o-arrow-path')
                 ->authorize(fn (): bool => self::canManageMaintenance())
                 ->action(function (): void {
-                    GenerateAllMaintenancePageCachesAction::run();
+                    $this->generateAccessibleMaintenancePages();
 
                     Notification::make()
                         ->success()
@@ -128,12 +129,12 @@ class MaintenanceCachePage extends Page implements HasActions
             Action::make('enable-global-maintenance')
                 ->label(__('capell-html-cache::admin.enable_global_maintenance'))
                 ->icon('heroicon-o-lock-closed')
-                ->authorize(fn (): bool => self::canManageMaintenance())
+                ->authorize(fn (): bool => $this->canManageGlobalMaintenance())
                 ->requiresConfirmation()
                 ->action(function (): void {
                     $secret = Str::random(32);
 
-                    GenerateAllMaintenancePageCachesAction::run();
+                    $this->generateAccessibleMaintenancePages();
                     resolve(MaintenanceManifestStore::class)->setGlobalActive(true);
                     Artisan::call('down', ['--secret' => $secret]);
                     Cookie::queue(MaintenanceModeBypassCookie::create($secret));
@@ -147,7 +148,7 @@ class MaintenanceCachePage extends Page implements HasActions
                 ->label(__('capell-html-cache::admin.disable_global_maintenance'))
                 ->icon('heroicon-o-lock-open')
                 ->color('success')
-                ->authorize(fn (): bool => self::canManageMaintenance())
+                ->authorize(fn (): bool => $this->canManageGlobalMaintenance())
                 ->action(function (): void {
                     resolve(MaintenanceManifestStore::class)->setGlobalActive(false);
                     Artisan::call('up');
@@ -172,10 +173,63 @@ class MaintenanceCachePage extends Page implements HasActions
             return true;
         }
 
+        if (! method_exists($actor, 'hasPermissionTo')) {
+            return false;
+        }
+
         try {
             return $actor->hasPermissionTo(HtmlCachePermission::ManageMaintenance->value) === true;
         } catch (PermissionDoesNotExist) {
             return false;
         }
+    }
+
+    private function canManageGlobalMaintenance(): bool
+    {
+        $actor = auth()->user();
+
+        return $actor instanceof Authenticatable
+            && SiteScope::isGlobalActor($actor)
+            && self::canManageMaintenance();
+    }
+
+    /**
+     * @return Builder<Site>
+     */
+    private function accessibleSitesQuery(bool $enabledOnly = false): Builder
+    {
+        $query = Site::query();
+
+        if ($enabledOnly) {
+            $query->enabled();
+        }
+
+        return SiteScope::applyForCurrentActor($query, 'id', denyWhenMissingActor: true);
+    }
+
+    /**
+     * @throws AuthorizationException
+     */
+    private function authorizedSite(int $siteId): Site
+    {
+        $site = Site::query()->findOrFail($siteId);
+        $actor = auth()->user();
+
+        throw_if(! self::canManageMaintenance() || ! SiteScope::actorCanUseSite($actor, $site), AuthorizationException::class);
+
+        return $site;
+    }
+
+    /**
+     * @throws AuthorizationException
+     */
+    private function generateAccessibleMaintenancePages(): void
+    {
+        throw_unless(self::canManageMaintenance(), AuthorizationException::class);
+
+        $this->accessibleSitesQuery(enabledOnly: true)
+            ->with(['language', 'siteDomains.language', 'theme', 'translations'])
+            ->ordered()
+            ->each(fn (Site $site): array => GenerateMaintenancePageCacheAction::run($site));
     }
 }

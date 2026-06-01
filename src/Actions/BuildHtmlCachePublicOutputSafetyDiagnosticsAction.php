@@ -271,12 +271,12 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
             }
         }
 
-        return collect($files)
+        return array_values(collect($files)
             ->filter(fn (string $file): bool => str_ends_with($file, '.html') && ! isset($indexedFiles[$file]))
             ->unique()
             ->take($limit)
             ->values()
-            ->all();
+            ->all());
     }
 
     /**

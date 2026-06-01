@@ -20,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
@@ -244,13 +245,7 @@ final class RefreshCachedUrlAtomicallyAction
 
     private function temporaryPathForAtomicReplace(string $path): string
     {
-        $temporaryPath = tempnam(dirname($path), basename($path) . '.tmp.');
-
-        if ($temporaryPath === false) {
-            throw new RuntimeException(sprintf('Unable to create temporary cache file for "%s".', $path));
-        }
-
-        return $temporaryPath;
+        return dirname($path) . DIRECTORY_SEPARATOR . basename($path) . '.tmp.' . Str::uuid()->toString();
     }
 
     private function staleRefreshClaimIsCurrent(Request $request): bool

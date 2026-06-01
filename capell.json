@@ -20,7 +20,7 @@
             "capell-app/core",
             "capell-app/frontend"
         ],
-        "supports": [],
+        "supports": ["capell-app/site-discovery"],
         "conflicts": []
     },
     "providers": {
@@ -86,6 +86,12 @@
     "scopes": ["backend", "frontend"],
     "order": 45,
     "contributionTraceability": {
-        "deferredContributions": ["admin-page", "route"]
+        "deferredContributions": [
+            "admin-page",
+            "dashboard-widget",
+            "model",
+            "route",
+            "scheduled-job"
+        ]
     }
 }

@@ -13,7 +13,7 @@ final class ModelEventRegistrar
 {
     private const string REQUEST_FLAG = 'capell.html_cache.model_events_registered';
 
-    /** @var array<class-string, true> */
+    /** @var array<class-string<Model>, true> */
     private static array $registeredModelClasses = [];
 
     private static bool $registeredForProcess = false;
@@ -45,13 +45,18 @@ final class ModelEventRegistrar
      */
     private static function registerRetrievedHook(string $modelClass): void
     {
+        if (! is_subclass_of($modelClass, Model::class)) {
+            return;
+        }
+
+        /** @var class-string<Model> $modelClass */
         if (isset(self::$registeredModelClasses[$modelClass])) {
             return;
         }
 
         self::$registeredModelClasses[$modelClass] = true;
 
-        $modelClass::registerModelEvent('retrieved', function (Model $model) use ($modelClass): void {
+        $modelClass::retrieved(function (Model $model) use ($modelClass): void {
             resolve(RetrievedModelStore::class)->trackByClass($model, $modelClass);
         });
     }

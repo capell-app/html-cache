@@ -15,6 +15,7 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
@@ -413,18 +414,6 @@ final class HtmlCacheMiddleware
 
     private function stripConfiguredCookies(Response $response): Response
     {
-        $cookiesToRemove = [
-            config('session.cookie'),
-            'XSRF-TOKEN',
-            'PHPDEBUGBAR_STACK_DATA',
-        ];
-
-        foreach ($response->headers->getCookies() as $cookie) {
-            if (in_array($cookie->getName(), $cookiesToRemove, true)) {
-                $response->headers->removeCookie($cookie->getName(), $cookie->getPath(), $cookie->getDomain());
-            }
-        }
-
-        return $response;
+        return CacheableResponseCookieStripper::strip($response);
     }
 }

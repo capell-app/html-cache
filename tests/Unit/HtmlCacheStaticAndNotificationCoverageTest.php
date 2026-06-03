@@ -856,10 +856,35 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
         ->and($cache->getCacheErrorPage(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET)))->toBe('missing')
         ->and(File::exists($cachePath . '/feed.xml'))->toBeTrue()
         ->and(File::exists($cachePath . '/data.json'))->toBeTrue()
-        ->and(File::exists($cachePath . '/__invalid__/pc__invalid__pc.html'))->toBeTrue()
+        ->and(File::exists($cachePath . '/__invalid__/pc__invalid__pc.html'))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page?x=1', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_POST), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_INERTIA' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('json', Response::HTTP_OK, ['Content-Type' => 'application/json'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_LIVEWIRE' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse();
+});
+
+it('skips page cache reads and writes for oversized hostile request paths', function (): void {
+    $cachePath = storage_path('framework/testing-page-cache-oversized-paths');
+    File::deleteDirectory($cachePath);
+
+    app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
+    {
+        public function shouldBypass(): bool
+        {
+            return false;
+        }
+    });
+
+    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $request = Request::create('/' . str_repeat('a', 5000), Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $response = new Response('<html><body>Not found</body></html>', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']);
+
+    expect($cache->getCachePage($request))->toBeFalse()
+        ->and($cache->getCacheErrorPage($request))->toBeFalse()
+        ->and($cache->shouldCachePage($request, $response))->toBeFalse();
+
+    $cache->cache($request, $response);
+
+    expect(File::exists($cachePath))->toBeFalse();
 });

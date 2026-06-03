@@ -28,6 +28,10 @@ final class PageCache
 
     public const string ERROR_PAGE = '404-error.html';
 
+    private const int MAX_PATH_SEGMENT_LENGTH = 255;
+
+    private const int MAX_RELATIVE_PATH_LENGTH = 2048;
+
     private ?Container $container = null;
 
     private ?string $cachePath = null;
@@ -74,6 +78,10 @@ final class PageCache
 
         $cacheLocation = $this->getDirectoryAndFileNames($laravelRequest, $laravelResponse);
 
+        if ($cacheLocation === null) {
+            return;
+        }
+
         [$path, $filename, $extension] = $cacheLocation;
         $content = (string) $response->getContent();
 
@@ -108,12 +116,20 @@ final class PageCache
     {
         $path = $this->getFileFromRequest($request);
 
+        if ($path === null) {
+            return false;
+        }
+
         return File::exists($path) ? File::get($path) : false;
     }
 
     public function getCacheErrorPage(Request $request): bool|string
     {
         $path = $this->getFileFromRequest($request, self::ERROR_EXTENSION);
+
+        if ($path === null) {
+            return false;
+        }
 
         return File::exists($path) ? File::get($path) : false;
     }
@@ -141,6 +157,10 @@ final class PageCache
         }
 
         if (! $request->isMethod('GET')) {
+            return false;
+        }
+
+        if ($this->safeRequestSegments($request) === null) {
             return false;
         }
 
@@ -193,9 +213,9 @@ final class PageCache
     }
 
     /**
-     * @return array<array-key, mixed>
+     * @return array<array-key, mixed>|null
      */
-    private function getDirectoryAndFileNames(SymfonyRequest $request, SymfonyResponse $response): array
+    private function getDirectoryAndFileNames(SymfonyRequest $request, SymfonyResponse $response): ?array
     {
         /** @var Request $laravelRequest */
         $laravelRequest = $request;
@@ -205,7 +225,7 @@ final class PageCache
         $segments = $this->safeRequestSegments($laravelRequest);
 
         if ($segments === null) {
-            return [$this->getCachePath('__invalid__'), 'pc__invalid__pc', $this->guessFileExtension($laravelResponse)];
+            return null;
         }
 
         $filename = $this->aliasFilename(array_pop($segments));
@@ -254,12 +274,12 @@ final class PageCache
         return null;
     }
 
-    private function getFileFromRequest(Request $request, string $extension = '.html'): string
+    private function getFileFromRequest(Request $request, string $extension = '.html'): ?string
     {
         $segments = $this->safeRequestSegments($request);
 
         if ($segments === null) {
-            return $this->getCachePath('__invalid__') . DIRECTORY_SEPARATOR . 'pc__invalid__pc' . $extension;
+            return null;
         }
 
         $filename = $this->aliasFilename(array_pop($segments));
@@ -271,9 +291,17 @@ final class PageCache
     private function safeRequestSegments(Request $request): ?array
     {
         $segments = $request->segments();
+        $relativePathLength = 0;
 
         foreach ($segments as $segment) {
-            if ($segment === '..' || str_contains((string) $segment, "\0") || str_contains((string) $segment, '\\')) {
+            $segment = (string) $segment;
+            $relativePathLength += strlen($segment) + 1;
+
+            if ($segment === '..'
+                || strlen($segment) > self::MAX_PATH_SEGMENT_LENGTH
+                || $relativePathLength > self::MAX_RELATIVE_PATH_LENGTH
+                || str_contains($segment, "\0")
+                || str_contains($segment, '\\')) {
                 return null;
             }
         }

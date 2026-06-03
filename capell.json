@@ -6,7 +6,7 @@
     "kind": "package",
     "capellApiVersion": "^4.0",
     "version": "4.x-dev",
-    "description": "Static HTML cache, dependency indexing, and cache administration for Capell.",
+    "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
     "product": {
         "group": "Capell Foundation",
         "tier": "free",
@@ -73,7 +73,7 @@
         "privateDocsRequested": false
     },
     "marketplace": {
-        "summary": "Static HTML cache, dependency indexing, and cache administration for Capell.",
+        "summary": "Serve Capell pages as static HTML for sub-millisecond responses — with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
         "screenshots": [
             {
                 "path": "docs/assets/marketplace/extension-card.jpg",

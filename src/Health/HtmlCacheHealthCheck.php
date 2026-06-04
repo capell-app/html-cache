@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Health;
 
 use Capell\Core\Contracts\Extensions\ChecksExtensionHealth;
 use Capell\Core\Data\Diagnostics\DoctorCheckResultData;
+use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
@@ -65,14 +66,14 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         $writable = $this->isPageCacheDiskWritable();
 
         return new DoctorCheckResultData(
-            label: 'HTML cache disk writable',
+            label: (string) __('capell-html-cache::health.disk.label'),
             passed: $writable,
             message: $writable
-                ? 'The page_cache disk is configured and writable for static HTML output.'
-                : 'The page_cache disk could not be written to; cached HTML cannot be stored.',
+                ? (string) __('capell-html-cache::health.disk.passed')
+                : (string) __('capell-html-cache::health.disk.failed'),
             remediation: $writable
                 ? null
-                : 'Ensure the page_cache filesystem disk is configured and its root directory is writable by the web server.',
+                : (string) __('capell-html-cache::health.disk.remediation'),
         );
     }
 
@@ -84,14 +85,14 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         $wired = $this->isFrontendCacheMiddlewareWired();
 
         return new DoctorCheckResultData(
-            label: 'Frontend HTML cache middleware wired',
+            label: (string) __('capell-html-cache::health.middleware.label'),
             passed: $wired,
             message: $wired
-                ? 'The frontend.cache middleware alias resolves to the HTML cache middleware.'
-                : 'The frontend.cache middleware alias is not wired to the HTML cache middleware; public pages will not be cached.',
+                ? (string) __('capell-html-cache::health.middleware.passed')
+                : (string) __('capell-html-cache::health.middleware.failed'),
             remediation: $wired
                 ? null
-                : 'Ensure HtmlCacheServiceProvider registers the frontend.cache middleware alias on the frontend route stack.',
+                : (string) __('capell-html-cache::health.middleware.remediation'),
         );
     }
 
@@ -103,14 +104,14 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         $missingTables = $this->missingTables();
 
         return new DoctorCheckResultData(
-            label: 'HTML cache storage tables',
+            label: (string) __('capell-html-cache::health.tables.label'),
             passed: $missingTables === [],
             message: $missingTables === []
-                ? 'The cached_model_urls dependency index and stale_cached_urls queue tables are present.'
-                : 'Missing tables: ' . implode(', ', $missingTables) . '.',
+                ? (string) __('capell-html-cache::health.tables.passed')
+                : (string) __('capell-html-cache::health.tables.failed', ['tables' => implode(', ', $missingTables)]),
             remediation: $missingTables === []
                 ? null
-                : 'Run the Capell migrations to create the HTML cache storage tables.',
+                : (string) __('capell-html-cache::health.tables.remediation'),
         );
     }
 
@@ -124,12 +125,12 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         $passed = ! $usesScheduledInvalidation || $commandRegistered;
 
         return new DoctorCheckResultData(
-            label: 'Scheduled stale-regeneration command registered',
+            label: (string) __('capell-html-cache::health.stale_command.label'),
             passed: $passed,
             message: $this->staleProcessingCommandMessage($usesScheduledInvalidation, $commandRegistered),
             remediation: $passed
                 ? null
-                : 'Ensure HtmlCacheServiceProvider registers the ' . self::STALE_PROCESSING_COMMAND . ' command while invalidation mode is scheduled.',
+                : (string) __('capell-html-cache::health.stale_command.remediation', ['command' => self::STALE_PROCESSING_COMMAND]),
         );
     }
 
@@ -138,10 +139,14 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
      */
     public function missingTables(): array
     {
-        return array_values(collect(self::REQUIRED_TABLES)
-            ->reject(static fn (string $tableName): bool => Schema::hasTable($tableName))
-            ->values()
-            ->all());
+        try {
+            return array_values(collect(self::REQUIRED_TABLES)
+                ->reject(static fn (string $tableName): bool => Schema::hasTable($tableName))
+                ->values()
+                ->all());
+        } catch (Throwable) {
+            return self::REQUIRED_TABLES;
+        }
     }
 
     public function isPageCacheDiskWritable(): bool
@@ -165,9 +170,26 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
 
     public function isFrontendCacheMiddlewareWired(): bool
     {
+        return $this->hasFrontendCacheMiddlewareAlias()
+            && $this->frontendCacheMiddlewareIsInFrontendStack();
+    }
+
+    public function hasFrontendCacheMiddlewareAlias(): bool
+    {
         $aliases = Route::getMiddleware();
 
         return ($aliases[self::FRONTEND_CACHE_MIDDLEWARE_ALIAS] ?? null) === HtmlCacheMiddleware::class;
+    }
+
+    public function frontendCacheMiddlewareIsInFrontendStack(): bool
+    {
+        try {
+            $middleware = resolve(FrontendRouteMiddlewareRegistry::class)->all();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return in_array(self::FRONTEND_CACHE_MIDDLEWARE_ALIAS, $middleware, true);
     }
 
     public function isStaleProcessingCommandRegistered(): bool
@@ -194,11 +216,11 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     private function staleProcessingCommandMessage(bool $usesScheduledInvalidation, bool $commandRegistered): string
     {
         if (! $usesScheduledInvalidation) {
-            return 'Invalidation mode is instant; scheduled stale-regeneration is not required.';
+            return (string) __('capell-html-cache::health.stale_command.not_required');
         }
 
         return $commandRegistered
-            ? 'Scheduled invalidation is active and the ' . self::STALE_PROCESSING_COMMAND . ' command is registered.'
-            : 'Scheduled invalidation is active but the ' . self::STALE_PROCESSING_COMMAND . ' command is not registered.';
+            ? (string) __('capell-html-cache::health.stale_command.passed', ['command' => self::STALE_PROCESSING_COMMAND])
+            : (string) __('capell-html-cache::health.stale_command.failed', ['command' => self::STALE_PROCESSING_COMMAND]);
     }
 }

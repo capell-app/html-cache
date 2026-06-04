@@ -8,6 +8,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 - Narrowed model-event invalidation so non-route model creates and translation updates clear or stale only URLs indexed against that model instead of flushing the entire HTML cache.
 - Added short-lived access-gate active-area lookup caching to keep anonymous cache-read decisions off the access gate table hot path.
 - Added configurable public HTTP cache-control ages (`shared_max_age`, `browser_max_age`, and `stale_while_revalidate`) and documented that filesystem cache files remain invalidation-driven rather than TTL-driven.
+- Tightened HTML cache health diagnostics so the critical check verifies the `frontend.cache` alias is present in the frontend route middleware registry and covers missing scheduled stale-processing command registration.
 
 ## 2026-06-03
 

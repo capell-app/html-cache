@@ -33,12 +33,14 @@ return [
         | Operator-controlled cache bypass rules
         |--------------------------------------------------------------------------
         |
-        | Paths and cookie names support Laravel wildcard matching. Use these for
-        | public URLs or personalization cookies that should never be read from or
-        | written to the shared HTML cache, such as /cart, /account/*, or currency.
+        | Paths, cookie names, and header names support Laravel wildcard matching.
+        | Use these for public URLs, personalization cookies, or locale/segment
+        | headers that should never be read from or written to the shared HTML
+        | cache, such as /cart, /account/*, currency, or Accept-Language.
         */
         'paths' => [],
         'cookies' => [],
+        'headers' => [],
     ],
     'access_gate' => [
         'active_area_cache_seconds' => (int) Env::get('CAPELL_HTML_CACHE_ACCESS_GATE_AREA_CACHE_SECONDS', 5),

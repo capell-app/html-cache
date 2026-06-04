@@ -83,7 +83,7 @@ Foundation/bundled and free — correct: this is infrastructure every public Cap
 | Reconcile manifest screenshots (1) with screenshots.json (7); capture all 7               | Now    | M      | High   | §5          |
 | Rewrite marketplace summary + composer description (outcome-led)                          | Now    | S      | Med    | §5          |
 | De-duplicate the two cookie-stripping lists into one source                               | Now    | S      | Med    | §2.5        |
-| Add test: two locales on same host+path are not cross-served                              | Now    | S      | High   | §4.2        |
+| Shipped 2026-06-04: add test/guard so same-host/path locale variants are not cross-served | Done   | S      | High   | §4.2        |
 | `CachePurger` contract + null driver + one CDN surrogate-key purge driver                 | Next   | L      | High   | §3          |
 | Config-driven bypass allow/deny path & cookie matcher                                     | Next   | M      | Med    | §3          |
 | Origin stale-while-revalidate (lock + serve-stale-then-regenerate)                        | Next   | M      | High   | §3, §4.4    |

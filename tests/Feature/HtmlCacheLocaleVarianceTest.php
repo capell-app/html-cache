@@ -60,6 +60,37 @@ it('does not cache or cross-serve two locales negotiated on the same host and pa
         ->and($frenchResponse->headers->get('X-Frontend-Cache'))->toBeNull();
 });
 
+it('bypasses same host and path locale variants negotiated by configured headers', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.bypass.headers', ['Accept-Language']);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $englishRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $englishRequest);
+    config()->set('capell-html-cache.bypass.headers', []);
+    resolve(PageCache::class)->cache($englishRequest, response('english about page', 200, ['Content-Type' => 'text/html']));
+    config()->set('capell-html-cache.bypass.headers', ['Accept-Language']);
+
+    $frenchRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $frenchRequest->headers->set('Accept-Language', 'fr');
+    app()->instance('request', $frenchRequest);
+
+    $frenchResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $frenchRequest,
+        fn (): Response => response('french about page', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect($frenchResponse->getContent())->toBe('french about page')
+        ->and($frenchResponse->headers->get('X-Frontend-Cache'))->toBeNull()
+        ->and((string) $frenchResponse->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->get('https.example.test/about.html'))->toBe('english about page');
+});
+
 it('serves a distinct cached file per host so distinct-host locales do not collide', function (): void {
     Storage::fake('page_cache');
 

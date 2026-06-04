@@ -15,7 +15,11 @@ final class ConfiguredHtmlCacheBypassRules
             return true;
         }
 
-        return $this->cookieMatches($request);
+        if ($this->cookieMatches($request)) {
+            return true;
+        }
+
+        return $this->headerMatches($request);
     }
 
     private function pathMatches(Request $request): bool
@@ -38,6 +42,23 @@ final class ConfiguredHtmlCacheBypassRules
         foreach ($this->configuredPatterns('capell-html-cache.bypass.cookies') as $pattern) {
             foreach ($cookieNames as $cookieName) {
                 if (Str::is($pattern, $cookieName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function headerMatches(Request $request): bool
+    {
+        $headerNames = $this->headerNames($request);
+
+        foreach ($this->configuredPatterns('capell-html-cache.bypass.headers') as $pattern) {
+            $normalizedPattern = Str::lower($pattern);
+
+            foreach ($headerNames as $headerName) {
+                if (Str::is($normalizedPattern, $headerName)) {
                     return true;
                 }
             }
@@ -113,5 +134,16 @@ final class ConfiguredHtmlCacheBypassRules
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function headerNames(Request $request): array
+    {
+        return array_values(array_unique(array_map(
+            static fn (string $headerName): string => Str::lower($headerName),
+            $request->headers->keys(),
+        )));
     }
 }

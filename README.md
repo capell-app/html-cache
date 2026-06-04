@@ -64,6 +64,7 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 - Integration: registers `StaticMaintenancePageStore` so Capell frontend maintenance pages can use the `page_cache` disk when this package is installed.
 - Public cache headers are configured through `capell-html-cache.http_cache`; the filesystem cache itself has no TTL and is cleared or refreshed by invalidation.
 - Access Gate active-area checks are cached briefly through `capell-html-cache.access_gate.active_area_cache_seconds` so anonymous cache decisions do not query the access gate table on every request.
+- Shared-URL locale or segment negotiation should be listed in `capell-html-cache.bypass.headers` / `bypass.cookies` so those variants never read or write the host+path HTML cache entry.
 
 ## Commands
 

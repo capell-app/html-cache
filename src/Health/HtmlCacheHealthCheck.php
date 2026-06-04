@@ -173,7 +173,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     public function isStaleProcessingCommandRegistered(): bool
     {
         try {
-            $commands = app(ConsoleKernel::class)->all();
+            $commands = resolve(ConsoleKernel::class)->all();
         } catch (Throwable) {
             return false;
         }

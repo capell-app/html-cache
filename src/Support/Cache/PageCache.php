@@ -76,6 +76,10 @@ final class PageCache
         /** @var Response $laravelResponse */
         $laravelResponse = $response;
 
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($laravelRequest)) {
+            return;
+        }
+
         $cacheLocation = $this->getDirectoryAndFileNames($laravelRequest, $laravelResponse);
 
         if ($cacheLocation === null) {
@@ -149,6 +153,10 @@ final class PageCache
         }
 
         if ($request->query->count() > 0) {
+            return false;
+        }
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
             return false;
         }
 

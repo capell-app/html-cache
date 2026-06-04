@@ -252,6 +252,60 @@ it('bypasses cached html for access gate browser token requests even when authen
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
 
+it('bypasses cache reads and writes for configured path rules', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.bypass.paths', ['/account/*']);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/account/profile', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    config()->set('capell-html-cache.bypass.paths', []);
+    resolve(PageCache::class)->cache($request, response('cached profile', 200, ['Content-Type' => 'text/html']));
+    config()->set('capell-html-cache.bypass.paths', ['/account/*']);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh profile', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->getContent())->toBe('fresh profile')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->get('https.example.test/account/profile.html'))->toBe('cached profile');
+});
+
+it('bypasses cache reads and writes for configured cookie rules', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.bypass.cookies', ['currency_*']);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/pricing', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    config()->set('capell-html-cache.bypass.cookies', []);
+    resolve(PageCache::class)->cache($request, response('cached pricing', 200, ['Content-Type' => 'text/html']));
+    config()->set('capell-html-cache.bypass.cookies', ['currency_*']);
+
+    $request->headers->set('Cookie', 'currency_bucket=gbp');
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh pricing', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->getContent())->toBe('fresh pricing')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->get('https.example.test/pricing.html'))->toBe('cached pricing');
+});
+
 it('does not write cached html when the response contains authoring markers', function (): void {
     Storage::fake('page_cache');
     $siteDomain = SiteDomain::factory()->create([
@@ -379,6 +433,25 @@ it('rejects cache eligibility for unsafe request and response states', function 
         ->and($pageCache->shouldCachePage(Request::create('https://example.test/about'), response('error', 500, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($pageCache->shouldCachePage(Request::create('https://example.test/about'), response()->json(['ok' => true])))->toBeFalse()
         ->and($pageCache->shouldCachePage($livewireRequest, $htmlResponse))->toBeFalse();
+});
+
+it('rejects cache eligibility for configured bypass rules', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.bypass.paths', ['checkout/*']);
+    config()->set('capell-html-cache.bypass.cookies', ['preview_segment']);
+
+    $pageCache = resolve(PageCache::class);
+    $htmlResponse = response('<main>Public</main>', 200, ['Content-Type' => 'text/html']);
+    $pathRequest = Request::create('https://example.test/checkout/payment');
+    $cookieRequest = Request::create('https://example.test/pricing');
+    $cookieRequest->cookies->set('preview_segment', 'beta');
+
+    app()->instance('request', $pathRequest);
+    $pageCache->cache($pathRequest, $htmlResponse);
+
+    expect($pageCache->shouldCachePage($pathRequest, $htmlResponse))->toBeFalse()
+        ->and($pageCache->shouldCachePage($cookieRequest, $htmlResponse))->toBeFalse()
+        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
 });
 
 it('writes and forgets error cache files using the public page cache API', function (): void {

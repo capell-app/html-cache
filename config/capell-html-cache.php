@@ -27,6 +27,19 @@ return [
     ],
     'cache_vary_headers' => ['Accept-Encoding'],
     'cache_skip_authenticated' => true,
+    'bypass' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Operator-controlled cache bypass rules
+        |--------------------------------------------------------------------------
+        |
+        | Paths and cookie names support Laravel wildcard matching. Use these for
+        | public URLs or personalization cookies that should never be read from or
+        | written to the shared HTML cache, such as /cart, /account/*, or currency.
+        */
+        'paths' => [],
+        'cookies' => [],
+    ],
     'access_gate' => [
         'active_area_cache_seconds' => (int) Env::get('CAPELL_HTML_CACHE_ACCESS_GATE_AREA_CACHE_SECONDS', 5),
     ],

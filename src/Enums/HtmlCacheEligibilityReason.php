@@ -13,6 +13,7 @@ enum HtmlCacheEligibilityReason: string
     case LivewireRequest = 'livewire_request';
     case InertiaRequest = 'inertia_request';
     case AuthorizationHeaderPresent = 'authorization_header_present';
+    case ConfiguredBypassRule = 'configured_bypass_rule';
     case CacheDisabled = 'cache_disabled';
     case CacheWriteDisabled = 'cache_write_disabled';
     case UnsafePublicOutput = 'unsafe_public_output';

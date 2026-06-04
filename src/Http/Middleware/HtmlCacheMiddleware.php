@@ -17,6 +17,7 @@ use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
@@ -42,6 +43,10 @@ final class HtmlCacheMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
+            return $this->privateNoStore($next($request));
+        }
 
         if ($this->shouldBypassForAccessGate($request)) {
             return $this->privateNoStore($next($request));
@@ -183,6 +188,10 @@ final class HtmlCacheMiddleware
         }
 
         if ($request->query->has('without_html_cache') || $request->query->count() > 0) {
+            return true;
+        }
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
             return true;
         }
 

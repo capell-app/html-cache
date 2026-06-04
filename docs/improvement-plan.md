@@ -82,7 +82,7 @@ Foundation/bundled and free — correct: this is infrastructure every public Cap
 | Implement real `HtmlCacheHealthCheck` (writable disk, middleware wired, tables, schedule) | Now    | M      | High   | §2.4        |
 | Reconcile manifest screenshots (1) with screenshots.json (7); capture all 7               | Now    | M      | High   | §5          |
 | Rewrite marketplace summary + composer description (outcome-led)                          | Now    | S      | Med    | §5          |
-| De-duplicate the two cookie-stripping lists into one source                               | Now    | S      | Med    | §2.5        |
+| Cookie-strip list de-duped 2026-06-04; both strip paths tested                            | Done   | S      | Med    | §2.5        |
 | Shipped 2026-06-04: add test/guard so same-host/path locale variants are not cross-served | Done   | S      | High   | §4.2        |
 | `CachePurger` contract + null driver + one CDN surrogate-key purge driver                 | Next   | L      | High   | §3          |
 | Config-driven bypass allow/deny path & cookie matcher                                     | Next   | M      | Med    | §3          |

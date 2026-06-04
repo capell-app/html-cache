@@ -9,6 +9,7 @@ use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
@@ -48,6 +49,16 @@ function htmlCacheAccessGateQueryCount(): int
     return collect(DB::getQueryLog())
         ->filter(static fn (array $query): bool => str_contains((string) ($query['query'] ?? ''), 'access_gate_areas'))
         ->count();
+}
+
+function htmlCacheCreateAccessGateAreasTable(): void
+{
+    Schema::create('access_gate_areas', function (Blueprint $table): void {
+        $table->id();
+        $table->string('key')->index();
+        $table->string('status')->index();
+        $table->timestamps();
+    });
 }
 
 beforeEach(function (): void {
@@ -140,12 +151,7 @@ it('uses configured public cache-control ages for cached responses', function ()
 
 it('caches active access gate area lookups so repeated anonymous requests do not query the access gate table', function (): void {
     Cache::flush();
-    Schema::create('access_gate_areas', function (Blueprint $table): void {
-        $table->id();
-        $table->string('key')->index();
-        $table->string('status')->index();
-        $table->timestamps();
-    });
+    htmlCacheCreateAccessGateAreasTable();
     DB::table('access_gate_areas')->insert([
         'key' => 'capell-preview',
         'status' => 'active',
@@ -177,6 +183,56 @@ it('caches active access gate area lookups so repeated anonymous requests do not
         ->toContain('no-store')
         ->and($queriesAfterFirstRequest)->toBeGreaterThan(0)
         ->and(htmlCacheAccessGateQueryCount())->toBe($queriesAfterFirstRequest);
+});
+
+it('refreshes cached active access gate area lookups after gate status changes', function (): void {
+    Cache::flush();
+    config()->set('capell-html-cache.access_gate.active_area_cache_seconds', 60);
+    htmlCacheCreateAccessGateAreasTable();
+    DB::table('access_gate_areas')->insert([
+        'key' => 'capell-preview',
+        'status' => 'active',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $resolver = resolve(ActiveAccessGateAreaResolver::class);
+
+    expect($resolver->hasActiveArea())->toBeTrue();
+
+    DB::table('access_gate_areas')
+        ->where('key', 'capell-preview')
+        ->update(['status' => 'paused', 'updated_at' => now()]);
+
+    expect($resolver->refreshActiveArea())->toBeFalse();
+
+    DB::table('access_gate_areas')
+        ->where('key', 'capell-preview')
+        ->update(['status' => 'active', 'updated_at' => now()]);
+
+    expect($resolver->refreshActiveArea())->toBeTrue();
+});
+
+it('can disable active access gate area caching for immediate gate status reads', function (): void {
+    Cache::flush();
+    config()->set('capell-html-cache.access_gate.active_area_cache_seconds', 0);
+    htmlCacheCreateAccessGateAreasTable();
+    DB::table('access_gate_areas')->insert([
+        'key' => 'capell-preview',
+        'status' => 'active',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $resolver = resolve(ActiveAccessGateAreaResolver::class);
+
+    expect($resolver->hasActiveArea())->toBeTrue();
+
+    DB::table('access_gate_areas')
+        ->where('key', 'capell-preview')
+        ->update(['status' => 'paused', 'updated_at' => now()]);
+
+    expect($resolver->hasActiveArea())->toBeFalse();
 });
 
 it('bypasses cached html for authenticated requests without a session cookie by default', function (): void {

@@ -78,7 +78,7 @@ Foundation/bundled and free — correct: this is infrastructure every public Cap
 | Item                                                                                      | Bucket | Effort | Impact | Section ref |
 | ----------------------------------------------------------------------------------------- | ------ | ------ | ------ | ----------- |
 | Targeted invalidation on `created` / `Translation` updated (stop full-disk flush)         | Now    | M      | High   | §2.1, §4.4  |
-| Cache the `access_gate_areas` hot-path existence query                                    | Now    | S      | High   | §4.1        |
+| Cache the `access_gate_areas` hot-path existence query                                    | Done   | S      | High   | §4.1 — Done 2026-06-04: memoized lookup plus refresh/disabled-cache tests. |
 | Implement real `HtmlCacheHealthCheck` (writable disk, middleware wired, tables, schedule) | Now    | M      | High   | §2.4        |
 | Reconcile manifest screenshots (1) with screenshots.json (7); capture all 7               | Now    | M      | High   | §5          |
 | Rewrite marketplace summary + composer description (outcome-led)                          | Now    | S      | Med    | §5          |

@@ -21,11 +21,23 @@ final class ActiveAccessGateAreaResolver
             return $this->queryHasActiveArea($connectionName, $defaultAreaKey);
         }
 
-        return (bool) Cache::remember(
+        return (bool) Cache::memo()->remember(
             $this->cacheKey($connectionName, $defaultAreaKey),
             $cacheSeconds,
             fn (): bool => $this->queryHasActiveArea($connectionName, $defaultAreaKey),
         );
+    }
+
+    public function refreshActiveArea(): bool
+    {
+        $this->forgetCachedActiveArea();
+
+        return $this->hasActiveArea();
+    }
+
+    public function forgetCachedActiveArea(): void
+    {
+        Cache::memo()->forget($this->cacheKey($this->connectionName(), $this->defaultAreaKey()));
     }
 
     private function queryHasActiveArea(?string $connectionName, string $defaultAreaKey): bool

@@ -100,7 +100,7 @@ it('passes the stale command diagnostic while invalidation mode is scheduled and
 it('fails the stale command diagnostic when scheduled mode is active and the command is missing', function (): void {
     config()->set('capell-html-cache.invalidation.mode', 'scheduled');
 
-    $originalKernel = app(ConsoleKernel::class);
+    $originalKernel = resolve(ConsoleKernel::class);
     $kernel = Mockery::mock($originalKernel)->makePartial();
     $kernel->shouldReceive('all')->once()->andReturn([]);
 

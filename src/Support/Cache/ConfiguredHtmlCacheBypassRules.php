@@ -11,8 +11,11 @@ final class ConfiguredHtmlCacheBypassRules
 {
     public function shouldBypass(Request $request): bool
     {
-        return $this->pathMatches($request)
-            || $this->cookieMatches($request);
+        if ($this->pathMatches($request)) {
+            return true;
+        }
+
+        return $this->cookieMatches($request);
     }
 
     private function pathMatches(Request $request): bool
@@ -46,9 +49,11 @@ final class ConfiguredHtmlCacheBypassRules
     private function matchesPathPattern(string $pattern, string $path): bool
     {
         $normalizedPattern = $this->normalizePathPattern($pattern);
+        if (Str::is($normalizedPattern, $path)) {
+            return true;
+        }
 
-        return Str::is($normalizedPattern, $path)
-            || Str::is(ltrim($normalizedPattern, '/'), ltrim($path, '/'));
+        return Str::is(ltrim($normalizedPattern, '/'), ltrim($path, '/'));
     }
 
     private function normalizedPath(Request $request): string

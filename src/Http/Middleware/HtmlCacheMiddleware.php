@@ -15,14 +15,13 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -148,7 +147,7 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        return $this->hasActiveAccessGateArea();
+        return resolve(ActiveAccessGateAreaResolver::class)->hasActiveArea();
     }
 
     private function hasAccessGateBrowserToken(Request $request): bool
@@ -166,28 +165,6 @@ final class HtmlCacheMiddleware
         $cookieHeader = $request->headers->get('Cookie');
 
         return is_string($cookieHeader) && str_contains($cookieHeader, $cookieName . '=');
-    }
-
-    private function hasActiveAccessGateArea(): bool
-    {
-        $connectionName = config('access-gate.connection');
-        $schema = is_string($connectionName) && $connectionName !== ''
-            ? Schema::connection($connectionName)
-            : Schema::getFacadeRoot();
-
-        if (! $schema->hasTable('access_gate_areas')) {
-            return false;
-        }
-
-        $defaultAreaKey = config('access-gate.install.default_area.key', 'capell-preview');
-        $query = is_string($connectionName) && $connectionName !== ''
-            ? DB::connection($connectionName)->table('access_gate_areas')
-            : DB::table('access_gate_areas');
-
-        return $query
-            ->where('key', is_string($defaultAreaKey) && $defaultAreaKey !== '' ? $defaultAreaKey : 'capell-preview')
-            ->where('status', 'active')
-            ->exists();
     }
 
     private function shouldBypassHttpCache(Request $request, Response $response): bool
@@ -316,13 +293,11 @@ final class HtmlCacheMiddleware
             return $this->privateNoStore($response);
         }
 
-        $configuredCacheTtl = config('capell-html-cache.cache_ttl');
-        $cacheTtl = is_numeric($configuredCacheTtl) ? max(0, (int) $configuredCacheTtl) : 3600;
         $response->headers->set('Cache-Control', sprintf(
             'public, s-maxage=%d, max-age=%d, stale-while-revalidate=%d',
-            intdiv($cacheTtl, 6),
-            60,
-            86400,
+            $this->sharedMaxAge(),
+            $this->browserMaxAge(),
+            $this->staleWhileRevalidateSeconds(),
         ));
         $response->headers->set('Vary', implode(', ', config('capell-html-cache.cache_vary_headers', ['Accept-Encoding'])));
 
@@ -415,5 +390,36 @@ final class HtmlCacheMiddleware
     private function stripConfiguredCookies(Response $response): Response
     {
         return CacheableResponseCookieStripper::strip($response);
+    }
+
+    private function sharedMaxAge(): int
+    {
+        $configuredSharedMaxAge = config('capell-html-cache.http_cache.shared_max_age');
+
+        if (is_numeric($configuredSharedMaxAge)) {
+            return max(0, (int) $configuredSharedMaxAge);
+        }
+
+        $configuredCacheTtl = config('capell-html-cache.cache_ttl');
+        $cacheTtl = is_numeric($configuredCacheTtl) ? max(0, (int) $configuredCacheTtl) : 3600;
+
+        return intdiv($cacheTtl, 6);
+    }
+
+    private function browserMaxAge(): int
+    {
+        return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.browser_max_age', 60);
+    }
+
+    private function staleWhileRevalidateSeconds(): int
+    {
+        return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.stale_while_revalidate', 86400);
+    }
+
+    private function nonNegativeConfigInteger(string $key, int $default): int
+    {
+        $value = config($key, $default);
+
+        return is_numeric($value) ? max(0, (int) $value) : $default;
     }
 }

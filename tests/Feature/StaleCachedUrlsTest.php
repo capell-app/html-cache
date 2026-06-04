@@ -22,7 +22,7 @@ require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
-it('marks indexed urls stale for broad invalidation in scheduled mode', function (): void {
+it('marks indexed translation urls stale in scheduled mode', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.invalidation.mode', 'scheduled');
 
@@ -56,8 +56,8 @@ it('marks indexed urls stale for broad invalidation in scheduled mode', function
         'site_id' => $siteDomain->site_id,
         'site_domain_id' => $siteDomain->getKey(),
         'language_id' => $siteDomain->language_id,
-        'cacheable_type' => $page->getMorphClass(),
-        'cacheable_id' => $page->getKey(),
+        'cacheable_type' => $translation->getMorphClass(),
+        'cacheable_id' => $translation->getKey(),
         'cached_at' => now(),
         'last_seen_at' => now(),
     ]);

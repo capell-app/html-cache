@@ -44,6 +44,7 @@ use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
+use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
@@ -91,6 +92,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());
         $this->app->scoped(RetrievedModelStore::class, fn (): RetrievedModelStore => new RetrievedModelStore);
@@ -316,7 +318,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         foreach (CapellCore::getModels() as $modelClass) {
             if ($modelClass === Translation::class) {
                 $modelClass::updated(function (Model $model): mixed {
-                    $this->dispatchClearAllHtmlCache();
+                    $this->dispatchClearCachedUrlsForModel($model);
 
                     return null;
                 });
@@ -332,7 +334,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
             if (! in_array($modelClass, $routeModelClasses, true)) {
                 $modelClass::created(function (Model $model): mixed {
-                    $this->dispatchClearAllHtmlCache();
+                    $this->dispatchClearCachedUrlsForModel($model);
 
                     return null;
                 });

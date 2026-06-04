@@ -62,6 +62,8 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 - Livewire: `SiteHealthCacheMap`.
 - Jobs: `RegisterCachedModelUrlsJob`.
 - Integration: registers `StaticMaintenancePageStore` so Capell frontend maintenance pages can use the `page_cache` disk when this package is installed.
+- Public cache headers are configured through `capell-html-cache.http_cache`; the filesystem cache itself has no TTL and is cleared or refreshed by invalidation.
+- Access Gate active-area checks are cached briefly through `capell-html-cache.access_gate.active_area_cache_seconds` so anonymous cache decisions do not query the access gate table on every request.
 
 ## Commands
 
@@ -89,6 +91,7 @@ Generated files are written under `maintenance/` on the `page_cache` disk. The m
 
 - Install with `composer require capell-app/html-cache` in the host Capell application.
 - Run migrations through the host application package install flow.
+- Tune `CAPELL_HTML_CACHE_SHARED_MAX_AGE`, `CAPELL_HTML_CACHE_BROWSER_MAX_AGE`, and `CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE` when CDN/browser cache headers need to differ from the defaults.
 - In this repository, verify package changes with `vendor/bin/pest`; do not use `php artisan`.
 
 ## Docs

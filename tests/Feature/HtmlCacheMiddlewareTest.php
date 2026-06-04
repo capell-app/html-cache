@@ -12,8 +12,12 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Cookie;
 
@@ -37,6 +41,13 @@ function htmlCacheMiddlewareFakeSafetyInspector(bool $containsAuthoringSurface):
             return $this->containsAuthoringSurface;
         }
     };
+}
+
+function htmlCacheAccessGateQueryCount(): int
+{
+    return collect(DB::getQueryLog())
+        ->filter(static fn (array $query): bool => str_contains((string) ($query['query'] ?? ''), 'access_gate_areas'))
+        ->count();
 }
 
 beforeEach(function (): void {
@@ -96,6 +107,76 @@ it('can serve cached html for requests with a session cookie when configured', f
     capell_expect($response->getContent())->toBe('cached html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('public');
+});
+
+it('uses configured public cache-control ages for cached responses', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.http_cache.shared_max_age', 900);
+    config()->set('capell-html-cache.http_cache.browser_max_age', 120);
+    config()->set('capell-html-cache.http_cache.stale_while_revalidate', 3600);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    $cacheControl = (string) $response->headers->get('Cache-Control');
+
+    capell_expect($cacheControl)
+        ->toContain('public')
+        ->toContain('s-maxage=900')
+        ->toContain('max-age=120')
+        ->toContain('stale-while-revalidate=3600');
+});
+
+it('caches active access gate area lookups so repeated anonymous requests do not query the access gate table', function (): void {
+    Cache::flush();
+    Schema::create('access_gate_areas', function (Blueprint $table): void {
+        $table->id();
+        $table->string('key')->index();
+        $table->string('status')->index();
+        $table->timestamps();
+    });
+    DB::table('access_gate_areas')->insert([
+        'key' => 'capell-preview',
+        'status' => 'active',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $middleware = resolve(HtmlCacheMiddleware::class);
+    DB::enableQueryLog();
+
+    $firstRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $firstRequest);
+    $firstResponse = $middleware->handle(
+        $firstRequest,
+        fn (): Response => response('protected html', 200, ['Content-Type' => 'text/html']),
+    );
+    $queriesAfterFirstRequest = htmlCacheAccessGateQueryCount();
+
+    $secondRequest = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $secondRequest);
+    $secondResponse = $middleware->handle(
+        $secondRequest,
+        fn (): Response => response('protected contact', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect((string) $firstResponse->headers->get('Cache-Control'))->toContain('private')
+        ->toContain('no-store')
+        ->and((string) $secondResponse->headers->get('Cache-Control'))->toContain('private')
+        ->toContain('no-store')
+        ->and($queriesAfterFirstRequest)->toBeGreaterThan(0)
+        ->and(htmlCacheAccessGateQueryCount())->toBe($queriesAfterFirstRequest);
 });
 
 it('bypasses cached html for authenticated requests without a session cookie by default', function (): void {

@@ -151,6 +151,9 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
 
     public function isPageCacheDiskWritable(): bool
     {
+        $disk = null;
+        $probeFile = null;
+
         try {
             $disk = Storage::disk(self::PAGE_CACHE_DISK);
             $probeFile = '.html-cache-health-' . bin2hex(random_bytes(8)) . '.tmp';
@@ -159,12 +162,17 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
                 return false;
             }
 
-            $written = $disk->get($probeFile) === 'ok';
-            $disk->delete($probeFile);
-
-            return $written;
+            return $disk->get($probeFile) === 'ok';
         } catch (Throwable) {
             return false;
+        } finally {
+            if ($disk !== null && $probeFile !== null) {
+                try {
+                    $disk->delete($probeFile);
+                } catch (Throwable) {
+                    // Cleanup is best-effort; the probe result above is the diagnostic signal.
+                }
+            }
         }
     }
 

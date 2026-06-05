@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Capell\HtmlCache\Health\HtmlCacheHealthCheck;
+
 it('keeps html cache marketplace and composer copy outcome-led and aligned', function (): void {
     $packagePath = dirname(__DIR__, 2);
     $manifest = htmlCacheJsonFile($packagePath . '/capell.json');
@@ -15,6 +17,19 @@ it('keeps html cache marketplace and composer copy outcome-led and aligned', fun
         ->and(data_get($manifest, 'marketplace.summary'))->toBe($summary)
         ->and(htmlCacheTextFile($packagePath . '/README.md'))->toContain($description)
         ->and(htmlCacheTextFile($packagePath . '/docs/README.md'))->toContain($description);
+});
+
+it('registers the real html cache health check with diagnostics', function (): void {
+    $packagePath = dirname(__DIR__, 2);
+    $manifest = htmlCacheJsonFile($packagePath . '/capell.json');
+    $healthChecks = collect($manifest['healthChecks'] ?? []);
+
+    $healthCheck = $healthChecks->firstWhere('key', 'html-cache.package-health');
+
+    expect($healthCheck)->toBeArray()
+        ->and($healthCheck['class'] ?? null)->toBe(HtmlCacheHealthCheck::class)
+        ->and($healthCheck['severity'] ?? null)->toBe('critical')
+        ->and($healthCheck['surface'] ?? null)->toBe('admin');
 });
 
 /**

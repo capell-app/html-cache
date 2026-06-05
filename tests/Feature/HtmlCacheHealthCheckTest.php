@@ -37,6 +37,15 @@ it('reports the disk writable, middleware wired, and tables present checks indiv
         ->and($check->missingTables())->toBe([]);
 });
 
+it('cleans up the writable disk probe file', function (): void {
+    Storage::fake('page_cache');
+
+    $check = new HtmlCacheHealthCheck;
+
+    expect($check->isPageCacheDiskWritable())->toBeTrue()
+        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+});
+
 it('fails the storage tables diagnostic when an html cache table is missing', function (): void {
     Storage::fake('page_cache');
 

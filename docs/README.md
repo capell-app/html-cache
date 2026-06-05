@@ -1,6 +1,6 @@
 # HTML Cache Docs
 
-Static HTML cache, dependency indexing, and cache administration for Capell.
+Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 
 Start at the [package README](../README.md) when deciding whether to install this package. Use the docs below for setup, extension, debugging, and verification details.
 

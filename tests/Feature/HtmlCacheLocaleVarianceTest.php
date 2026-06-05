@@ -78,6 +78,7 @@ it('bypasses same host and path locale variants negotiated by configured headers
 
     $frenchRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $frenchRequest->headers->set('Accept-Language', 'fr');
+
     app()->instance('request', $frenchRequest);
 
     $frenchResponse = resolve(HtmlCacheMiddleware::class)->handle(

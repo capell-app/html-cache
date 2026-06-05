@@ -142,7 +142,7 @@ final class ConfiguredHtmlCacheBypassRules
     private function headerNames(Request $request): array
     {
         return array_values(array_unique(array_map(
-            static fn (string $headerName): string => Str::lower($headerName),
+            Str::lower(...),
             $request->headers->keys(),
         )));
     }

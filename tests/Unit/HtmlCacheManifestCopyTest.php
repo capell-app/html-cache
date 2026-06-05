@@ -22,12 +22,15 @@ it('keeps html cache marketplace and composer copy outcome-led and aligned', fun
 it('registers the real html cache health check with diagnostics', function (): void {
     $packagePath = dirname(__DIR__, 2);
     $manifest = htmlCacheJsonFile($packagePath . '/capell.json');
-    $healthChecks = collect($manifest['healthChecks'] ?? []);
+    $healthChecks = $manifest['healthChecks'] ?? [];
+    throw_unless(is_array($healthChecks), RuntimeException::class, 'Expected html cache health checks manifest data.');
 
-    $healthCheck = $healthChecks->firstWhere('key', 'html-cache.package-health');
+    $healthCheck = collect($healthChecks)->firstWhere('key', 'html-cache.package-health');
 
-    expect($healthCheck)->toBeArray()
-        ->and($healthCheck['class'] ?? null)->toBe(HtmlCacheHealthCheck::class)
+    expect($healthCheck)->toBeArray();
+    throw_unless(is_array($healthCheck), RuntimeException::class, 'Expected html cache health check manifest data.');
+
+    expect($healthCheck['class'] ?? null)->toBe(HtmlCacheHealthCheck::class)
         ->and($healthCheck['severity'] ?? null)->toBe('critical')
         ->and($healthCheck['surface'] ?? null)->toBe('admin');
 });
@@ -37,7 +40,11 @@ it('registers the real html cache health check with diagnostics', function (): v
  */
 function htmlCacheJsonFile(string $path): array
 {
-    return json_decode(htmlCacheTextFile($path), true, flags: JSON_THROW_ON_ERROR);
+    $decoded = json_decode(htmlCacheTextFile($path), true, flags: JSON_THROW_ON_ERROR);
+    throw_unless(is_array($decoded), RuntimeException::class, 'Expected JSON object or array.');
+
+    /** @var array<string, mixed> $decoded */
+    return $decoded;
 }
 
 function htmlCacheTextFile(string $path): string

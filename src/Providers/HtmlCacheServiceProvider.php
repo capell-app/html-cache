@@ -279,7 +279,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerModelInvalidationHooks(): self
     {
-        $routeModelClasses = [Page::class, Translation::class, PageUrl::class];
+        $routeModelClasses = [Page::class, PageUrl::class];
 
         foreach ($routeModelClasses as $modelClass) {
             $modelClass::created(function (Model $model): mixed {
@@ -317,7 +317,17 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         foreach (CapellCore::getModels() as $modelClass) {
             if ($modelClass === Translation::class) {
+                $modelClass::created(function (Model $model): mixed {
+                    $this->dispatchClearCachedUrlsForModel($model);
+
+                    return null;
+                });
                 $modelClass::updated(function (Model $model): mixed {
+                    $this->dispatchClearCachedUrlsForModel($model);
+
+                    return null;
+                });
+                $modelClass::deleted(function (Model $model): mixed {
                     $this->dispatchClearCachedUrlsForModel($model);
 
                     return null;

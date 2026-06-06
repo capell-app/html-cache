@@ -45,7 +45,7 @@ Install the core baseline and `capell-app/html-cache`, run migrations, warm at l
 
 ## Screenshot Coverage
 
-The screenshot contract should cover the maintenance page, cached URL index, dashboard widgets, page/site admin extensions, site health cache-map output, a public cache hit, and a static maintenance page.
+The screenshot contract covers the maintenance page, cached URL index, dashboard widgets, page/site admin extensions, site health cache-map output, a public cache hit, and a static maintenance page. All seven captures are committed under `docs/screenshots/` and promoted into marketplace media.
 
 ## Public Safety Checks
 

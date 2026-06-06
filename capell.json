@@ -13,20 +13,27 @@
         "bundle": "foundation"
     },
     "namespace": "Capell\\HtmlCache",
-    "surfaces": ["admin", "frontend"],
+    "surfaces": [
+        "admin",
+        "frontend"
+    ],
     "dependencies": {
         "requires": [
             "capell-app/admin",
             "capell-app/core",
             "capell-app/frontend"
         ],
-        "supports": ["capell-app/site-discovery"],
+        "supports": [
+            "capell-app/site-discovery"
+        ],
         "conflicts": []
     },
     "providers": {
         "metadata": [],
         "install": [],
-        "runtime": ["Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"],
+        "runtime": [
+            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"
+        ],
         "admin": [],
         "frontend": []
     },
@@ -43,15 +50,25 @@
         "doctor": null
     },
     "settings": [],
-    "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
-    "capabilities": ["cache-blocking"],
+    "permissions": [
+        "capell-html-cache.view",
+        "capell-html-cache.clear"
+    ],
+    "capabilities": [
+        "cache-blocking"
+    ],
     "performance": {
         "frontendRenderBudgetMs": 20,
         "adminQueryBudget": 40,
-        "cacheTags": ["html-cache"],
+        "cacheTags": [
+            "html-cache"
+        ],
         "cacheSafety": {
             "cacheable": false,
-            "variesBy": ["site", "locale"],
+            "variesBy": [
+                "site",
+                "locale"
+            ],
             "sensitiveOutput": false,
             "invalidationSources": [],
             "queueInvalidation": true
@@ -79,11 +96,53 @@
                 "path": "docs/assets/marketplace/extension-card.jpg",
                 "alt": "HTML Cache extension preview image",
                 "caption": "HTML Cache extension preview"
+            },
+            {
+                "path": "docs/screenshots/html-cache-maintenance-cache-page.png",
+                "alt": "HTML Cache maintenance cache page in Capell admin",
+                "caption": "Maintenance cache page"
+            },
+            {
+                "path": "docs/screenshots/html-cache-cached-model-urls.png",
+                "alt": "HTML Cache cached model URLs resource index in Capell admin",
+                "caption": "Cached model URLs"
+            },
+            {
+                "path": "docs/screenshots/html-cache-dashboard-widgets.png",
+                "alt": "HTML Cache dashboard widgets for overview, coverage, and stale queue",
+                "caption": "Dashboard widgets"
+            },
+            {
+                "path": "docs/screenshots/html-cache-site-health-cache-map.png",
+                "alt": "HTML Cache site health cache-map diagnostics in Capell admin",
+                "caption": "Site health cache map"
+            },
+            {
+                "path": "docs/screenshots/html-cache-page-table-extension.png",
+                "alt": "HTML Cache page table cache indicator in the Capell Pages resource",
+                "caption": "Page table cache indicator"
+            },
+            {
+                "path": "docs/screenshots/html-cache-public-cache-hit.png",
+                "alt": "Anonymous public cache hit with safe cached public HTML",
+                "caption": "html cache public cache hit"
+            },
+            {
+                "path": "docs/screenshots/html-cache-maintenance-page.png",
+                "alt": "Static maintenance page output served from generated HTML",
+                "caption": "html cache maintenance page"
             }
         ],
-        "categories": ["admin", "foundation", "frontend"]
+        "categories": [
+            "admin",
+            "foundation",
+            "frontend"
+        ]
     },
-    "scopes": ["backend", "frontend"],
+    "scopes": [
+        "backend",
+        "frontend"
+    ],
     "order": 45,
     "contributionTraceability": {
         "deferredContributions": [

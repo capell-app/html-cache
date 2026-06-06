@@ -19,6 +19,7 @@ use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\GenerateStaticSitesAction;
 use Capell\HtmlCache\Actions\NotifyClearCachedPagesAction;
+use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Components\Tables\Columns\PageCachedIconColumn;
@@ -473,6 +474,22 @@ it('flushes retrieved models through sync and async registration modes', functio
     $deferredStore->flushToUrl('https://retrieved-modes.test/deferred');
 
     expect($deferredStore->tracked($page->getMorphClass()))->toBe(0);
+});
+
+it('records cached model urls using the unique url model row', function (): void {
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('recorded-model.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $url = 'https://recorded-model.test/page';
+
+    RecordCachedModelUrlsAction::run($url, [
+        $page->getMorphClass() => [$page->getKey()],
+    ]);
+
+    RecordCachedModelUrlsAction::run($url, [
+        $page->getMorphClass() => [$page->getKey()],
+    ]);
+
+    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1);
 });
 
 it('registers model retrieval hooks once per request', function (): void {

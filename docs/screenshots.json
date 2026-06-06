@@ -19,9 +19,7 @@
             "scenario": "runner-fixture-admin",
             "url": "/screenshot-fixtures/html-cache/html-cache-maintenance-cache-page",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-cached-model-urls",
@@ -37,9 +35,7 @@
             "scenario": "runner-fixture-admin",
             "url": "/screenshot-fixtures/html-cache/html-cache-cached-model-urls",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-dashboard-widgets",
@@ -55,9 +51,7 @@
             "scenario": "runner-fixture-admin",
             "url": "/screenshot-fixtures/html-cache/html-cache-dashboard-widgets",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-site-health-cache-map",
@@ -73,9 +67,7 @@
             "scenario": "runner-fixture-admin",
             "url": "/screenshot-fixtures/html-cache/html-cache-site-health-cache-map",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-page-table-extension",
@@ -91,9 +83,7 @@
             "scenario": "runner-fixture-admin",
             "url": "/screenshot-fixtures/html-cache/html-cache-page-table-extension",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-public-cache-hit",
@@ -109,9 +99,7 @@
             "scenario": "runner-fixture-frontend",
             "url": "/screenshot-fixtures/html-cache/html-cache-public-cache-hit",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         },
         {
             "id": "html-cache-maintenance-page",
@@ -127,9 +115,7 @@
             "scenario": "runner-fixture-frontend",
             "url": "/screenshot-fixtures/html-cache/html-cache-maintenance-page",
             "waitFor": ".html-cache",
-            "colorSchemes": [
-                "light"
-            ]
+            "colorSchemes": ["light"]
         }
     ]
 }

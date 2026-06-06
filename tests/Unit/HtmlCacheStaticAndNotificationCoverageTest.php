@@ -482,9 +482,7 @@ it('records cached model urls using the unique url model row', function (): void
     $pageKey = $page->getKey();
     $url = 'https://recorded-model.test/page';
 
-    if (! is_int($pageKey)) {
-        throw new RuntimeException('Expected residual coverage page to use an integer key.');
-    }
+    throw_unless(is_int($pageKey), RuntimeException::class, 'Expected residual coverage page to use an integer key.');
 
     RecordCachedModelUrlsAction::run($url, [
         $page->getMorphClass() => [$pageKey],

@@ -479,14 +479,19 @@ it('flushes retrieved models through sync and async registration modes', functio
 it('records cached model urls using the unique url model row', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('recorded-model.test');
     $page = htmlCacheResidualCoveragePage($siteDomain);
+    $pageKey = $page->getKey();
     $url = 'https://recorded-model.test/page';
 
+    if (! is_int($pageKey)) {
+        throw new RuntimeException('Expected residual coverage page to use an integer key.');
+    }
+
     RecordCachedModelUrlsAction::run($url, [
-        $page->getMorphClass() => [$page->getKey()],
+        $page->getMorphClass() => [$pageKey],
     ]);
 
     RecordCachedModelUrlsAction::run($url, [
-        $page->getMorphClass() => [$page->getKey()],
+        $page->getMorphClass() => [$pageKey],
     ]);
 
     expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1);

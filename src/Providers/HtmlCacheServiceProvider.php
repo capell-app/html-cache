@@ -98,11 +98,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
-        $this->app->singleton(CachePurger::class, function (): CachePurger {
-            return config('capell-html-cache.purge.driver') === 'http'
+        $this->app->singleton(CachePurger::class, fn (): CachePurger => config('capell-html-cache.purge.driver') === 'http'
                 ? $this->app->make(HttpSurrogateKeyCachePurger::class)
-                : $this->app->make(NullCachePurger::class);
-        });
+                : $this->app->make(NullCachePurger::class));
         $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());
@@ -351,6 +349,14 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         Event::listen('eloquent.deleted: *', [HtmlCacheModelInvalidationObserver::class, 'deletedFromEvent']);
 
         return $this;
+    }
+
+    private function isTimestampOnlyUpdate(Model $model): bool
+    {
+        $changedAttributes = array_keys($model->getChanges());
+
+        return $changedAttributes !== []
+            && array_diff($changedAttributes, [$model->getUpdatedAtColumn()]) === [];
     }
 
     /**

@@ -25,6 +25,9 @@ return [
         'browser_max_age' => (int) Env::get('CAPELL_HTML_CACHE_BROWSER_MAX_AGE', 60),
         'stale_while_revalidate' => (int) Env::get('CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE', 86400),
     ],
+    'origin_stale_while_revalidate' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
+    ],
     'cache_vary_headers' => ['Accept-Encoding'],
     'purge' => [
         /*

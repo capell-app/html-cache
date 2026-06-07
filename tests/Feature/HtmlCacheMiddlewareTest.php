@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Models\Page;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
@@ -10,6 +11,7 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
@@ -19,6 +21,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -700,6 +703,54 @@ it('strips configured cookies from anonymous cache hits', function (): void {
         ->and($cachedModelUrl->refresh()->hit_count)->toBe(1)
         ->and($cachedModelUrl->bytes_served)->toBe(strlen('cached html'))
         ->and($cachedModelUrl->last_hit_at)->not->toBeNull();
+});
+
+it('serves stale cached html while refreshing the origin cache after response', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.origin_stale_while_revalidate.enabled', true);
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/stale';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/stale', $siteDomain);
+
+    bindHtmlCacheFrontendContext($page);
+    Storage::disk('page_cache')->put($cachePath, 'old cached html');
+    Route::get('/stale', fn (): Response => response('fresh cached html', 200, ['Content-Type' => 'text/html']));
+
+    $staleCachedUrl = StaleCachedUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/stale',
+        'stale_key' => StaleCachedUrl::staleKey(CachedModelUrl::hashUrl($url), $siteDomain->site_id, $siteDomain->getKey(), '/stale'),
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cache_path' => $cachePath,
+        'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/stale', $siteDomain, error: true),
+        'reason' => 'test',
+        'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    $request = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('uncached fallback', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->getContent())->toBe('old cached html')
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached html')
+        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($staleCachedUrl->processed_at)->not->toBeNull();
 });
 
 it('wraps web middleware before stripping cacheable response cookies', function (): void {

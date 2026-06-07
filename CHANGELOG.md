@@ -11,6 +11,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 - Added a `CachePurger` contract with null and HTTP surrogate-key purge drivers, plus config for edge purge endpoint, token, method, header, and timeout.
 - Added cache-hit telemetry for cached URLs, including hit counts, bytes served, last-hit timestamps, and dashboard coverage row output.
 - Replaced per-model generic invalidation closures with a single wildcard Eloquent observer path while preserving explicit route-structure invalidation handlers.
+- Added origin stale-while-revalidate so stale cache files can be served while a claimed refresh runs after the response.
 - Tightened HTML cache health diagnostics so the critical check verifies the `frontend.cache` alias is present in the frontend route middleware registry and covers missing scheduled stale-processing command registration.
 
 ## 2026-06-03

@@ -1,6 +1,6 @@
 # HTML Cache
 
-Static HTML cache, dependency indexing, and cache administration for Capell.
+Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 
 ## At A Glance
 
@@ -13,7 +13,7 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 
 ## Why It Helps Your Capell Workflow
 
-- Adds static HTML cache indexing, dependency tracking, and admin cache controls for Capell public pages.
+- Serves Capell public pages as static HTML for fast anonymous responses while preserving dependency-aware invalidation.
 - Helps operators see stale cached URLs and refresh affected pages without manually clearing broad caches.
 - Protects public-output safety by keeping cached HTML suitable for anonymous visitors, admins, crawlers, and static exports.
 
@@ -25,7 +25,7 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 
 ## What It Adds
 
-- Static HTML cache, dependency indexing, and cache administration for Capell.
+- Full-page static HTML cache with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 - Admin resources: `CachedModelUrlResource`.
 - Admin page: `MaintenanceCachePage`.
 - Dashboard widgets for cache overview, cache coverage, and stale regeneration queue.
@@ -62,6 +62,10 @@ Static HTML cache, dependency indexing, and cache administration for Capell.
 - Livewire: `SiteHealthCacheMap`.
 - Jobs: `RegisterCachedModelUrlsJob`.
 - Integration: registers `StaticMaintenancePageStore` so Capell frontend maintenance pages can use the `page_cache` disk when this package is installed.
+- Public cache headers are configured through `capell-html-cache.http_cache`; the filesystem cache itself has no TTL and is cleared or refreshed by invalidation.
+- Edge/CDN invalidation is available through `CachePurger`: the default null driver keeps local invalidation only, while the `http` driver sends normalized `Surrogate-Key` values to a configured purge endpoint.
+- Access Gate active-area checks are cached briefly through `capell-html-cache.access_gate.active_area_cache_seconds` so anonymous cache decisions do not query the access gate table on every request.
+- Shared-URL locale or segment negotiation should be listed in `capell-html-cache.bypass.headers` / `bypass.cookies` so those variants never read or write the host+path HTML cache entry.
 
 ## Commands
 
@@ -89,6 +93,8 @@ Generated files are written under `maintenance/` on the `page_cache` disk. The m
 
 - Install with `composer require capell-app/html-cache` in the host Capell application.
 - Run migrations through the host application package install flow.
+- Tune `CAPELL_HTML_CACHE_SHARED_MAX_AGE`, `CAPELL_HTML_CACHE_BROWSER_MAX_AGE`, and `CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE` when CDN/browser cache headers need to differ from the defaults.
+- Set `CAPELL_HTML_CACHE_PURGE_DRIVER=http`, `CAPELL_HTML_CACHE_PURGE_ENDPOINT`, and optional `CAPELL_HTML_CACHE_PURGE_TOKEN` to purge an edge cache by surrogate key when local cached URLs are cleared.
 - In this repository, verify package changes with `vendor/bin/pest`; do not use `php artisan`.
 
 ## Docs

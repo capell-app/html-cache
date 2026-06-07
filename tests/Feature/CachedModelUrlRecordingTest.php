@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Models\Language;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
@@ -130,6 +131,79 @@ it('clears cached files and table rows for a url', function (): void {
         ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
+});
+
+it('does not clear unrelated cached html when a non-route core model is created', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    Storage::disk('page_cache')->put($cachePath, 'cached page');
+    CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    Language::factory()->create();
+
+    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
+        ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeTrue();
+});
+
+it('does not clear unrelated cached html when a translation is created', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    Storage::disk('page_cache')->put($cachePath, 'cached page');
+    CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    Translation::factory()
+        ->translatable($page)
+        ->language(Language::factory()->create())
+        ->create();
+
+    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
+        ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeTrue();
 });
 
 it('marks model cached urls stale in scheduled invalidation mode without deleting the current cache', function (): void {

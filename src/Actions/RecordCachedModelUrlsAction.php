@@ -55,21 +55,34 @@ final class RecordCachedModelUrlsAction
                     }
 
                     $seenKeys[] = $cacheableType . ':' . $cacheableId;
-                    $attributes = [
-                        'url_hash' => $urlHash,
-                        'cacheable_type' => $cacheableType,
-                        'cacheable_id' => $cacheableId,
-                    ];
                     $existing = CachedModelUrl::query()
-                        ->where($attributes)
+                        ->where([
+                            'url_hash' => $urlHash,
+                            'cacheable_type' => $cacheableType,
+                            'cacheable_id' => $cacheableId,
+                        ])
                         ->first();
 
                     if ($existing instanceof CachedModelUrl && $existing->last_seen_at instanceof CarbonInterface && $existing->last_seen_at->greaterThan($now)) {
                         continue;
                     }
 
-                    CachedModelUrl::query()->updateOrCreate(
-                        $attributes,
+                    CachedModelUrl::query()->upsert(
+                        [
+                            [
+                                'url_hash' => $urlHash,
+                                'cacheable_type' => $cacheableType,
+                                'cacheable_id' => $cacheableId,
+                                'url' => $url,
+                                'path' => $path,
+                                'site_id' => $siteDomain?->site_id,
+                                'site_domain_id' => $siteDomain?->getKey(),
+                                'language_id' => $siteDomain?->language_id,
+                                'cached_at' => $now,
+                                'last_seen_at' => $now,
+                            ],
+                        ],
+                        ['url_hash', 'cacheable_type', 'cacheable_id'],
                         [
                             'url' => $url,
                             'path' => $path,

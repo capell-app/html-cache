@@ -65,8 +65,12 @@ final class BuildHtmlCacheUrlRowsAction
             ->selectRaw('MAX(id) as id')
             ->selectRaw('MAX(cached_at) as cached_at')
             ->selectRaw('MAX(last_seen_at) as last_seen_at')
+            ->selectRaw('MAX(hit_count) as hit_count')
+            ->selectRaw('MAX(bytes_served) as bytes_served')
+            ->selectRaw('MAX(last_hit_at) as last_hit_at')
             ->groupBy('url_hash', 'url', 'site_id', 'language_id')
-            ->latest('last_seen_at')
+            ->orderByDesc('last_hit_at')
+            ->orderByDesc('last_seen_at')
             ->limit($limit)
             ->get()
             ->map($this->cachedRow(...))
@@ -100,8 +104,8 @@ final class BuildHtmlCacheUrlRowsAction
             'state' => (string) __('capell-html-cache::dashboard.cached'),
             'url' => $cachedUrl->url,
             'site' => (string) ($cachedUrl->site->name ?? __('capell-html-cache::dashboard.not_available')),
-            'hits' => (string) __('capell-html-cache::dashboard.not_tracked'),
-            'last_hit' => (string) __('capell-html-cache::dashboard.not_tracked'),
+            'hits' => number_format((int) $cachedUrl->getAttribute('hit_count')),
+            'last_hit' => $this->dateForHumans($cachedUrl->getAttribute('last_hit_at')),
             'cached_at' => $this->dateForHumans($cachedUrl->getAttribute('cached_at')),
             'last_seen' => $this->dateForHumans($cachedUrl->getAttribute('last_seen_at')),
         ];

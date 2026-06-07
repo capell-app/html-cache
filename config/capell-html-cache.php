@@ -9,8 +9,62 @@ return [
     'write_enabled' => Env::get('CAPELL_WRITE_HTML_CACHE', true),
     'minify_html' => Env::get('CAPELL_MINIFY_HTML', true),
     'cache_ttl' => 3600,
+    'http_cache' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Public response cache-control ages
+        |--------------------------------------------------------------------------
+        |
+        | The filesystem page cache itself has no TTL; files live until model,
+        | route, or manual invalidation clears or refreshes them. These values
+        | only control HTTP/CDN cache headers on public cacheable responses.
+        | When shared_max_age is null, it falls back to cache_ttl / 6 for
+        | backwards-compatible headers.
+        */
+        'shared_max_age' => Env::get('CAPELL_HTML_CACHE_SHARED_MAX_AGE'),
+        'browser_max_age' => (int) Env::get('CAPELL_HTML_CACHE_BROWSER_MAX_AGE', 60),
+        'stale_while_revalidate' => (int) Env::get('CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE', 86400),
+    ],
+    'origin_stale_while_revalidate' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
+    ],
     'cache_vary_headers' => ['Accept-Encoding'],
+    'purge' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Edge/CDN surrogate-key purge
+        |--------------------------------------------------------------------------
+        |
+        | The null driver keeps local filesystem invalidation only. The http
+        | driver sends normalized surrogate keys to a CDN, reverse proxy, or
+        | webhook endpoint whenever cached URLs are cleared locally.
+        */
+        'driver' => Env::get('CAPELL_HTML_CACHE_PURGE_DRIVER', 'null'),
+        'endpoint' => Env::get('CAPELL_HTML_CACHE_PURGE_ENDPOINT'),
+        'token' => Env::get('CAPELL_HTML_CACHE_PURGE_TOKEN'),
+        'method' => Env::get('CAPELL_HTML_CACHE_PURGE_METHOD', 'post'),
+        'surrogate_key_header' => Env::get('CAPELL_HTML_CACHE_PURGE_HEADER', 'Surrogate-Key'),
+        'timeout_seconds' => (int) Env::get('CAPELL_HTML_CACHE_PURGE_TIMEOUT_SECONDS', 5),
+    ],
     'cache_skip_authenticated' => true,
+    'bypass' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Operator-controlled cache bypass rules
+        |--------------------------------------------------------------------------
+        |
+        | Paths, cookie names, and header names support Laravel wildcard matching.
+        | Use these for public URLs, personalization cookies, or locale/segment
+        | headers that should never be read from or written to the shared HTML
+        | cache, such as /cart, /account/*, currency, or Accept-Language.
+        */
+        'paths' => [],
+        'cookies' => [],
+        'headers' => [],
+    ],
+    'access_gate' => [
+        'active_area_cache_seconds' => (int) Env::get('CAPELL_HTML_CACHE_ACCESS_GATE_AREA_CACHE_SECONDS', 5),
+    ],
     'invalidation' => [
         'mode' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_MODE', 'instant'),
         'schedule' => Env::get('CAPELL_HTML_CACHE_INVALIDATION_SCHEDULE', 'everyFiveMinutes'),

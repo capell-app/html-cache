@@ -13,26 +13,27 @@ use Capell\Admin\Contracts\Extenders\PageTableExtender;
 use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
+use Capell\Core\Exceptions\UrlMissingSiteDomainException;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
-use Capell\Core\Models\Translation;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
 use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\Frontend\Contracts\StaticMaintenancePageStore;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
-use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
+use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
-use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
+use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
+use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
@@ -44,6 +45,8 @@ use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
+use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
+use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
@@ -51,6 +54,8 @@ use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
+use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
@@ -60,6 +65,7 @@ use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
 use Override;
@@ -80,7 +86,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasTranslations()
             ->hasViews('capell-html-cache')
             ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
-            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table');
+            ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
+            ->hasMigration('2026_06_07_000001_add_telemetry_to_cached_model_urls_table');
     }
 
     public function registeringPackage(): void
@@ -91,6 +98,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(CachePurger::class, fn (): CachePurger => config('capell-html-cache.purge.driver') === 'http'
+                ? $this->app->make(HttpSurrogateKeyCachePurger::class)
+                : $this->app->make(NullCachePurger::class));
+        $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());
         $this->app->scoped(RetrievedModelStore::class, fn (): RetrievedModelStore => new RetrievedModelStore);
@@ -277,9 +288,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerModelInvalidationHooks(): self
     {
-        $routeModelClasses = [Page::class, Translation::class, PageUrl::class];
+        $broadRouteModelClasses = [Page::class];
 
-        foreach ($routeModelClasses as $modelClass) {
+        foreach ($broadRouteModelClasses as $modelClass) {
             $modelClass::created(function (Model $model): mixed {
                 $this->dispatchClearAllHtmlCache();
 
@@ -291,6 +302,26 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 return null;
             });
         }
+
+        PageUrl::created(function (PageUrl $pageUrl): mixed {
+            $this->dispatchClearPageUrlCache($pageUrl);
+
+            return null;
+        });
+        PageUrl::updated(function (PageUrl $pageUrl): mixed {
+            if ($this->isTimestampOnlyUpdate($pageUrl)) {
+                return null;
+            }
+
+            $this->dispatchClearPageUrlCache($pageUrl);
+
+            return null;
+        });
+        PageUrl::deleted(function (PageUrl $pageUrl): mixed {
+            $this->dispatchClearPageUrlCache($pageUrl);
+
+            return null;
+        });
 
         SiteDomain::saved(function (SiteDomain $siteDomain): mixed {
             if (! $siteDomain->wasRecentlyCreated && ! $siteDomain->wasChanged(['scheme', 'domain', 'path', 'site_id', 'language_id'])) {
@@ -313,38 +344,19 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return null;
         });
 
-        foreach (CapellCore::getModels() as $modelClass) {
-            if ($modelClass === Translation::class) {
-                $modelClass::updated(function (Model $model): mixed {
-                    $this->dispatchClearAllHtmlCache();
-
-                    return null;
-                });
-
-                continue;
-            }
-
-            $modelClass::updated(function (Model $model): mixed {
-                $this->dispatchClearCachedUrlsForModel($model);
-
-                return null;
-            });
-
-            if (! in_array($modelClass, $routeModelClasses, true)) {
-                $modelClass::created(function (Model $model): mixed {
-                    $this->dispatchClearAllHtmlCache();
-
-                    return null;
-                });
-                $modelClass::deleted(function (Model $model): mixed {
-                    $this->dispatchClearCachedUrlsForModel($model);
-
-                    return null;
-                });
-            }
-        }
+        Event::listen('eloquent.created: *', [HtmlCacheModelInvalidationObserver::class, 'createdFromEvent']);
+        Event::listen('eloquent.updated: *', [HtmlCacheModelInvalidationObserver::class, 'updatedFromEvent']);
+        Event::listen('eloquent.deleted: *', [HtmlCacheModelInvalidationObserver::class, 'deletedFromEvent']);
 
         return $this;
+    }
+
+    private function isTimestampOnlyUpdate(Model $model): bool
+    {
+        $changedAttributes = array_keys($model->getChanges());
+
+        return $changedAttributes !== []
+            && array_diff($changedAttributes, [$model->getUpdatedAtColumn()]) === [];
     }
 
     /**
@@ -384,30 +396,42 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         ClearAllHtmlCacheAction::dispatchAfterResponse();
     }
 
-    private function dispatchClearCachedUrlsForModel(Model $model): void
+    private function dispatchClearPageUrlCache(PageUrl $pageUrl): void
     {
-        $morphClass = $model->getMorphClass();
-        $modelKey = (int) $model->getKey();
+        $url = $this->pageUrlFullUrl($pageUrl);
+
+        if ($url === null) {
+            return;
+        }
 
         if ($this->usesScheduledInvalidation()) {
             if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-                MarkCachedUrlsForModelStaleAction::dispatchSync($morphClass, $modelKey);
+                MarkCachedUrlStaleAction::dispatchSync($url, 'page_url_changed');
 
                 return;
             }
 
-            MarkCachedUrlsForModelStaleAction::dispatchAfterResponse($morphClass, $modelKey);
+            MarkCachedUrlStaleAction::dispatchAfterResponse($url, 'page_url_changed');
 
             return;
         }
 
         if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearCachedUrlsForModelAction::dispatchSync($morphClass, $modelKey);
+            ClearCachedUrlAction::dispatchSync($url);
 
             return;
         }
 
-        ClearCachedUrlsForModelAction::dispatchAfterResponse($morphClass, $modelKey);
+        ClearCachedUrlAction::dispatchAfterResponse($url);
+    }
+
+    private function pageUrlFullUrl(PageUrl $pageUrl): ?string
+    {
+        try {
+            return $pageUrl->fullUrl();
+        } catch (UrlMissingSiteDomainException) {
+            return null;
+        }
     }
 
     private function registerCommands(): self

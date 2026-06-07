@@ -13,15 +13,18 @@ use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
+use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
+use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
+use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -42,6 +45,10 @@ final class HtmlCacheMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
+            return $this->privateNoStore($next($request));
+        }
 
         if ($this->shouldBypassForAccessGate($request)) {
             return $this->privateNoStore($next($request));
@@ -77,12 +84,18 @@ final class HtmlCacheMiddleware
             $cachedPage = $pageCache->getCachePage($request);
 
             if (is_string($cachedPage)) {
+                RecordHtmlCacheHitAction::run($request, strlen($cachedPage));
+                $this->refreshStaleCachedUrlAfterResponse($request);
+
                 return $this->cacheHitResponse($cachedPage, 200);
             }
 
             $cachedErrorPage = $pageCache->getCacheErrorPage($request);
 
             if (is_string($cachedErrorPage)) {
+                RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
+                $this->refreshStaleCachedUrlAfterResponse($request);
+
                 return $this->cacheHitResponse($cachedErrorPage, 404);
             }
         }
@@ -147,7 +160,7 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        return $this->hasActiveAccessGateArea();
+        return resolve(ActiveAccessGateAreaResolver::class)->hasActiveArea();
     }
 
     private function hasAccessGateBrowserToken(Request $request): bool
@@ -167,28 +180,6 @@ final class HtmlCacheMiddleware
         return is_string($cookieHeader) && str_contains($cookieHeader, $cookieName . '=');
     }
 
-    private function hasActiveAccessGateArea(): bool
-    {
-        $connectionName = config('access-gate.connection');
-        $schema = is_string($connectionName) && $connectionName !== ''
-            ? Schema::connection($connectionName)
-            : Schema::getFacadeRoot();
-
-        if (! $schema->hasTable('access_gate_areas')) {
-            return false;
-        }
-
-        $defaultAreaKey = config('access-gate.install.default_area.key', 'capell-preview');
-        $query = is_string($connectionName) && $connectionName !== ''
-            ? DB::connection($connectionName)->table('access_gate_areas')
-            : DB::table('access_gate_areas');
-
-        return $query
-            ->where('key', is_string($defaultAreaKey) && $defaultAreaKey !== '' ? $defaultAreaKey : 'capell-preview')
-            ->where('status', 'active')
-            ->exists();
-    }
-
     private function shouldBypassHttpCache(Request $request, Response $response): bool
     {
         if ($request->query->count() > 0 || $this->isInertiaRequest($request) || $response->isServerError()) {
@@ -205,6 +196,10 @@ final class HtmlCacheMiddleware
         }
 
         if ($request->query->has('without_html_cache') || $request->query->count() > 0) {
+            return true;
+        }
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
             return true;
         }
 
@@ -279,6 +274,21 @@ final class HtmlCacheMiddleware
         return $this->applyCacheHeaders(request(), $response, applySurrogateKey: false, forcePublic: true);
     }
 
+    private function refreshStaleCachedUrlAfterResponse(Request $request): void
+    {
+        if (config('capell-html-cache.origin_stale_while_revalidate.enabled', true) !== true) {
+            return;
+        }
+
+        if (app()->runningUnitTests() || app()->runningInConsole()) {
+            RefreshOriginStaleCachedUrlAction::dispatchSync($request->fullUrl());
+
+            return;
+        }
+
+        RefreshOriginStaleCachedUrlAction::dispatchAfterResponse($request->fullUrl());
+    }
+
     private function applyCacheHeaders(
         Request $request,
         Response $response,
@@ -315,13 +325,11 @@ final class HtmlCacheMiddleware
             return $this->privateNoStore($response);
         }
 
-        $configuredCacheTtl = config('capell-html-cache.cache_ttl');
-        $cacheTtl = is_numeric($configuredCacheTtl) ? max(0, (int) $configuredCacheTtl) : 3600;
         $response->headers->set('Cache-Control', sprintf(
             'public, s-maxage=%d, max-age=%d, stale-while-revalidate=%d',
-            intdiv($cacheTtl, 6),
-            60,
-            86400,
+            $this->sharedMaxAge(),
+            $this->browserMaxAge(),
+            $this->staleWhileRevalidateSeconds(),
         ));
         $response->headers->set('Vary', implode(', ', config('capell-html-cache.cache_vary_headers', ['Accept-Encoding'])));
 
@@ -413,18 +421,37 @@ final class HtmlCacheMiddleware
 
     private function stripConfiguredCookies(Response $response): Response
     {
-        $cookiesToRemove = [
-            config('session.cookie'),
-            'XSRF-TOKEN',
-            'PHPDEBUGBAR_STACK_DATA',
-        ];
+        return CacheableResponseCookieStripper::strip($response);
+    }
 
-        foreach ($response->headers->getCookies() as $cookie) {
-            if (in_array($cookie->getName(), $cookiesToRemove, true)) {
-                $response->headers->removeCookie($cookie->getName(), $cookie->getPath(), $cookie->getDomain());
-            }
+    private function sharedMaxAge(): int
+    {
+        $configuredSharedMaxAge = config('capell-html-cache.http_cache.shared_max_age');
+
+        if (is_numeric($configuredSharedMaxAge)) {
+            return max(0, (int) $configuredSharedMaxAge);
         }
 
-        return $response;
+        $configuredCacheTtl = config('capell-html-cache.cache_ttl');
+        $cacheTtl = is_numeric($configuredCacheTtl) ? max(0, (int) $configuredCacheTtl) : 3600;
+
+        return intdiv($cacheTtl, 6);
+    }
+
+    private function browserMaxAge(): int
+    {
+        return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.browser_max_age', 60);
+    }
+
+    private function staleWhileRevalidateSeconds(): int
+    {
+        return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.stale_while_revalidate', 86400);
+    }
+
+    private function nonNegativeConfigInteger(string $key, int $default): int
+    {
+        $value = config($key, $default);
+
+        return is_numeric($value) ? max(0, (int) $value) : $default;
     }
 }

@@ -10,6 +10,8 @@ HTML Cache adds static public HTML caching, cache dependency indexing, stale-reg
 - Dashboard widgets for cache overview, cache coverage URLs, and regeneration queue status.
 - Site health cache-map Livewire component and public cached HTML safety diagnostics.
 - Commands for clearing HTML cache, processing stale cache records, and generating static sites.
+- Configurable public cache-control ages for CDN/browser responses.
+- Short-lived access-gate active-area lookup caching for anonymous cache-read decisions.
 
 ## Install Impact
 
@@ -43,11 +45,15 @@ Install the core baseline and `capell-app/html-cache`, run migrations, warm at l
 
 ## Screenshot Coverage
 
-The screenshot contract should cover the maintenance page, cached URL index, dashboard widgets, page/site admin extensions, site health cache-map output, a public cache hit, and a static maintenance page.
+The screenshot contract covers the maintenance page, cached URL index, dashboard widgets, page/site admin extensions, site health cache-map output, a public cache hit, and a static maintenance page. All seven captures are committed under `docs/screenshots/` and promoted into marketplace media.
 
 ## Public Safety Checks
 
 Anonymous cached HTML must not expose authoring HTML, editor JavaScript, editable markers, model IDs, field paths, permissions, package names, selectors, or signed editor URLs. Keep this check in every final screenshot run for this package.
+
+## Invalidation Notes
+
+Route/structure changes can still clear or stale the full cache map because they affect URL resolution. Leaf model creates and translation updates now use the dependency index, so only cached URLs that recorded the changed model are affected. Cached files on disk do not expire by TTL; they live until invalidation, static generation, or manual cache operations refresh or delete them.
 
 ## Verification
 

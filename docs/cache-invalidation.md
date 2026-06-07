@@ -19,6 +19,8 @@ In `scheduled` mode, model changes insert rows into `stale_cached_urls` instead 
 
 Site-domain scheme, host, path, site, and language mutations still clear the HTML cache immediately, even in scheduled mode. Those changes can make the old file path or public URL unsafe to serve while waiting for the next cycle.
 
+Route/structure model creates and deletes still trigger broad invalidation because they can change public URL resolution. Non-route model creates and translation updates use the dependency index instead: only cached URLs that previously recorded that model are cleared in `instant` mode or marked stale in `scheduled` mode. This avoids cold-starting the full cache when a leaf record is created.
+
 If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete, deletes the old cache files, and removes matching `cached_model_urls` rows.
 
 Failed refreshes retry after the configured backoff until `max_attempts` is reached. Rows that keep failing are marked `exhausted` for diagnostics and manual follow-up instead of being retried forever.
@@ -75,22 +77,29 @@ RecordCachedModelUrlsAction::run($url, [
 
 ## Configuration
 
-| Key                                                         | Purpose                                                                 |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `capell-html-cache.enabled`                                 | Turns HTML cache behaviour on or off.                                   |
-| `capell-html-cache.write_enabled`                           | Allows cache writes. Disable this when investigating output safety.     |
-| `capell-html-cache.minify_html`                             | Controls minification before writing cached HTML.                       |
-| `capell-html-cache.cache_ttl`                               | Default cache TTL.                                                      |
-| `capell-html-cache.cache_skip_authenticated`                | Keeps authenticated responses out of the public cache.                  |
-| `capell-html-cache.invalidation.mode`                       | `instant` or `scheduled`. Default `instant`.                            |
-| `capell-html-cache.invalidation.schedule`                   | Scheduler frequency for stale processing. Default `everyFiveMinutes`.   |
-| `capell-html-cache.invalidation.batch_size`                 | Default stale URL batch size.                                           |
-| `capell-html-cache.invalidation.processing_timeout_minutes` | Minutes before a `processing` stale row may be claimed again.           |
-| `capell-html-cache.invalidation.retry_backoff_minutes`      | Minutes before a failed stale row may be retried.                       |
-| `capell-html-cache.invalidation.max_attempts`               | Maximum refresh attempts before a stale row becomes `exhausted`.        |
-| `capell-html-cache.model_event_registration_mode`           | Controls model event registration timing; default is `deferred`.        |
-| `capell-html-cache.static_generation.internal_requests`     | Lets static generation render through the current Laravel kernel.       |
-| `capell-html-cache.public_html_authoring_markers`           | Strings used by diagnostics to detect authoring leakage in public HTML. |
+| Key                                                         | Purpose                                                                                                                                                                          |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capell-html-cache.enabled`                                 | Turns HTML cache behaviour on or off.                                                                                                                                            |
+| `capell-html-cache.write_enabled`                           | Allows cache writes. Disable this when investigating output safety.                                                                                                              |
+| `capell-html-cache.minify_html`                             | Controls minification before writing cached HTML.                                                                                                                                |
+| `capell-html-cache.cache_ttl`                               | Backward-compatible source for shared HTTP cache age when no explicit `shared_max_age` is configured. Filesystem cache entries are invalidation-driven and do not expire by TTL. |
+| `capell-html-cache.http_cache.shared_max_age`               | `s-maxage` value for public cached responses; defaults to `cache_ttl / 6` when unset.                                                                                            |
+| `capell-html-cache.http_cache.browser_max_age`              | Browser `max-age` value for public cached responses.                                                                                                                             |
+| `capell-html-cache.http_cache.stale_while_revalidate`       | CDN/browser `stale-while-revalidate` directive value.                                                                                                                            |
+| `capell-html-cache.cache_skip_authenticated`                | Keeps authenticated responses out of the public cache.                                                                                                                           |
+| `capell-html-cache.bypass.paths`                            | Wildcard path rules that bypass public cache reads and writes.                                                                                                                   |
+| `capell-html-cache.bypass.cookies`                          | Wildcard cookie-name rules that bypass public cache reads and writes. Use for personalization or variant cookies that are not encoded in the URL.                                |
+| `capell-html-cache.bypass.headers`                          | Wildcard header-name rules that bypass public cache reads and writes. Use for shared-URL locale or segment negotiation headers such as `Accept-Language`.                        |
+| `capell-html-cache.access_gate.active_area_cache_seconds`   | Short TTL for the access-gate active-area lookup used by anonymous cache decisions. Set `0` to disable.                                                                          |
+| `capell-html-cache.invalidation.mode`                       | `instant` or `scheduled`. Default `instant`.                                                                                                                                     |
+| `capell-html-cache.invalidation.schedule`                   | Scheduler frequency for stale processing. Default `everyFiveMinutes`.                                                                                                            |
+| `capell-html-cache.invalidation.batch_size`                 | Default stale URL batch size.                                                                                                                                                    |
+| `capell-html-cache.invalidation.processing_timeout_minutes` | Minutes before a `processing` stale row may be claimed again.                                                                                                                    |
+| `capell-html-cache.invalidation.retry_backoff_minutes`      | Minutes before a failed stale row may be retried.                                                                                                                                |
+| `capell-html-cache.invalidation.max_attempts`               | Maximum refresh attempts before a stale row becomes `exhausted`.                                                                                                                 |
+| `capell-html-cache.model_event_registration_mode`           | Controls model event registration timing; default is `deferred`.                                                                                                                 |
+| `capell-html-cache.static_generation.internal_requests`     | Lets static generation render through the current Laravel kernel.                                                                                                                |
+| `capell-html-cache.public_html_authoring_markers`           | Strings used by diagnostics to detect authoring leakage in public HTML.                                                                                                          |
 
 ## Console
 

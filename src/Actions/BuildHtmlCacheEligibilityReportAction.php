@@ -14,6 +14,7 @@ use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Http\Request;
@@ -85,6 +86,10 @@ final class BuildHtmlCacheEligibilityReportAction
 
         if ($request->headers->has('Authorization')) {
             $reasons[] = HtmlCacheEligibilityReason::AuthorizationHeaderPresent;
+        }
+
+        if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($request)) {
+            $reasons[] = HtmlCacheEligibilityReason::ConfiguredBypassRule;
         }
 
         if (config('capell-html-cache.cache_skip_authenticated', true) === true

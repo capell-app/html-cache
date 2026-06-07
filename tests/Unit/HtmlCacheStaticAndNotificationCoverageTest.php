@@ -19,6 +19,7 @@ use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\GenerateStaticSitesAction;
 use Capell\HtmlCache\Actions\NotifyClearCachedPagesAction;
+use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
 use Capell\HtmlCache\Filament\Components\Tables\Columns\PageCachedIconColumn;
@@ -31,6 +32,7 @@ use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
@@ -475,6 +477,25 @@ it('flushes retrieved models through sync and async registration modes', functio
     expect($deferredStore->tracked($page->getMorphClass()))->toBe(0);
 });
 
+it('records cached model urls using the unique url model row', function (): void {
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('recorded-model.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $pageKey = $page->getKey();
+    $url = 'https://recorded-model.test/page';
+
+    throw_unless(is_int($pageKey), RuntimeException::class, 'Expected residual coverage page to use an integer key.');
+
+    RecordCachedModelUrlsAction::run($url, [
+        $page->getMorphClass() => [$pageKey],
+    ]);
+
+    RecordCachedModelUrlsAction::run($url, [
+        $page->getMorphClass() => [$pageKey],
+    ]);
+
+    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1);
+});
+
 it('registers model retrieval hooks once per request', function (): void {
     $request = Request::create('https://events.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
@@ -486,6 +507,45 @@ it('registers model retrieval hooks once per request', function (): void {
     ModelEventRegistrar::registerModels();
 
     expect($request->attributes->get('capell.html_cache.model_events_registered'))->toBeTrue();
+});
+
+it('invalidates cached urls through a single generic model observer', function (): void {
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('global-observer.test');
+    $site = $siteDomain->site;
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    CapellCore::registerModels([Site::class, Page::class]);
+
+    CachedModelUrl::query()->create([
+        'url' => 'https://global-observer.test/site',
+        'url_hash' => CachedModelUrl::hashUrl('https://global-observer.test/site'),
+        'path' => '/site',
+        'site_domain_id' => $siteDomain->id,
+        'site_id' => $siteDomain->site_id,
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $site->getMorphClass(),
+        'cacheable_id' => $site->getKey(),
+    ]);
+    CachedModelUrl::query()->create([
+        'url' => 'https://global-observer.test/page',
+        'url_hash' => CachedModelUrl::hashUrl('https://global-observer.test/page'),
+        'path' => '/page',
+        'site_domain_id' => $siteDomain->id,
+        'site_id' => $siteDomain->site_id,
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+    ]);
+
+    $observer = new HtmlCacheModelInvalidationObserver;
+    $site->forceFill(['name' => 'Updated test site']);
+    $site->syncChanges();
+    $observer->updatedFromEvent('eloquent.updated: ' . $site::class, [$site]);
+    $page->forceFill(['title' => 'Updated test page']);
+    $page->syncChanges();
+    $observer->updatedFromEvent('eloquent.updated: ' . $page::class, [$page]);
+
+    expect(CachedModelUrl::query()->where('url', 'https://global-observer.test/site')->exists())->toBeFalse()
+        ->and(CachedModelUrl::query()->where('url', 'https://global-observer.test/page')->exists())->toBeTrue();
 });
 
 it('builds admin health sections and clears html cache through admin cleaner', function (): void {
@@ -856,10 +916,35 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
         ->and($cache->getCacheErrorPage(Request::create('/missing', Symfony\Component\HttpFoundation\Request::METHOD_GET)))->toBe('missing')
         ->and(File::exists($cachePath . '/feed.xml'))->toBeTrue()
         ->and(File::exists($cachePath . '/data.json'))->toBeTrue()
-        ->and(File::exists($cachePath . '/__invalid__/pc__invalid__pc.html'))->toBeTrue()
+        ->and(File::exists($cachePath . '/__invalid__/pc__invalid__pc.html'))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page?x=1', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_POST), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_INERTIA' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET), new Response('json', Response::HTTP_OK, ['Content-Type' => 'application/json'])))->toBeFalse()
         ->and($cache->shouldCachePage(Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_X_LIVEWIRE' => 'true']), new Response($html, Response::HTTP_OK, ['Content-Type' => 'text/html'])))->toBeFalse();
+});
+
+it('skips page cache reads and writes for oversized hostile request paths', function (): void {
+    $cachePath = storage_path('framework/testing-page-cache-oversized-paths');
+    File::deleteDirectory($cachePath);
+
+    app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
+    {
+        public function shouldBypass(): bool
+        {
+            return false;
+        }
+    });
+
+    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $request = Request::create('/' . str_repeat('a', 5000), Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $response = new Response('<html><body>Not found</body></html>', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']);
+
+    expect($cache->getCachePage($request))->toBeFalse()
+        ->and($cache->getCacheErrorPage($request))->toBeFalse()
+        ->and($cache->shouldCachePage($request, $response))->toBeFalse();
+
+    $cache->cache($request, $response);
+
+    expect(File::exists($cachePath))->toBeFalse();
 });

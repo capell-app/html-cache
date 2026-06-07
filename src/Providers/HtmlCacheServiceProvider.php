@@ -36,6 +36,7 @@ use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
+use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
@@ -55,6 +56,8 @@ use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
+use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
@@ -95,6 +98,11 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(CachePurger::class, function (): CachePurger {
+            return config('capell-html-cache.purge.driver') === 'http'
+                ? $this->app->make(HttpSurrogateKeyCachePurger::class)
+                : $this->app->make(NullCachePurger::class);
+        });
         $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());

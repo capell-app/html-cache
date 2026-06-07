@@ -6,7 +6,11 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
+use Capell\Core\Contracts\Pageable;
+use Capell\Core\Models\Language;
 use Capell\Core\Models\SiteDomain;
+use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
+use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
@@ -34,7 +38,7 @@ final class ClearCachedUrlAction
             $path = null;
         }
 
-        $selectedCachedModelUrl?->loadMissing('siteDomain');
+        $selectedCachedModelUrl?->loadMissing('siteDomain', 'language');
         $path ??= resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($urlString);
         $cachedModelUrls = $this->cachedModelUrls($urlString, $selectedCachedModelUrl);
         $siteDomain ??= $selectedCachedModelUrl?->siteDomain;
@@ -50,12 +54,14 @@ final class ClearCachedUrlAction
 
         if (! $siteDomain instanceof SiteDomain || $siteDomain->domain === null || $siteDomain->domain === '') {
             $this->deleteFilesFromCachedRows($cachedModelUrls);
+            $this->purgeSurrogateKeys($cachedModelUrls);
             $cachedModelUrls->each->delete();
 
             return false;
         }
 
         $this->deleteFilesFromCachedRows($cachedModelUrls);
+        $this->purgeSurrogateKeys($cachedModelUrls);
 
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
@@ -77,7 +83,7 @@ final class ClearCachedUrlAction
     private function cachedModelUrls(string $url, ?CachedModelUrl $selectedCachedModelUrl): Collection
     {
         $query = CachedModelUrl::query()
-            ->with('siteDomain')
+            ->with('siteDomain', 'language')
             ->where('url_hash', CachedModelUrl::hashUrl($url));
 
         if (! $selectedCachedModelUrl instanceof CachedModelUrl) {
@@ -115,6 +121,34 @@ final class ClearCachedUrlAction
 
         foreach (array_unique($files) as $file) {
             $store->delete($file);
+        }
+    }
+
+    /**
+     * @param  Collection<int, CachedModelUrl>  $cachedModelUrls
+     */
+    private function purgeSurrogateKeys(Collection $cachedModelUrls): void
+    {
+        $keys = [];
+
+        foreach ($cachedModelUrls as $cachedModelUrl) {
+            if ($cachedModelUrl->site_id !== null) {
+                $keys[] = 'site-' . $cachedModelUrl->site_id;
+            }
+
+            if ($cachedModelUrl->language instanceof Language) {
+                $keys[] = 'lang-' . $cachedModelUrl->language->code;
+            }
+
+            if (is_a($cachedModelUrl->cacheable_type, Pageable::class, true)) {
+                $keys[] = 'page-' . $cachedModelUrl->cacheable_id;
+            }
+        }
+
+        $keys = SurrogateKeyNormalizer::normalize($keys);
+
+        if ($keys !== []) {
+            resolve(CachePurger::class)->purge($keys);
         }
     }
 }

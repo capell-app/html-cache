@@ -8,6 +8,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 - Narrowed model-event invalidation so non-route model creates and translation updates clear or stale only URLs indexed against that model instead of flushing the entire HTML cache.
 - Added short-lived access-gate active-area lookup caching to keep anonymous cache-read decisions off the access gate table hot path.
 - Added configurable public HTTP cache-control ages (`shared_max_age`, `browser_max_age`, and `stale_while_revalidate`) and documented that filesystem cache files remain invalidation-driven rather than TTL-driven.
+- Added a `CachePurger` contract with null and HTTP surrogate-key purge drivers, plus config for edge purge endpoint, token, method, header, and timeout.
 - Tightened HTML cache health diagnostics so the critical check verifies the `frontend.cache` alias is present in the frontend route middleware registry and covers missing scheduled stale-processing command registration.
 
 ## 2026-06-03
@@ -15,4 +16,4 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 - Replaced the stub `HtmlCacheHealthCheck` with real diagnostics matching its `critical` manifest claim: probes the `page_cache` disk is writable, the `frontend.cache` middleware is wired, the `cached_model_urls` and `stale_cached_urls` tables exist, and the scheduled stale-regeneration command is registered when invalidation mode is `scheduled`.
 - De-duplicated the two cookie-stripping code paths into a single `CacheableResponseCookieStripper`, removing the drift risk between `HtmlCacheMiddleware` and `PreventSessionCookieOnCacheableRequests` that could leak a session/CSRF cookie onto a cacheable response.
 - Rewrote the marketplace summary and composer/manifest descriptions to lead with the performance and public-output-safety outcomes.
-- Noted that `Surrogate-Key` headers are emitted for external CDN consumption but no built-in purge driver consumes them yet (a `CachePurger` contract and CDN driver are planned).
+- Noted that `Surrogate-Key` headers are emitted for external CDN consumption; this is now backed by the configurable HTTP purge driver.

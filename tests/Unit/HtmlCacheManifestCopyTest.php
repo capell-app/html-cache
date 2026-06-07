@@ -15,6 +15,7 @@ it('keeps html cache marketplace and composer copy outcome-led and aligned', fun
     expect($manifest['description'] ?? null)->toBe($description)
         ->and($composer['description'] ?? null)->toBe($description)
         ->and(data_get($manifest, 'marketplace.summary'))->toBe($summary)
+        ->and(data_get($manifest, 'capabilities'))->toContain('full-page-cache', 'cache-blocking', 'surrogate-key-purge')
         ->and(htmlCacheTextFile($packagePath . '/README.md'))->toContain($description)
         ->and(htmlCacheTextFile($packagePath . '/docs/README.md'))->toContain($description);
 });

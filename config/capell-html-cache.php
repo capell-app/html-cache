@@ -26,6 +26,23 @@ return [
         'stale_while_revalidate' => (int) Env::get('CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE', 86400),
     ],
     'cache_vary_headers' => ['Accept-Encoding'],
+    'purge' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Edge/CDN surrogate-key purge
+        |--------------------------------------------------------------------------
+        |
+        | The null driver keeps local filesystem invalidation only. The http
+        | driver sends normalized surrogate keys to a CDN, reverse proxy, or
+        | webhook endpoint whenever cached URLs are cleared locally.
+        */
+        'driver' => Env::get('CAPELL_HTML_CACHE_PURGE_DRIVER', 'null'),
+        'endpoint' => Env::get('CAPELL_HTML_CACHE_PURGE_ENDPOINT'),
+        'token' => Env::get('CAPELL_HTML_CACHE_PURGE_TOKEN'),
+        'method' => Env::get('CAPELL_HTML_CACHE_PURGE_METHOD', 'post'),
+        'surrogate_key_header' => Env::get('CAPELL_HTML_CACHE_PURGE_HEADER', 'Surrogate-Key'),
+        'timeout_seconds' => (int) Env::get('CAPELL_HTML_CACHE_PURGE_TIMEOUT_SECONDS', 5),
+    ],
     'cache_skip_authenticated' => true,
     'bypass' => [
         /*

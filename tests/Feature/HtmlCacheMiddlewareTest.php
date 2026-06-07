@@ -8,6 +8,7 @@ use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
@@ -134,6 +135,18 @@ it('uses configured public cache-control ages for cached responses', function ()
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => 'https://example.test/about',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/about'),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
@@ -683,7 +696,10 @@ it('strips configured cookies from anonymous cache hits', function (): void {
     );
 
     capell_expect($response->getContent())->toBe('cached html')
-        ->and($response->headers->getCookies())->toBe([]);
+        ->and($response->headers->getCookies())->toBe([])
+        ->and($cachedModelUrl->refresh()->hit_count)->toBe(1)
+        ->and($cachedModelUrl->bytes_served)->toBe(strlen('cached html'))
+        ->and($cachedModelUrl->last_hit_at)->not->toBeNull();
 });
 
 it('wraps web middleware before stripping cacheable response cookies', function (): void {

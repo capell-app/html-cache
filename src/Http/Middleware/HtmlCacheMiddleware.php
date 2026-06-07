@@ -13,6 +13,7 @@ use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
@@ -82,12 +83,16 @@ final class HtmlCacheMiddleware
             $cachedPage = $pageCache->getCachePage($request);
 
             if (is_string($cachedPage)) {
+                RecordHtmlCacheHitAction::run($request, strlen($cachedPage));
+
                 return $this->cacheHitResponse($cachedPage, 200);
             }
 
             $cachedErrorPage = $pageCache->getCacheErrorPage($request);
 
             if (is_string($cachedErrorPage)) {
+                RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
+
                 return $this->cacheHitResponse($cachedErrorPage, 404);
             }
         }

@@ -147,6 +147,9 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
             'cacheable_id' => $dependencyId === 1 ? $cachedPage->getKey() : $uncachedPage->getKey(),
             'cached_at' => now()->subHours(2),
             'last_seen_at' => now()->subHour(),
+            'hit_count' => 10,
+            'bytes_served' => 1200,
+            'last_hit_at' => now()->subMinutes(30),
         ]);
     }
 
@@ -190,7 +193,8 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
             'https://example.com/cached',
             'https://example.com/cached',
         ])
-        ->and($lastRow['hits'])->toBe(__('capell-html-cache::dashboard.not_tracked'));
+        ->and($lastRow['hits'])->toBe('10')
+        ->and($lastRow['last_hit'])->not->toBe(__('capell-html-cache::dashboard.not_tracked'));
 });
 
 it('builds stale queue rows with translated states from scoped rows', function (): void {

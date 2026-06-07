@@ -9,6 +9,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 - Added short-lived access-gate active-area lookup caching to keep anonymous cache-read decisions off the access gate table hot path.
 - Added configurable public HTTP cache-control ages (`shared_max_age`, `browser_max_age`, and `stale_while_revalidate`) and documented that filesystem cache files remain invalidation-driven rather than TTL-driven.
 - Added a `CachePurger` contract with null and HTTP surrogate-key purge drivers, plus config for edge purge endpoint, token, method, header, and timeout.
+- Added cache-hit telemetry for cached URLs, including hit counts, bytes served, last-hit timestamps, and dashboard coverage row output.
 - Tightened HTML cache health diagnostics so the critical check verifies the `frontend.cache` alias is present in the frontend route middleware registry and covers missing scheduled stale-processing command registration.
 
 ## 2026-06-03

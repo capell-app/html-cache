@@ -28,6 +28,9 @@ use Override;
  * @property int $cacheable_id
  * @property CarbonImmutable|null $cached_at
  * @property CarbonImmutable|null $last_seen_at
+ * @property int $hit_count
+ * @property int $bytes_served
+ * @property CarbonImmutable|null $last_hit_at
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read Model|null $cacheable
@@ -56,6 +59,9 @@ final class CachedModelUrl extends Model
         'cacheable_id',
         'cached_at',
         'last_seen_at',
+        'hit_count',
+        'bytes_served',
+        'last_hit_at',
     ];
 
     public static function hashUrl(string $url): string
@@ -119,6 +125,7 @@ final class CachedModelUrl extends Model
         return [
             'cached_at' => 'immutable_datetime',
             'last_seen_at' => 'immutable_datetime',
+            'last_hit_at' => 'immutable_datetime',
         ];
     }
 }

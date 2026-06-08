@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
 it('keeps the null cache purger as a successful no-op', function (): void {
@@ -28,7 +29,7 @@ it('sends normalized surrogate keys to the configured http purge endpoint', func
 
     expect($purged)->toBeTrue();
 
-    Http::assertSent(fn (Illuminate\Http\Client\Request $request): bool => $request->url() === 'https://cache.example.test/purge'
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'https://cache.example.test/purge'
         && $request->hasHeader('Authorization', 'Bearer edge-token')
         && $request->hasHeader('Surrogate-Key', 'page-1 site-2')
         && $request['surrogate_keys'] === ['page-1', 'site-2']);

@@ -32,9 +32,9 @@ class MaintenanceCachePage extends Page implements HasActions
 {
     use InteractsWithActions;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedWrenchScrewdriver;
+    protected static ?string $slug = 'html-cache/maintenance-cache';
 
-    protected static ?string $slug = 'maintenance-cache';
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedWrenchScrewdriver;
 
     protected static ?int $navigationSort = 10;
 

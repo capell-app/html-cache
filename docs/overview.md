@@ -25,7 +25,7 @@ HTML Cache adds static public HTML caching, cache dependency indexing, stale-reg
 
 | Surface                     | URL/route expectation           | Notes                                                                               |
 | --------------------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
-| Maintenance cache page      | `/admin/maintenance-cache`      | Generates maintenance page cache and toggles global/per-site maintenance state.     |
+| Maintenance cache page      | `/admin/html-cache/maintenance-cache` | Generates maintenance page cache and toggles global/per-site maintenance state.     |
 | Cached model URLs resource  | Admin resource under Monitoring | Lists cached URLs, model dependencies, site/language scope, and clear/open actions. |
 | Dashboard widgets           | Main admin dashboard            | Shows cache overview, coverage URLs, and stale queue status.                        |
 | Page table extender         | Core Pages resource             | Adds cache state/action context to page tables.                                     |

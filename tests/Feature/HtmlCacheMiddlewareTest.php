@@ -26,6 +26,8 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Cookie;
 
+require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+
 uses(HtmlCacheTestCase::class);
 
 /**

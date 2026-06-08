@@ -687,6 +687,18 @@ it('strips configured cookies from anonymous cache hits', function (): void {
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => 'https://example.test/about',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/about'),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,

@@ -24,14 +24,13 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Collection as SupportCollection;
 use Livewire\Livewire;
 
 uses(HtmlCacheTestCase::class);
 
 /**
- * @param  Collection<array-key, mixed>  $assignedSiteIds
+ * @param  SupportCollection<int, int>  $assignedSiteIds
  */
 function createHtmlCacheDashboardWidgetUser(SupportCollection $assignedSiteIds): Authenticatable
 {

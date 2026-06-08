@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Support\Env;
 
+$integerEnv = static function (string $key, int $default): int {
+    $value = Env::get($key, $default);
+
+    return is_numeric($value) ? (int) $value : $default;
+};
+
 return [
     'enabled' => Env::get('CAPELL_HTML_CACHE', true),
     'write_enabled' => Env::get('CAPELL_WRITE_HTML_CACHE', true),
@@ -79,7 +85,7 @@ return [
     ],
     'site_health_public_html_scan_limit' => (int) Env::get('CAPELL_HTML_CACHE_SITE_HEALTH_SCAN_LIMIT', 100),
     'site_health_unindexed_public_html_scan_limit' => (int) Env::get('CAPELL_HTML_CACHE_SITE_HEALTH_UNINDEXED_SCAN_LIMIT', 25),
-    'site_health_cached_url_limit' => (int) Env::get('CAPELL_HTML_CACHE_SITE_HEALTH_CACHED_URL_LIMIT', 20),
+    'site_health_cached_url_limit' => $integerEnv('CAPELL_HTML_CACHE_SITE_HEALTH_CACHED_URL_LIMIT', 20),
     'public_html_authoring_markers' => [
         'data-capell-authoring',
         'data-capell-editable',

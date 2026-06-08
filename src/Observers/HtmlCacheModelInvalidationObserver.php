@@ -146,7 +146,11 @@ final class HtmlCacheModelInvalidationObserver
     private function dispatchClearCachedUrlsForModel(Model $model): void
     {
         $morphClass = $model->getMorphClass();
-        $modelKey = (int) $model->getKey();
+        $modelKey = $this->integerModelKey($model);
+
+        if ($modelKey === null) {
+            return;
+        }
 
         if (config('capell-html-cache.invalidation.mode', 'instant') === 'scheduled') {
             if (app()->runningUnitTests() || app()->runningInConsole()) {
@@ -167,6 +171,13 @@ final class HtmlCacheModelInvalidationObserver
         }
 
         ClearCachedUrlsForModelAction::dispatchAfterResponse($morphClass, $modelKey);
+    }
+
+    private function integerModelKey(Model $model): ?int
+    {
+        $modelKey = $model->getKey();
+
+        return is_numeric($modelKey) ? (int) $modelKey : null;
     }
 
     private function isTimestampOnlyUpdate(Model $model): bool

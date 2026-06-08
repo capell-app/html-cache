@@ -104,7 +104,7 @@ final class BuildHtmlCacheUrlRowsAction
             'state' => (string) __('capell-html-cache::dashboard.cached'),
             'url' => $cachedUrl->url,
             'site' => (string) ($cachedUrl->site->name ?? __('capell-html-cache::dashboard.not_available')),
-            'hits' => number_format((int) $cachedUrl->getAttribute('hit_count')),
+            'hits' => number_format($this->integerValue($cachedUrl->getAttribute('hit_count'))),
             'last_hit' => $this->dateForHumans($cachedUrl->getAttribute('last_hit_at')),
             'cached_at' => $this->dateForHumans($cachedUrl->getAttribute('cached_at')),
             'last_seen' => $this->dateForHumans($cachedUrl->getAttribute('last_seen_at')),
@@ -144,5 +144,10 @@ final class BuildHtmlCacheUrlRowsAction
         }
 
         return __('capell-html-cache::dashboard.never');
+    }
+
+    private function integerValue(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : 0;
     }
 }

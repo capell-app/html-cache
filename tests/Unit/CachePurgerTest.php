@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
+use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+
+uses(HtmlCacheTestCase::class);
 
 it('keeps the null cache purger as a successful no-op', function (): void {
     expect((new NullCachePurger)->purge(['page-1']))->toBeTrue();

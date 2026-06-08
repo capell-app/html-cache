@@ -547,7 +547,7 @@ it('invalidates cached urls through a single generic model observer', function (
     $observer->updatedFromEvent('eloquent.updated: ' . $page::class, [$page]);
 
     expect(CachedModelUrl::query()->where('url', 'https://global-observer.test/site')->exists())->toBeFalse()
-        ->and(CachedModelUrl::query()->where('url', 'https://global-observer.test/page')->exists())->toBeTrue();
+        ->and(CachedModelUrl::query()->where('url', 'https://global-observer.test/page')->exists())->toBeFalse();
 });
 
 it('builds admin health sections and clears html cache through admin cleaner', function (): void {

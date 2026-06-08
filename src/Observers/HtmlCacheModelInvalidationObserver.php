@@ -104,8 +104,12 @@ final class HtmlCacheModelInvalidationObserver
 
     private function shouldInvalidateForModel(Model $model): bool
     {
-        if ($model instanceof Page || $model instanceof PageUrl) {
+        if ($model instanceof PageUrl) {
             return false;
+        }
+
+        if ($model instanceof Page) {
+            return true;
         }
 
         if ($model instanceof Translation) {

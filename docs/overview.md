@@ -23,14 +23,14 @@ HTML Cache adds static public HTML caching, cache dependency indexing, stale-reg
 
 ## Admin Surfaces
 
-| Surface                     | URL/route expectation           | Notes                                                                               |
-| --------------------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
+| Surface                     | URL/route expectation                 | Notes                                                                               |
+| --------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------- |
 | Maintenance cache page      | `/admin/html-cache/maintenance-cache` | Generates maintenance page cache and toggles global/per-site maintenance state.     |
-| Cached model URLs resource  | Admin resource under Monitoring | Lists cached URLs, model dependencies, site/language scope, and clear/open actions. |
-| Dashboard widgets           | Main admin dashboard            | Shows cache overview, coverage URLs, and stale queue status.                        |
-| Page table extender         | Core Pages resource             | Adds cache state/action context to page tables.                                     |
-| Site header action extender | Core Sites resource             | Adds maintenance/cache actions to site-level admin context.                         |
-| Site health cache map       | Site Health page                | Shows cache-map diagnostics and public output safety checks.                        |
+| Cached model URLs resource  | Admin resource under Monitoring       | Lists cached URLs, model dependencies, site/language scope, and clear/open actions. |
+| Dashboard widgets           | Main admin dashboard                  | Shows cache overview, coverage URLs, and stale queue status.                        |
+| Page table extender         | Core Pages resource                   | Adds cache state/action context to page tables.                                     |
+| Site header action extender | Core Sites resource                   | Adds maintenance/cache actions to site-level admin context.                         |
+| Site health cache map       | Site Health page                      | Shows cache-map diagnostics and public output safety checks.                        |
 
 ## Frontend Surfaces
 

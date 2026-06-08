@@ -31,6 +31,9 @@
             "providers": [
                 "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"
             ]
+        },
+        "branch-alias": {
+            "dev-main": "4.x-dev"
         }
     },
     "config": {

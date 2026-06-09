@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Page;
+use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
@@ -11,8 +11,8 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
-use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Cookie;
+
+require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -687,6 +689,18 @@ it('strips configured cookies from anonymous cache hits', function (): void {
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $request);
     resolve(PageCache::class)->cache($request, response('cached html', 200, ['Content-Type' => 'text/html']));
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => 'https://example.test/about',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/about'),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,

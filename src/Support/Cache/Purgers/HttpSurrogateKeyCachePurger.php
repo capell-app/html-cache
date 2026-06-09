@@ -36,7 +36,8 @@ final class HttpSurrogateKeyCachePurger implements CachePurger
         }
 
         $headerName = config('capell-html-cache.purge.surrogate_key_header', 'Surrogate-Key');
-        $method = strtolower((string) config('capell-html-cache.purge.method', 'post'));
+        $configuredMethod = config('capell-html-cache.purge.method', 'post');
+        $method = is_string($configuredMethod) ? strtolower($configuredMethod) : 'post';
 
         $response = $request
             ->withHeaders([

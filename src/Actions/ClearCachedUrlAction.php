@@ -145,7 +145,7 @@ final class ClearCachedUrlAction
             }
         }
 
-        $keys = SurrogateKeyNormalizer::normalize($keys);
+        $keys = array_values(SurrogateKeyNormalizer::normalize($keys));
 
         if ($keys !== []) {
             resolve(CachePurger::class)->purge($keys);

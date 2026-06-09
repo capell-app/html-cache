@@ -24,14 +24,13 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Collection as SupportCollection;
 use Livewire\Livewire;
 
 uses(HtmlCacheTestCase::class);
 
 /**
- * @param  Collection<array-key, mixed>  $assignedSiteIds
+ * @param  SupportCollection<int, int>  $assignedSiteIds
  */
 function createHtmlCacheDashboardWidgetUser(SupportCollection $assignedSiteIds): Authenticatable
 {
@@ -163,6 +162,9 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
         'cacheable_id' => $secondLanguageCachedPage->getKey(),
         'cached_at' => now()->subHours(3),
         'last_seen_at' => now()->subHours(2),
+        'hit_count' => 10,
+        'bytes_served' => 1200,
+        'last_hit_at' => now()->subMinutes(45),
     ]);
     CachedModelUrl::query()->create([
         'url' => 'https://hidden.test/hidden',

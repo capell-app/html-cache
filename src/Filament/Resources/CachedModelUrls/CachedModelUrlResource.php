@@ -20,6 +20,8 @@ use Override;
 
 final class CachedModelUrlResource extends Resource
 {
+    protected static ?string $slug = 'html-cache/cached-model-urls';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentMagnifyingGlass;
 
     protected static string|BackedEnum|null $activeNavigationIcon = Heroicon::DocumentMagnifyingGlass;

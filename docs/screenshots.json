@@ -11,7 +11,7 @@
             "package": "html-cache",
             "surface": "admin",
             "targetType": "admin-page",
-            "target": "/admin/maintenance-cache",
+            "target": "/admin/html-cache/maintenance-cache",
             "required": true,
             "notes": "Capture the maintenance cache controls after at least one site exists.",
             "useCase": "An administrator clears, warms, or regenerates cached HTML for a site.",

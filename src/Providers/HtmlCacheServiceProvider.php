@@ -13,6 +13,7 @@ use Capell\Admin\Contracts\Extenders\PageTableExtender;
 use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
+use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Exceptions\UrlMissingSiteDomainException;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
@@ -25,6 +26,7 @@ use Capell\Frontend\Contracts\StaticMaintenancePageStore;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
+use Capell\HtmlCache\Actions\ClearCachedUrlsForSurrogateKeysAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
@@ -347,6 +349,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         Event::listen('eloquent.created: *', [HtmlCacheModelInvalidationObserver::class, 'createdFromEvent']);
         Event::listen('eloquent.updated: *', [HtmlCacheModelInvalidationObserver::class, 'updatedFromEvent']);
         Event::listen('eloquent.deleted: *', [HtmlCacheModelInvalidationObserver::class, 'deletedFromEvent']);
+        Event::listen(FrontendSurrogateKeysInvalidated::class, function (FrontendSurrogateKeysInvalidated $event): void {
+            $this->dispatchClearSurrogateKeyCache($event->surrogateKeys);
+        });
 
         return $this;
     }
@@ -423,6 +428,24 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         }
 
         ClearCachedUrlAction::dispatchAfterResponse($url);
+    }
+
+    /**
+     * @param  array<int, string>  $surrogateKeys
+     */
+    private function dispatchClearSurrogateKeyCache(array $surrogateKeys): void
+    {
+        if ($surrogateKeys === []) {
+            return;
+        }
+
+        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
+            ClearCachedUrlsForSurrogateKeysAction::dispatchSync($surrogateKeys);
+
+            return;
+        }
+
+        ClearCachedUrlsForSurrogateKeysAction::dispatchAfterResponse($surrogateKeys);
     }
 
     private function pageUrlFullUrl(PageUrl $pageUrl): ?string

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Models\Language;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
@@ -131,6 +132,66 @@ it('clears cached files and table rows for a url', function (): void {
         ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
+});
+
+it('clears cached files and table rows for invalidated site surrogate keys', function (): void {
+    Storage::fake('page_cache');
+
+    [$firstSiteDomain, $firstPage, $secondSiteDomain, $secondPage] = EloquentModel::withoutEvents(function (): array {
+        $firstSiteDomain = SiteDomain::factory()->create([
+            'scheme' => 'https',
+            'domain' => 'example.test',
+            'path' => null,
+        ]);
+        $secondSiteDomain = SiteDomain::factory()->create([
+            'scheme' => 'https',
+            'domain' => 'other.test',
+            'path' => null,
+        ]);
+
+        return [
+            $firstSiteDomain,
+            Page::factory()
+                ->recycle($firstSiteDomain->site)
+                ->withTranslations()
+                ->create(),
+            $secondSiteDomain,
+            Page::factory()
+                ->recycle($secondSiteDomain->site)
+                ->withTranslations()
+                ->create(),
+        ];
+    });
+
+    $firstUrl = 'https://example.test/about';
+    $secondUrl = 'https://other.test/about';
+    $firstCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $firstSiteDomain);
+    $secondCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $secondSiteDomain);
+
+    Storage::disk('page_cache')->put($firstCachePath, 'first cached page');
+    Storage::disk('page_cache')->put($secondCachePath, 'second cached page');
+
+    foreach ([[$firstUrl, $firstSiteDomain, $firstPage], [$secondUrl, $secondSiteDomain, $secondPage]] as [$url, $siteDomain, $page]) {
+        CachedModelUrl::query()->create([
+            'url' => $url,
+            'url_hash' => CachedModelUrl::hashUrl($url),
+            'path' => '/about',
+            'site_id' => $siteDomain->site_id,
+            'site_domain_id' => $siteDomain->getKey(),
+            'language_id' => $siteDomain->language_id,
+            'cacheable_type' => $page->getMorphClass(),
+            'cacheable_id' => $page->getKey(),
+            'cached_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+    }
+
+    event(new FrontendSurrogateKeysInvalidated(['site-' . $firstSiteDomain->site_id]));
+
+    expect(Storage::disk('page_cache')->exists($firstCachePath))->toBeFalse()
+        ->and(CachedModelUrl::query()->where('url', $firstUrl)->exists())->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($secondCachePath))->toBeTrue()
+        ->and(CachedModelUrl::query()->where('url', $secondUrl)->exists())->toBeTrue();
 });
 
 it('does not clear unrelated cached html when a non-route core model is created', function (): void {

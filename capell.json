@@ -70,10 +70,7 @@
             ],
             "redactedOutputClasses": [],
             "plaintextJustifications": [
-                {
-                    "field": "stale_cached_urls.claim_token",
-                    "reason": "Reviewed package field; not stored as a reusable secret by this package contract."
-                }
+                "stale_cached_urls.claim_token: Reviewed package field; not stored as a reusable secret by this package contract."
             ]
         },
         "publicOutput": {

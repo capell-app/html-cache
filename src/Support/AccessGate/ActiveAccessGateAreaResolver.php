@@ -83,6 +83,6 @@ final class ActiveAccessGateAreaResolver
 
     private function cacheKey(?string $connectionName, string $defaultAreaKey): string
     {
-        return 'capell-html-cache:access-gate-active-area:' . sha1(($connectionName ?? 'default') . '|' . $defaultAreaKey);
+        return 'capell-html-cache:access-gate-active-area:' . hash('sha256', ($connectionName ?? 'default') . '|' . $defaultAreaKey);
     }
 }

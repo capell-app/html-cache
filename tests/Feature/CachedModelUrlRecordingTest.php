@@ -28,6 +28,69 @@ require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
+/**
+ * @return array{SiteDomain, Page}
+ */
+function htmlCacheCreateDomainAndPage(string $domain = 'example.test'): array
+{
+    $result = EloquentModel::withoutEvents(function () use ($domain): array {
+        $siteDomain = SiteDomain::factory()->create([
+            'scheme' => 'https',
+            'domain' => $domain,
+            'path' => null,
+        ]);
+
+        return [
+            $siteDomain,
+            Page::factory()
+                ->recycle($siteDomain->site)
+                ->withTranslations()
+                ->create(),
+        ];
+    });
+
+    [$siteDomain, $page] = $result;
+
+    throw_unless($siteDomain instanceof SiteDomain, RuntimeException::class, 'Expected site domain fixture.');
+    throw_unless($page instanceof Page, RuntimeException::class, 'Expected page fixture.');
+
+    return [$siteDomain, $page];
+}
+
+function htmlCacheCreateCachedModelUrl(string $url, SiteDomain $siteDomain, Page $page): CachedModelUrl
+{
+    return CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+}
+
+/**
+ * @return array<string, array<int, int|string>>
+ */
+function htmlCacheModelMap(EloquentModel ...$models): array
+{
+    $map = [];
+
+    foreach ($models as $model) {
+        $key = $model->getKey();
+
+        throw_unless(is_int($key) || is_string($key), RuntimeException::class, 'Expected model key to be scalar.');
+
+        $map[$model->getMorphClass()][] = $key;
+    }
+
+    return $map;
+}
+
 it('ignores morph pivot relations when tracking rendered models', function (): void {
     Relation::requireMorphMap();
 
@@ -48,30 +111,15 @@ it('ignores morph pivot relations when tracking rendered models', function (): v
 });
 
 it('records rendered models against a cached url and removes stale model links', function (): void {
-    [$siteDomain, $page] = EloquentModel::withoutEvents(function (): array {
-        $siteDomain = SiteDomain::factory()->create([
-            'scheme' => 'https',
-            'domain' => 'example.test',
-            'path' => null,
-        ]);
-
-        return [
-            $siteDomain,
-            Page::factory()
-                ->recycle($siteDomain->site)
-                ->withTranslations()
-                ->create(),
-        ];
-    });
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $translation = $page->translations()->where('language_id', $siteDomain->language_id)->first();
 
     expect($translation)->toBeInstanceOf(Translation::class);
+    throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
+
     $url = 'https://example.test/about';
 
-    RecordCachedModelUrlsAction::run($url, [
-        $page->getMorphClass() => [$page->getKey()],
-        $translation->getMorphClass() => [$translation->getKey()],
-    ]);
+    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation));
 
     expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(2)
         ->and(CachedModelUrl::query()->where('url', $url)->first())
@@ -80,9 +128,7 @@ it('records rendered models against a cached url and removes stale model links',
         ->language_id->toBe($siteDomain->language_id)
         ->path->toBe('/about');
 
-    RecordCachedModelUrlsAction::run($url, [
-        $page->getMorphClass() => [$page->getKey()],
-    ]);
+    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
 
     expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1)
         ->and(CachedModelUrl::query()->where('url', $url)->first())
@@ -137,31 +183,8 @@ it('clears cached files and table rows for a url', function (): void {
 it('clears cached files and table rows for invalidated site surrogate keys', function (): void {
     Storage::fake('page_cache');
 
-    [$firstSiteDomain, $firstPage, $secondSiteDomain, $secondPage] = EloquentModel::withoutEvents(function (): array {
-        $firstSiteDomain = SiteDomain::factory()->create([
-            'scheme' => 'https',
-            'domain' => 'example.test',
-            'path' => null,
-        ]);
-        $secondSiteDomain = SiteDomain::factory()->create([
-            'scheme' => 'https',
-            'domain' => 'other.test',
-            'path' => null,
-        ]);
-
-        return [
-            $firstSiteDomain,
-            Page::factory()
-                ->recycle($firstSiteDomain->site)
-                ->withTranslations()
-                ->create(),
-            $secondSiteDomain,
-            Page::factory()
-                ->recycle($secondSiteDomain->site)
-                ->withTranslations()
-                ->create(),
-        ];
-    });
+    [$firstSiteDomain, $firstPage] = htmlCacheCreateDomainAndPage();
+    [$secondSiteDomain, $secondPage] = htmlCacheCreateDomainAndPage('other.test');
 
     $firstUrl = 'https://example.test/about';
     $secondUrl = 'https://other.test/about';
@@ -171,20 +194,8 @@ it('clears cached files and table rows for invalidated site surrogate keys', fun
     Storage::disk('page_cache')->put($firstCachePath, 'first cached page');
     Storage::disk('page_cache')->put($secondCachePath, 'second cached page');
 
-    foreach ([[$firstUrl, $firstSiteDomain, $firstPage], [$secondUrl, $secondSiteDomain, $secondPage]] as [$url, $siteDomain, $page]) {
-        CachedModelUrl::query()->create([
-            'url' => $url,
-            'url_hash' => CachedModelUrl::hashUrl($url),
-            'path' => '/about',
-            'site_id' => $siteDomain->site_id,
-            'site_domain_id' => $siteDomain->getKey(),
-            'language_id' => $siteDomain->language_id,
-            'cacheable_type' => $page->getMorphClass(),
-            'cacheable_id' => $page->getKey(),
-            'cached_at' => now(),
-            'last_seen_at' => now(),
-        ]);
-    }
+    htmlCacheCreateCachedModelUrl($firstUrl, $firstSiteDomain, $firstPage);
+    htmlCacheCreateCachedModelUrl($secondUrl, $secondSiteDomain, $secondPage);
 
     event(new FrontendSurrogateKeysInvalidated(['site-' . $firstSiteDomain->site_id]));
 
@@ -271,37 +282,12 @@ it('marks model cached urls stale in scheduled invalidation mode without deletin
     Storage::fake('page_cache');
     config()->set('capell-html-cache.invalidation.mode', 'scheduled');
 
-    [$siteDomain, $page] = EloquentModel::withoutEvents(function (): array {
-        $siteDomain = SiteDomain::factory()->create([
-            'scheme' => 'https',
-            'domain' => 'example.test',
-            'path' => null,
-        ]);
-
-        return [
-            $siteDomain,
-            Page::factory()
-                ->recycle($siteDomain->site)
-                ->withTranslations()
-                ->create(),
-        ];
-    });
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $url = 'https://example.test/about';
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
     Storage::disk('page_cache')->put($cachePath, 'old cached page');
-    CachedModelUrl::query()->create([
-        'url' => $url,
-        'url_hash' => CachedModelUrl::hashUrl($url),
-        'path' => '/about',
-        'site_id' => $siteDomain->site_id,
-        'site_domain_id' => $siteDomain->getKey(),
-        'language_id' => $siteDomain->language_id,
-        'cacheable_type' => $page->getMorphClass(),
-        'cacheable_id' => $page->getKey(),
-        'cached_at' => now(),
-        'last_seen_at' => now(),
-    ]);
+    htmlCacheCreateCachedModelUrl($url, $siteDomain, $page);
 
     $page->update(['name' => 'Updated page']);
 

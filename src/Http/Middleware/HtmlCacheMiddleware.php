@@ -38,6 +38,8 @@ final class HtmlCacheMiddleware
 
     public const string STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE = 'capell.html_cache.stale_cache_claim_token';
 
+    public const string SYNTHETIC_RENDER_ATTRIBUTE = 'capell.html_cache.synthetic_render';
+
     public const string ELIGIBILITY_REPORT_ATTRIBUTE = 'capell.html_cache.eligibility_report';
 
     private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';

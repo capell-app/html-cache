@@ -124,6 +124,7 @@ final class RefreshCachedUrlAtomicallyAction
         $request->attributes->set(HtmlCacheMiddleware::BYPASS_CACHE_READ_ATTRIBUTE, true);
         $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE, $staleCachedUrl->getKey());
         $request->attributes->set(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE, $staleCachedUrl->claim_token);
+        $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
 
         return $request;
     }

@@ -8,7 +8,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 
 Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 
-After install, operators get cache maintenance pages, diagnostics, dashboard widgets, stale-queue tooling, and public middleware that only stores anonymous-safe HTML.
+After install, admins get package-owned management surfaces and public users may see package-owned frontend output or routes.
 
 Status details:
 
@@ -58,7 +58,7 @@ Screenshot contract: `screenshots.json`.
 - Models: `CachedModelUrl`, `StaleCachedUrl`.
 - Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`.
 - Migration impact: run host migrations through the package install flow before opening package surfaces.
-- Deletion/retention behaviour: `instant` invalidation deletes cache files and index rows immediately; `scheduled` invalidation keeps stale rows until `capell:html-cache:process-stale` refreshes, fails, or exhausts them for diagnostics.
+- Deletion/retention behaviour: Docs gap unless the package has an explicit pruning command, retention setting, or tested cascade path.
 
 ## Install Impact
 
@@ -67,7 +67,7 @@ Screenshot contract: `screenshots.json`.
 - Public routes: none detected in package route files.
 - Database changes: package migrations are declared.
 - Settings: no package settings declared.
-- Queues or schedules: scheduled invalidation uses `capell:html-cache:process-stale`; dependency recording can run deferred, sync, or async based on `capell-html-cache.model_event_registration_mode`.
+- Queues or schedules: review package jobs or schedules before install.
 - Cache tags: `html-cache`.
 - Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
 
@@ -88,9 +88,9 @@ Screenshot contract: `screenshots.json`.
 
 ## Quick Start
 
-1. Install the package in a host Capell app: `composer require capell-app/html-cache`.
-2. Run host migrations so `cached_model_urls` and `stale_cached_urls` exist.
-3. Open the maintenance cache page or dashboard widgets and verify HTML Cache appears.
+1. Install the package: `composer require capell-app/html-cache`.
+2. Run the required setup: `php artisan migrate`.
+3. Open the related Capell admin surface and verify HTML Cache appears.
 
 ## Next Steps
 

@@ -51,6 +51,44 @@
         "cache-hit-telemetry",
         "origin-stale-while-revalidate"
     ],
+    "security": {
+        "riskTier": "standard",
+        "publicSurface": {
+            "routeNames": [],
+            "auth": "none",
+            "csrfExemptRoutes": [],
+            "signedRoutes": [],
+            "tokenizedRoutes": [],
+            "webhookRoutes": [],
+            "throttledRoutes": []
+        },
+        "sensitiveData": {
+            "encryptedFields": [],
+            "hashedTokenFields": [
+                "cached_model_urls.url_hash",
+                "stale_cached_urls.url_hash"
+            ],
+            "redactedOutputClasses": [],
+            "plaintextJustifications": [
+                "stale_cached_urls.claim_token: Reviewed package field; not stored as a reusable secret by this package contract."
+            ]
+        },
+        "publicOutput": {
+            "cacheSafe": true,
+            "forbidAuthoringSurface": true,
+            "forbidSecrets": true,
+            "forbidPublicBladeQueries": true
+        },
+        "externalHttpClients": {
+            "requiresTimeouts": false,
+            "requiresSecretRedaction": false,
+            "clients": []
+        },
+        "adminSurface": {
+            "authorization": "permissions",
+            "permissions": ["capell-html-cache.view", "capell-html-cache.clear"]
+        }
+    },
     "performance": {
         "frontendRenderBudgetMs": 20,
         "adminQueryBudget": 40,

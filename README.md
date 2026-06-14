@@ -1,120 +1,107 @@
 # HTML Cache
 
+<!-- prettier-ignore-start -->
+
+## What This Plugin Adds
+
+HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell Foundation** product group. It ships as `capell-app/html-cache` and extends these surfaces: admin, frontend.
+
 Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 
-## At A Glance
+After install, admins get package-owned management surfaces and public users may see package-owned frontend output or routes.
 
-- Package: `capell-app/html-cache`
-- Namespace: `Capell\HtmlCache\`
-- Surfaces: Filament admin, Livewire, console, queue, database
-- Service providers: `packages/html-cache/src/Providers/HtmlCacheServiceProvider.php`
-- Capell dependencies: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`
-- Third-party dependencies: `laravel/framework`, `lorisleiva/laravel-actions`, `spatie/laravel-data`, `spatie/laravel-package-tools`
+Status details:
 
-## Why It Helps Your Capell Workflow
+- Status: Available
+- Tier: free
+- Bundle: foundation
+- Composer package: `capell-app/html-cache`
+- Namespace: `Capell\HtmlCache`
+- Theme key: not applicable
 
-- Serves Capell public pages as static HTML for fast anonymous responses while preserving dependency-aware invalidation.
-- Helps operators see stale cached URLs and refresh affected pages without manually clearing broad caches.
-- Protects public-output safety by keeping cached HTML suitable for anonymous visitors, admins, crawlers, and static exports.
+## Why It Matters
 
-## Best Used With
+**For developers:** The package gives developers package-owned service providers, Actions, Data objects, models, Filament classes, and Blade views instead of pushing this behaviour into core or application code.
 
-- [Frontend Authoring](../frontend-authoring/README.md)
-- [Frontend Optimizer](../frontend-optimizer/README.md)
-- [Diagnostics](../diagnostics/README.md)
+**For teams:** Serve Capell pages as static HTML for sub-millisecond responses - with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.
 
-## What It Adds
+## Screens And Workflow
 
-- Full-page static HTML cache with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
-- Admin resources: `CachedModelUrlResource`.
-- Admin page: `MaintenanceCachePage`.
-- Dashboard widgets for cache overview, cache coverage, and stale regeneration queue.
+Screenshot contract: `docs/screenshots.json`.
+
+- HTML Cache maintenance cache page (admin, required).
+- Cached model URLs resource index (admin, required).
+- HTML Cache dashboard widgets (admin, required).
+- HTML Cache site health cache map (admin, required).
+- Page table cache indicator (admin, required).
+- Anonymous public cache hit (frontend, required).
+- Static maintenance page output (frontend, required).
+
+## Technical Shape
+
+- Service providers: `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`.
+- Config files: `packages/html-cache/config/capell-html-cache.php`.
+- Migrations: `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`, `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`.
+- Models: `CachedModelUrl`, `StaleCachedUrl`.
+- Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsWidget`, `HtmlCacheOverviewWidget`, `HtmlCacheStaleQueueWidget`.
 - Livewire components: `SiteHealthCacheMap`.
-- Package setup or maintenance commands.
-
-## Code Map
-
-| Area      | Path                                | Purpose                                                             |
-| --------- | ----------------------------------- | ------------------------------------------------------------------- |
-| Actions   | `packages/html-cache/src/Actions`   | Domain operations. Test these directly where possible.              |
-| Data      | `packages/html-cache/src/Data`      | Structured payloads, form state, view models, and integration data. |
-| Enums     | `packages/html-cache/src/Enums`     | Persisted states and Filament option values.                        |
-| Models    | `packages/html-cache/src/Models`    | Eloquent records owned by the package.                              |
-| Filament  | `packages/html-cache/src/Filament`  | Admin resources, pages, widgets, and settings UI.                   |
-| Livewire  | `packages/html-cache/src/Livewire`  | Interactive frontend or admin components.                           |
-| HTTP      | `packages/html-cache/src/Http`      | Controllers, middleware, and request handling.                      |
-| Jobs      | `packages/html-cache/src/Jobs`      | Queued work and async side effects.                                 |
-| Providers | `packages/html-cache/src/Providers` | Registration, extension hooks, routes, migrations, and resources.   |
-| Resources | `packages/html-cache/resources`     | Views, translations, assets, and package resources.                 |
-| Config    | `packages/html-cache/config`        | Package configuration and publishable config.                       |
-| Database  | `packages/html-cache/database`      | Migrations, seeders, and settings migrations.                       |
-| Tests     | `packages/html-cache/tests`         | Package-level Pest coverage.                                        |
-
-## Admin Surface
-
-- Resources: `CachedModelUrlResource`.
-- Pages: `MaintenanceCachePage`, `ListCachedModelUrls`.
-- Widgets: `HtmlCacheOverviewWidget`, `CacheCoverageUrlsWidget`, `HtmlCacheStaleQueueWidget`.
-- Extenders: page table cache indicator, site header maintenance/cache action, Site Health cache map.
-
-## Runtime Surface
-
-- Livewire: `SiteHealthCacheMap`.
+- Actions: `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `BuildHtmlCacheStaleQueueRowsAction`, `BuildHtmlCacheUrlRowsAction`, `and 14 more`.
+- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`.
 - Jobs: `RegisterCachedModelUrlsJob`.
-- Integration: registers `StaticMaintenancePageStore` so Capell frontend maintenance pages can use the `page_cache` disk when this package is installed.
-- Public cache headers are configured through `capell-html-cache.http_cache`; the filesystem cache itself has no TTL and is cleared or refreshed by invalidation.
-- Edge/CDN invalidation is available through `CachePurger`: the default null driver keeps local invalidation only, while the `http` driver sends normalized `Surrogate-Key` values to a configured purge endpoint.
-- Access Gate active-area checks are cached briefly through `capell-html-cache.access_gate.active_area_cache_seconds` so anonymous cache decisions do not query the access gate table on every request.
-- Shared-URL locale or segment negotiation should be listed in `capell-html-cache.bypass.headers` / `bypass.cookies` so those variants never read or write the host+path HTML cache entry.
+- Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
+- Health checks: `Capell\HtmlCache\Health\HtmlCacheHealthCheck`.
+- Blade views: `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`, `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`.
+- Cache tags: `html-cache`.
 
-## Commands
+## Data Model
 
-- `capell:static-site {--site=} {--internal : Render URLs through the current Laravel kernel} {--refresh : Delete affected HTML cache files before rendering}` (packages/html-cache/src/Console/Commands/StaticSiteCommand.php)
+- Models: `CachedModelUrl`, `StaleCachedUrl`.
+- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`.
+- Migration impact: run host migrations through the package install flow before opening package surfaces.
+- Deletion/retention behaviour: Docs gap unless the package has an explicit pruning command, retention setting, or tested cascade path.
 
-## Maintenance Pages
+## Install Impact
 
-Capell frontend owns maintenance page rendering, the manifest, and the runtime middleware. This package only contributes the `page_cache`-backed static store plus optional admin actions for generating those files.
+- Admin navigation: adds package-owned Filament classes when registered.
+- Permissions: `capell-html-cache.view`, `capell-html-cache.clear`.
+- Public routes: none detected in package route files.
+- Database changes: package migrations are declared.
+- Settings: no package settings declared.
+- Queues or schedules: review package jobs or schedules before install.
+- Cache tags: `html-cache`.
+- Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
 
-Generated files are written under `maintenance/` on the `page_cache` disk. The manifest at `storage/framework/capell-maintenance.json` maps host/scheme/path combinations to those files. To serve static maintenance HTML during Laravel maintenance mode, wire the frontend `frontend.maintenance` middleware into the host application's maintenance path. If this package is not installed, no static store is registered and frontend falls back to Laravel's plain 503.
+## Common Pitfalls
 
-## Data And Persistence
+- Run migrations before opening package resources or public routes.
+- Keep public Blade and cached HTML free of authoring markers, model IDs, permissions, signed editor URLs, and lazy database queries.
+- Keep `composer.json`, `composer.local.json`, `capell.json`, docs, screenshots, and tests aligned when the package surface changes.
 
-- Models: `CachedModelUrl`.
-- Migrations: `2026_05_10_190854_01_create_cached_model_urls_table.php`.
-- Config: `packages/html-cache/config/capell-html-cache.php`.
-- Data objects live in `src/Data/`; use them for payloads, form state, and view models.
+## Troubleshooting
 
-## Extension Points
+| Symptom | Likely cause | Check | Fix |
+| --- | --- | --- | --- |
+| Package surface is missing after install | Provider or manifest is not loaded | Confirm `capell.json`, package `composer.json`, and provider registration | Reinstall the package, refresh Composer autoload, and clear host caches |
+| Admin screen or command fails on missing table | Package migrations have not run | Check the tables listed in `Data Model` | Run host migrations and rerun the focused package test |
+| Background work does not run | Queue worker or scheduled command is not active | Check package jobs, commands, and host scheduler configuration | Start the queue or scheduler, then run the focused command or package test |
+| Public output leaks unexpected state | Render data, cache variation, or authoring boundary has regressed | Check public Blade, cache tags, and public-output safety tests | Move data loading out of Blade and rerun the package public-output tests |
 
-- Contracts: `PageCacheNotifiable`.
-- Register Capell extension points, routes, migrations, settings, render hooks, and resources from service providers.
+## Quick Start
 
-## Install And Setup
+1. Install the package: `composer require capell-app/html-cache`.
+2. Run the required setup: `php artisan migrate`.
+3. Open the related Capell admin surface and verify HTML Cache appears.
 
-- Install with `composer require capell-app/html-cache` in the host Capell application.
-- Run migrations through the host application package install flow.
-- Tune `CAPELL_HTML_CACHE_SHARED_MAX_AGE`, `CAPELL_HTML_CACHE_BROWSER_MAX_AGE`, and `CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE` when CDN/browser cache headers need to differ from the defaults.
-- Set `CAPELL_HTML_CACHE_PURGE_DRIVER=http`, `CAPELL_HTML_CACHE_PURGE_ENDPOINT`, and optional `CAPELL_HTML_CACHE_PURGE_TOKEN` to purge an edge cache by surrogate key when local cached URLs are cleared.
-- In this repository, verify package changes with `vendor/bin/pest`; do not use `php artisan`.
+## Next Steps
 
-## Docs
+- [Package docs](docs/README.md)
+- [Overview](docs/overview.md)
+- [Screenshot contract](docs/screenshots.json)
+- [Marketplace assets](docs/assets/marketplace/)
+- [Capell content language plan](../../docs/CONTENT_LANGUAGE_PLAN.md)
+- [Capell documentation design system](../../docs/DESIGN_SYSTEM.md)
+- [Capell and package ERD notes](../../docs/erd/capell-and-package-erds.md)
+- Related packages: [Site Discovery](../site-discovery/README.md).
+- Focused tests: `vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml`.
 
-- [docs index](docs/README.md)
-- [overview.md](docs/overview.md)
-- [cache-invalidation.md](docs/cache-invalidation.md)
-- [screenshots.json](docs/screenshots.json)
-
-## Testing
-
-Run package tests from the repository root:
-
-```bash
-vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml
-```
-
-## Maintenance Notes
-
-- Cached HTML must be safe for anonymous visitors, signed-in users, admins, crawlers, and static exports.
-- Put behaviour changes in `src/Actions/`; UI classes, commands, and controllers should call actions instead of owning domain logic.
-- Use package `Data` classes at boundaries instead of passing anonymous arrays between layers.
-- Use backed enums for persisted values and enum labels for Filament options.
+<!-- prettier-ignore-end -->

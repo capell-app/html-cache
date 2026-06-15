@@ -117,7 +117,7 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
     $hiddenPage = Page::factory()->site($hiddenSite)->withTranslations($language)->create();
 
     test()->actingAs(createHtmlCacheDashboardWidgetUser(collect([$site->getKey()])));
-    PageUrl::query()->delete();
+    PageUrl::query()->forceDelete();
 
     PageUrl::factory()->page($cachedPage)->site($site)->language($language)->state([
         'url' => '/cached',

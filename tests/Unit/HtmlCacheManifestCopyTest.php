@@ -54,15 +54,30 @@ it('registers the real html cache health check with diagnostics', function (): v
 
 it('declares shipped html cache extension contributions instead of deferring them', function (): void {
     $manifest = htmlCacheJsonFile(dirname(__DIR__, 2) . '/capell.json');
-    $contributions = collect($manifest['contributes'] ?? []);
+    $contributes = $manifest['contributes'] ?? [];
+
+    throw_unless(is_array($contributes), RuntimeException::class, 'Expected HTML cache contributions array.');
+
+    $contributions = collect($contributes);
 
     $adminPage = $contributions->firstWhere('class', HtmlCacheAdminPagesContribution::class);
     $dashboardWidgets = $contributions->firstWhere('class', HtmlCacheDashboardWidgetsContribution::class);
     $models = $contributions->firstWhere('class', HtmlCacheModelsContribution::class);
     $routes = $contributions->firstWhere('class', HtmlCacheFrontendRoutesContribution::class);
     $scheduledJob = $contributions->firstWhere('class', HtmlCacheStaleProcessingScheduleContribution::class);
+    $contributionTraceability = $manifest['contributionTraceability'] ?? null;
+    $security = $manifest['security'] ?? null;
 
-    expect($manifest['contributionTraceability']['deferredContributions'] ?? null)->toBe([])
+    throw_unless(is_array($adminPage), RuntimeException::class, 'Expected HTML cache admin page contribution array.');
+    throw_unless(is_array($dashboardWidgets), RuntimeException::class, 'Expected HTML cache dashboard widget contribution array.');
+    throw_unless(is_array($models), RuntimeException::class, 'Expected HTML cache model contribution array.');
+    throw_unless(is_array($routes), RuntimeException::class, 'Expected HTML cache route contribution array.');
+    throw_unless(is_array($scheduledJob), RuntimeException::class, 'Expected HTML cache scheduled job contribution array.');
+    throw_unless(is_array($contributionTraceability), RuntimeException::class, 'Expected HTML cache contribution traceability array.');
+    throw_unless(is_array($security), RuntimeException::class, 'Expected HTML cache security metadata array.');
+    throw_unless(is_array($security['publicSurface'] ?? null), RuntimeException::class, 'Expected HTML cache public surface metadata array.');
+
+    expect($contributionTraceability['deferredContributions'] ?? null)->toBe([])
         ->and($adminPage)->toBeArray()
         ->and($adminPage['type'] ?? null)->toBe('admin-page')
         ->and($adminPage['pageClass'] ?? null)->toBe(MaintenanceCachePage::class)
@@ -85,7 +100,7 @@ it('declares shipped html cache extension contributions instead of deferring the
         ])
         ->and($routes)->toBeArray()
         ->and($routes['type'] ?? null)->toBe('route')
-        ->and($routes['routes'] ?? null)->toBe($manifest['security']['publicSurface']['routeNames'] ?? null)
+        ->and($routes['routes'] ?? null)->toBe($security['publicSurface']['routeNames'] ?? null)
         ->and($routes['middlewareAliases'] ?? null)->toContain(
             'frontend.cache',
             'frontend.model_events',
@@ -110,10 +125,13 @@ it('declares shipped html cache extension contributions instead of deferring the
 
 it('exposes package-local verification script aliases', function (): void {
     $composer = htmlCacheJsonFile(dirname(__DIR__, 2) . '/composer.json');
+    $scripts = $composer['scripts'] ?? null;
 
-    expect($composer['scripts']['test'] ?? null)->toBe('../../vendor/bin/pest tests --configuration=../../phpunit.xml')
-        ->and($composer['scripts']['lint'] ?? null)->toBe('../../vendor/bin/pint --config=../../pint.json')
-        ->and($composer['scripts']['analyse'] ?? null)->toBe('cd ../.. && COMPOSER=composer.local.json composer analyze');
+    throw_unless(is_array($scripts), RuntimeException::class, 'Expected HTML cache composer scripts array.');
+
+    expect($scripts['test'] ?? null)->toBe('../../vendor/bin/pest tests --configuration=../../phpunit.xml')
+        ->and($scripts['lint'] ?? null)->toBe('../../vendor/bin/pint --config=../../pint.json')
+        ->and($scripts['analyse'] ?? null)->toBe('cd ../.. && COMPOSER=composer.local.json composer analyze');
 });
 
 /**

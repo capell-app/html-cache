@@ -53,10 +53,7 @@
                 "Capell\\HtmlCache\\Models\\CachedModelUrl",
                 "Capell\\HtmlCache\\Models\\StaleCachedUrl"
             ],
-            "tables": [
-                "cached_model_urls",
-                "stale_cached_urls"
-            ]
+            "tables": ["cached_model_urls", "stale_cached_urls"]
         },
         {
             "type": "route",

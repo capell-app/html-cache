@@ -303,18 +303,37 @@ final class PageCache
 
         foreach ($segments as $segment) {
             $segment = (string) $segment;
+            $decodedSegment = $this->fullyDecodedPathSegment($segment);
             $relativePathLength += strlen($segment) + 1;
 
-            if ($segment === '..'
+            if ($decodedSegment === '.'
+                || $decodedSegment === '..'
                 || strlen($segment) > self::MAX_PATH_SEGMENT_LENGTH
                 || $relativePathLength > self::MAX_RELATIVE_PATH_LENGTH
-                || str_contains($segment, "\0")
-                || str_contains($segment, '\\')) {
+                || str_contains($decodedSegment, '..')
+                || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $decodedSegment) === 1) {
                 return null;
             }
         }
 
         return $segments;
+    }
+
+    private function fullyDecodedPathSegment(string $segment): string
+    {
+        $decodedSegment = $segment;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $nextSegment = rawurldecode($decodedSegment);
+
+            if ($nextSegment === $decodedSegment) {
+                return $decodedSegment;
+            }
+
+            $decodedSegment = $nextSegment;
+        }
+
+        return $decodedSegment;
     }
 
     private function isInertiaRequest(Request $request): bool

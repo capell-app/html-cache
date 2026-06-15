@@ -39,6 +39,11 @@
     "config": {
         "sort-packages": true
     },
+    "scripts": {
+        "test": "../../vendor/bin/pest tests --configuration=../../phpunit.xml",
+        "lint": "../../vendor/bin/pint --config=../../pint.json",
+        "analyse": "cd ../.. && COMPOSER=composer.local.json composer analyze"
+    },
     "prefer-stable": true,
     "homepage": "https://github.com/capell-app/html-cache",
     "keywords": [

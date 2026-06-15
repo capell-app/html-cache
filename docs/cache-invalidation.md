@@ -118,6 +118,8 @@ capell:static-site {--site=} {--internal} {--refresh}
 
 `--internal` renders through the current Laravel kernel. `--refresh` deletes affected cached files before rendering.
 
+Internal static generation and stale-refresh renders are marked as synthetic HTML-cache renders. They still record the current model dependency index for the rendered URL, but they do it synchronously inside the synthetic request instead of deferring or queueing another `RegisterCachedModelUrlsJob`.
+
 ## Extension Point
 
 Implement `Capell\HtmlCache\Contracts\PageCacheNotifiable` when a class needs to react after a page cache entry is recorded:

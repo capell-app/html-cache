@@ -29,6 +29,7 @@ use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
 use Capell\HtmlCache\Health\HtmlCacheHealthCheck;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\CachedModelUrl;
@@ -60,6 +61,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -393,6 +395,33 @@ it('runs html cache console commands against static site and file cache paths', 
         ->and(File::exists($cachePath . '/folder/two.html'))->toBeFalse();
 });
 
+it('marks internal static generation kernel requests as synthetic html cache renders', function (): void {
+    $registry = StaticSiteExtensionRegistry::instance();
+    $registry->clear();
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('internal-static.test');
+    $syntheticRender = null;
+
+    Route::get('/generated', function (Request $request) use (&$syntheticRender): Response {
+        $syntheticRender = $request->attributes->get(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE);
+
+        return new Response('generated');
+    });
+
+    $registry->register('synthetic-test', function (Site $site, SiteDomain $siteDomain, Closure $visit): void {
+        $visit('https://internal-static.test/generated');
+    });
+
+    config(['capell-html-cache.static_generation.internal_requests' => true]);
+
+    try {
+        (new StaticSiteGenerator($siteDomain->site))->process();
+    } finally {
+        $registry->clear();
+    }
+
+    expect($syntheticRender)->toBeTrue();
+});
+
 it('strips session cookies only from public cacheable responses', function (): void {
     config(['session.cookie' => 'capell_session']);
 
@@ -475,6 +504,27 @@ it('flushes retrieved models through sync and async registration modes', functio
     $deferredStore->flushToUrl('https://retrieved-modes.test/deferred');
 
     expect($deferredStore->tracked($page->getMorphClass()))->toBe(0);
+});
+
+it('records synthetic render model urls synchronously without queueing registration jobs', function (): void {
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('synthetic-render.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $page->setRelation('site', $siteDomain->site);
+    $request = Request::create('https://synthetic-render.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
+
+    app()->instance('request', $request);
+    config(['capell-html-cache.model_event_registration_mode' => 'async']);
+    Queue::fake();
+
+    $store = new RetrievedModelStore;
+    $store->track($page);
+    $store->flushToUrl('https://synthetic-render.test/page');
+
+    Queue::assertNothingPushed();
+
+    expect($store->tracked($page->getMorphClass()))->toBe(0)
+        ->and(CachedModelUrl::query()->where('url', 'https://synthetic-render.test/page')->exists())->toBeTrue();
 });
 
 it('records cached model urls using the unique url model row', function (): void {

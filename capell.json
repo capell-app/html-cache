@@ -94,10 +94,35 @@
         "adminQueryBudget": 40,
         "cacheTags": ["html-cache"],
         "cacheSafety": {
-            "cacheable": false,
+            "cacheable": true,
             "variesBy": ["site", "locale"],
             "sensitiveOutput": false,
-            "invalidationSources": [],
+            "invalidationSources": [
+                {
+                    "model": "Capell\\Core\\Models\\Page",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\PageUrl",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\SiteDomain",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\Translation",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\HtmlCache\\Models\\CachedModelUrl",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\HtmlCache\\Models\\StaleCachedUrl",
+                    "events": ["saved", "deleted"]
+                }
+            ],
             "queueInvalidation": true
         }
     },

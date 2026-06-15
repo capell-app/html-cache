@@ -8,6 +8,7 @@ use Capell\Core\Actions\VisitUrlAction;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Closure;
@@ -160,6 +161,7 @@ final class StaticSiteGenerator
             'SERVER_PORT' => $port,
             'HTTPS' => $scheme === 'https' ? 'on' : 'off',
         ]);
+        $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
 
         $kernel = resolve(HttpKernel::class);
         $response = $kernel->handle($request);

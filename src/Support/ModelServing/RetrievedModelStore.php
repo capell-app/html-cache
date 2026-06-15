@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\ModelServing;
 
 use Capell\Frontend\Contracts\RenderedModelTracker;
+use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphPivot;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -46,6 +49,13 @@ final class RetrievedModelStore implements RenderedModelTracker
             return;
         }
 
+        if ($this->isSyntheticRender()) {
+            RecordCachedModelUrlsAction::run($url, $this->retrievedModels, CarbonImmutable::now());
+            $this->retrievedModels = [];
+
+            return;
+        }
+
         $mode = config('capell-html-cache.model_event_registration_mode');
 
         if (in_array($mode, [null, false, ''], true)) {
@@ -75,6 +85,18 @@ final class RetrievedModelStore implements RenderedModelTracker
         }
 
         $this->retrievedModels = [];
+    }
+
+    private function isSyntheticRender(): bool
+    {
+        try {
+            $request = resolve('request');
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $request instanceof Request
+            && $request->attributes->get(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE) === true;
     }
 
     /**

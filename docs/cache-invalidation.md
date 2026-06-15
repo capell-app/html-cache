@@ -142,3 +142,5 @@ Keep notifications cheap. Cache writes happen on public page renders, so slow wo
 ## Public Output Safety
 
 HTML Cache must remain safe for anonymous visitors, signed-in users, admins, crawlers, and static exports. Do not put authoring attributes, model IDs, signed editor URLs, field paths, package names, or permission hints into cached HTML. If a package needs admin editing, use Frontend Authoring's post-load beacon.
+
+Cache paths are also part of the public-output safety boundary. Encoded or double-encoded dot segments, control bytes, backslashes, and oversized path segments are rejected before cache reads or writes. Invalid paths are treated as uncacheable instead of being normalized into a nearby public cache file.

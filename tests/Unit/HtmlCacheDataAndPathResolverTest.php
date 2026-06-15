@@ -52,3 +52,19 @@ it('rejects unsafe cache path segments', function (): void {
 
     (new HtmlCachePathResolver)->pathForUrl('/', $domain);
 })->throws(InvalidArgumentException::class);
+
+it('rejects encoded unsafe cache path segments', function (string $url): void {
+    $domain = new SiteDomain([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => '/',
+    ]);
+
+    expect(fn (): string => (new HtmlCachePathResolver)->pathForUrl($url, $domain))
+        ->toThrow(InvalidArgumentException::class);
+})->with([
+    '/unsafe/%2e%2e/secret',
+    '/unsafe/%252e%252e/secret',
+    '/unsafe/%00/secret',
+    '/unsafe/%5c/secret',
+]);

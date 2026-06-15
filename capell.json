@@ -30,7 +30,53 @@
         "admin": [],
         "frontend": []
     },
-    "contributes": [],
+    "contributes": [
+        {
+            "type": "admin-page",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheAdminPagesContribution",
+            "pageClass": "Capell\\HtmlCache\\Filament\\Pages\\MaintenanceCachePage",
+            "labelKey": "capell-html-cache::admin.maintenance_cache"
+        },
+        {
+            "type": "dashboard-widget",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheDashboardWidgetsContribution",
+            "widgetClasses": [
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheOverviewWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\CacheCoverageUrlsWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheStaleQueueWidget"
+            ]
+        },
+        {
+            "type": "model",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheModelsContribution",
+            "modelClasses": [
+                "Capell\\HtmlCache\\Models\\CachedModelUrl",
+                "Capell\\HtmlCache\\Models\\StaleCachedUrl"
+            ],
+            "tables": [
+                "cached_model_urls",
+                "stale_cached_urls"
+            ]
+        },
+        {
+            "type": "route",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheFrontendRoutesContribution",
+            "routes": [],
+            "middlewareAliases": [
+                "frontend.cache",
+                "frontend.model_events",
+                "frontend.no_session_cookies_on_cache"
+            ]
+        },
+        {
+            "type": "scheduled-job",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheStaleProcessingScheduleContribution",
+            "command": "capell:html-cache:process-stale",
+            "frequencyConfig": "capell-html-cache.invalidation.schedule",
+            "defaultFrequency": "everyFiveMinutes",
+            "enabledWhen": "capell-html-cache.invalidation.mode=scheduled"
+        }
+    ],
     "database": {
         "migrations": true,
         "settings": false,
@@ -190,12 +236,6 @@
     "scopes": ["backend", "frontend"],
     "order": 45,
     "contributionTraceability": {
-        "deferredContributions": [
-            "admin-page",
-            "dashboard-widget",
-            "model",
-            "route",
-            "scheduled-job"
-        ]
+        "deferredContributions": []
     }
 }

@@ -48,25 +48,46 @@ final class HtmlCachePathResolver
 
     private function assertSafeSegment(string $label, ?string $value): void
     {
-        if ($value === null || $value === '' || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $value) === 1 || str_contains($value, '..')) {
+        $decodedValue = $this->fullyDecodedSegment($value ?? '');
+
+        if ($value === null || $value === '' || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $decodedValue) === 1 || str_contains($decodedValue, '..')) {
             throw new InvalidArgumentException(sprintf('Unsafe %s for cache path.', $label));
         }
     }
 
     private function assertSafePath(string $label, string $value): void
     {
-        if (preg_match('/[\x00-\x1F\x7F\\\\]/', $value) === 1) {
+        $decodedValue = $this->fullyDecodedSegment($value);
+
+        if (preg_match('/[\x00-\x1F\x7F\\\\]/', $decodedValue) === 1) {
             throw new InvalidArgumentException(sprintf('Unsafe %s for cache path.', $label));
         }
 
-        if (str_starts_with($value, '//')) {
+        if (str_starts_with($decodedValue, '//')) {
             throw new InvalidArgumentException(sprintf('Unsafe %s for cache path.', $label));
         }
 
-        foreach (explode('/', $value) as $segment) {
-            if ($segment === '..') {
+        foreach (explode('/', $decodedValue) as $segment) {
+            if ($segment === '.' || $segment === '..' || str_contains($segment, '..')) {
                 throw new InvalidArgumentException(sprintf('Unsafe %s for cache path.', $label));
             }
         }
+    }
+
+    private function fullyDecodedSegment(string $value): string
+    {
+        $decodedValue = $value;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $nextValue = rawurldecode($decodedValue);
+
+            if ($nextValue === $decodedValue) {
+                return $decodedValue;
+            }
+
+            $decodedValue = $nextValue;
+        }
+
+        return $decodedValue;
     }
 }

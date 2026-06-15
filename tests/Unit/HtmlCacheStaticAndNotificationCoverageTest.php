@@ -1000,3 +1000,34 @@ it('skips page cache reads and writes for oversized hostile request paths', func
 
     expect(File::exists($cachePath))->toBeFalse();
 });
+
+it('skips page cache reads and writes for encoded hostile request paths', function (string $path): void {
+    $cachePath = storage_path('framework/testing-page-cache-hostile-paths');
+    File::deleteDirectory($cachePath);
+
+    app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
+    {
+        public function shouldBypass(): bool
+        {
+            return false;
+        }
+    });
+
+    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $request = Request::create($path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $response = new Response('<html><body>Unsafe</body></html>', Response::HTTP_OK, ['Content-Type' => 'text/html']);
+
+    expect($cache->getCachePage($request))->toBeFalse()
+        ->and($cache->getCacheErrorPage($request))->toBeFalse()
+        ->and($cache->shouldCachePage($request, $response))->toBeFalse();
+
+    $cache->cache($request, $response);
+
+    expect(File::exists($cachePath))->toBeFalse();
+})->with([
+    '/unsafe/%2e%2e/secret',
+    '/unsafe/%252e%252e/secret',
+    '/unsafe/%2e/secret',
+    '/unsafe/%00/secret',
+    '/unsafe/%5c/secret',
+]);

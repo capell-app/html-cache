@@ -167,6 +167,28 @@ it('uses configured public cache-control ages for cached responses', function ()
         ->toContain('stale-while-revalidate=3600');
 });
 
+it('refuses to read or write cache files for hostile request path segments', function (string $url): void {
+    Storage::fake('page_cache');
+
+    $request = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $response = response('unsafe html', 200, ['Content-Type' => 'text/html']);
+    $pageCache = resolve(PageCache::class);
+
+    expect($pageCache->shouldCachePage($request, $response))->toBeFalse()
+        ->and($pageCache->getCachePage($request))->toBeFalse();
+
+    $pageCache->cache($request, $response);
+
+    expect(Storage::disk('page_cache')->allFiles())->toBe([]);
+})->with([
+    'plain traversal' => ['https://example.test/unsafe/../secret'],
+    'encoded traversal' => ['https://example.test/unsafe/%2e%2e/secret'],
+    'double encoded traversal' => ['https://example.test/unsafe/%252e%252e/secret'],
+    'encoded backslash' => ['https://example.test/unsafe/%5c/secret'],
+    'encoded null byte' => ['https://example.test/unsafe/%00/secret'],
+    'overlong segment' => ['https://example.test/unsafe/' . str_repeat('a', 256)],
+]);
+
 it('caches active access gate area lookups so repeated anonymous requests do not query the access gate table', function (): void {
     Cache::flush();
     htmlCacheCreateAccessGateAreasTable();

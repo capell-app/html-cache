@@ -4,6 +4,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 
 ## Unreleased
 
+- Added a cache-hit middleware query-budget assertion so anonymous cache-hit decisions stay bounded while recording hit telemetry.
 - Added hostile request path fixtures covering traversal, encoded traversal, null bytes, and overlong segments so unsafe URLs cannot be cached or served from the page-cache disk.
 
 - Prepared package metadata and documentation for ongoing Capell 4.x package work.

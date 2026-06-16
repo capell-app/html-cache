@@ -61,7 +61,7 @@ Caveats / risks to verify or close:
 
 6. **Redis-cluster safety: not applicable but worth a note.** The cache layer is filesystem-based and the queues are DB tables, so none of the banned `Redis::scan/keys/flushdb` commands appear here. No action needed; call this out so reviewers don't assume a Redis store.
 
-7. **Performance budgets are partly verified.** `frontendRenderBudgetMs: 20`, `adminQueryBudget: 40`. The hot-path access-gate lookup is memoized and tests assert repeated anonymous requests do not keep querying `access_gate_areas`. A broader benchmark remains useful.
+7. **Done/Shipped: middleware decision-path query budget is pinned.** The hot-path access-gate lookup is memoized and tests assert repeated anonymous requests do not keep querying `access_gate_areas`; cache-hit middleware coverage now also asserts an anonymous cached response stays within a five-query budget while recording hit telemetry. — `tests/Feature/HtmlCacheMiddlewareTest.php`
 
 8. **`composer.json` has no `test`/`analyse`/`lint` scripts.** Verification relies on monorepo-root tooling; the package can't be checked in isolation. Add package-local script aliases for portability.
 
@@ -99,4 +99,4 @@ Foundation/bundled and free — correct: this is infrastructure every public Cap
 | ESI / partial-hole hydration for dynamic fragments                                        | Later  | L      | Med    | §3                                                                                                                                                                                                             |
 | Queued, traffic-ranked incremental cache warming (warm-on-deploy / warm-on-invalidate)    | Later  | L      | Med    | §3                                                                                                                                                                                                             |
 | Done/Shipped: Hostile-path test fixtures for cache read/write safety                      | Done   | S      | Med    | §4.5                                                                                                                                                                                                           |
-| Budget assertion for middleware decision path                                             | Later  | S      | Med    | §4.7                                                                                                                                                                                                           |
+| Done/Shipped: Budget assertion for middleware decision path                               | Done   | S      | Med    | §4.7                                                                                                                                                                                                           |

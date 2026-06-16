@@ -741,6 +741,45 @@ it('strips configured cookies from anonymous cache hits', function (): void {
         ->and($cachedModelUrl->last_hit_at)->not->toBeNull();
 });
 
+it('keeps anonymous cache-hit middleware decisions inside a small query budget', function (): void {
+    Storage::fake('page_cache');
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/budget', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    resolve(PageCache::class)->cache($request, response('cached budget html', 200, ['Content-Type' => 'text/html']));
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => 'https://example.test/budget',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/budget'),
+        'path' => '/budget',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh budget html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    $queryCount = count(DB::getQueryLog());
+
+    capell_expect($response->getContent())->toBe('cached budget html')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT')
+        ->and($cachedModelUrl->refresh()->hit_count)->toBe(1)
+        ->and($queryCount)->toBeLessThanOrEqual(5);
+});
+
 it('serves stale cached html while refreshing the origin cache after response', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.origin_stale_while_revalidate.enabled', true);

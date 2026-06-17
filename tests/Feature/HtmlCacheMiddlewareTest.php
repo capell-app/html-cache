@@ -167,6 +167,28 @@ it('uses configured public cache-control ages for cached responses', function ()
         ->toContain('stale-while-revalidate=3600');
 });
 
+it('refuses to read or write cache files for hostile request path segments', function (string $url): void {
+    Storage::fake('page_cache');
+
+    $request = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $response = response('unsafe html', 200, ['Content-Type' => 'text/html']);
+    $pageCache = resolve(PageCache::class);
+
+    expect($pageCache->shouldCachePage($request, $response))->toBeFalse()
+        ->and($pageCache->getCachePage($request))->toBeFalse();
+
+    $pageCache->cache($request, $response);
+
+    expect(Storage::disk('page_cache')->allFiles())->toBe([]);
+})->with([
+    'plain traversal' => ['https://example.test/unsafe/../secret'],
+    'encoded traversal' => ['https://example.test/unsafe/%2e%2e/secret'],
+    'double encoded traversal' => ['https://example.test/unsafe/%252e%252e/secret'],
+    'encoded backslash' => ['https://example.test/unsafe/%5c/secret'],
+    'encoded null byte' => ['https://example.test/unsafe/%00/secret'],
+    'overlong segment' => ['https://example.test/unsafe/' . str_repeat('a', 256)],
+]);
+
 it('caches active access gate area lookups so repeated anonymous requests do not query the access gate table', function (): void {
     Cache::flush();
     htmlCacheCreateAccessGateAreasTable();
@@ -717,6 +739,45 @@ it('strips configured cookies from anonymous cache hits', function (): void {
         ->and($cachedModelUrl->refresh()->hit_count)->toBe(1)
         ->and($cachedModelUrl->bytes_served)->toBe(strlen('cached html'))
         ->and($cachedModelUrl->last_hit_at)->not->toBeNull();
+});
+
+it('keeps anonymous cache-hit middleware decisions inside a small query budget', function (): void {
+    Storage::fake('page_cache');
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/budget', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    resolve(PageCache::class)->cache($request, response('cached budget html', 200, ['Content-Type' => 'text/html']));
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => 'https://example.test/budget',
+        'url_hash' => CachedModelUrl::hashUrl('https://example.test/budget'),
+        'path' => '/budget',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh budget html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    $queryCount = count(DB::getQueryLog());
+
+    capell_expect($response->getContent())->toBe('cached budget html')
+        ->and($response->headers->get('X-Frontend-Cache'))->toBe('HIT')
+        ->and($cachedModelUrl->refresh()->hit_count)->toBe(1)
+        ->and($queryCount)->toBeLessThanOrEqual(5);
 });
 
 it('serves stale cached html while refreshing the origin cache after response', function (): void {

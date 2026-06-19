@@ -49,6 +49,7 @@ Screenshot contract: `docs/screenshots.json`.
 - Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`.
 - Jobs: `RegisterCachedModelUrlsJob`.
 - Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
+- Manifest contributions: `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`, `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardWidgetsContribution`, `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`, `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`, `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`.
 - Health checks: `Capell\HtmlCache\Health\HtmlCacheHealthCheck`.
 - Blade views: `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`, `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`.
 - Cache tags: `html-cache`.

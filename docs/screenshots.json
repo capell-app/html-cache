@@ -19,7 +19,12 @@
             "scenario": "admin-index",
             "url": "/screenshot-fixtures/html-cache/html-cache-maintenance-cache-page",
             "waitFor": ".html-cache",
-            "colorSchemes": ["light"]
+            "colorSchemes": ["light"],
+            "covers": [
+                "packages/html-cache/src/Filament/Extenders/Site/MaintenanceSiteHeaderActionExtender.php",
+                "packages/html-cache/src/Filament/Pages/MaintenanceCachePage.php",
+                "packages/html-cache/src/Filament/Resources/CachedModelUrls/Tables/CachedModelUrlsTable.php"
+            ]
         },
         {
             "id": "html-cache-cached-model-urls",

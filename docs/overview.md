@@ -37,6 +37,66 @@ Screenshot contract: `screenshots.json`.
 - Anonymous public cache hit (frontend, required).
 - Static maintenance page output (frontend, required).
 
+## Screenshot Evidence
+
+These captures are the package-owned visual contract for the admin pages, public pages, actions, workflows, and feature surfaces described above. Keep this section aligned with `docs/screenshots.json` whenever the package surface changes.
+
+### HTML Cache maintenance cache page
+
+![HTML Cache maintenance cache page](screenshots/html-cache-maintenance-cache-page.png)
+
+- Surface: admin · Target: /admin/html-cache/maintenance-cache.
+- Documents: An administrator clears, warms, or regenerates cached HTML for a site.
+- Capture notes: Capture the maintenance cache controls after at least one site exists.
+
+### Cached model URLs resource index
+
+![Cached model URLs resource index](screenshots/html-cache-cached-model-urls.png)
+
+- Surface: admin · Target: admin-resource.
+- Documents: An administrator reviews model-to-URL cache map rows after a public page has been warmed.
+- Capture notes: Capture after warming a public page so cache map rows exist.
+
+### HTML Cache dashboard widgets
+
+![HTML Cache dashboard widgets](screenshots/html-cache-dashboard-widgets.png)
+
+- Surface: admin · Target: /admin.
+- Documents: An administrator checks cache overview, coverage, and stale queue widgets.
+- Capture notes: Capture cache overview, cache coverage URLs, and stale queue widgets.
+
+### HTML Cache site health cache map
+
+![HTML Cache site health cache map](screenshots/html-cache-site-health-cache-map.png)
+
+- Surface: admin · Target: /admin/site-health.
+- Documents: An operator reviews cache-map diagnostics and public-output safety checks in Site Health.
+- Capture notes: Capture package diagnostics and public output safety checks on the core Site Health page.
+
+### Page table cache indicator
+
+![Page table cache indicator](screenshots/html-cache-page-table-extension.png)
+
+- Surface: admin · Target: /admin/pages.
+- Documents: An editor sees cache state indicators directly in the core Pages resource.
+- Capture notes: Capture the core Pages resource with the cache table extension visible.
+
+### Anonymous public cache hit
+
+![Anonymous public cache hit](screenshots/html-cache-public-cache-hit.png)
+
+- Surface: frontend · Target: frontend-url.
+- Documents: An anonymous visitor receives cached public HTML with no authoring markers, editor URLs, or session cookies.
+- Capture notes: Capture anonymous public output and verify no authoring markers, editor URLs, or session cookies are exposed.
+
+### Static maintenance page output
+
+![Static maintenance page output](screenshots/html-cache-maintenance-page.png)
+
+- Surface: frontend · Target: frontend-url.
+- Documents: An anonymous visitor sees the generated static maintenance page for a site/domain.
+- Capture notes: Capture generated maintenance HTML for a site/domain after using the maintenance cache page.
+
 ## Technical Shape
 
 - Service providers: `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`.

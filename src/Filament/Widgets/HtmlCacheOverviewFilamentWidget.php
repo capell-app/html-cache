@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Filament\Widgets;
 
-use Capell\Admin\Contracts\CapellWidgetContract;
+use Capell\Admin\Contracts\CapellFilamentWidgetContract;
 use Capell\Admin\Filament\Concerns\GatedByRoleAndSettings;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheDashboardStatsAction;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Override;
 
-final class HtmlCacheOverviewWidget extends StatsOverviewWidget implements CapellWidgetContract
+final class HtmlCacheOverviewFilamentWidget extends StatsOverviewWidget implements CapellFilamentWidgetContract
 {
     use GatedByRoleAndSettings;
 

@@ -3,16 +3,16 @@
 declare(strict_types=1);
 
 use Capell\Core\Contracts\Extensions\ExtensionContribution;
+use Capell\Core\Contracts\Extensions\RegistersExtensionFilamentWidget;
 use Capell\Core\Contracts\Extensions\RegistersExtensionRoute;
-use Capell\Core\Contracts\Extensions\RegistersExtensionWidget;
 use Capell\Core\Contracts\Extensions\RunsScheduledExtensionJob;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
-use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueWidget;
+use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueFilamentWidget;
 use Capell\HtmlCache\Health\HtmlCacheHealthCheck;
 use Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution;
-use Capell\HtmlCache\Manifest\HtmlCacheDashboardWidgetsContribution;
+use Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution;
 use Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution;
 use Capell\HtmlCache\Manifest\HtmlCacheModelsContribution;
 use Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution;
@@ -61,7 +61,7 @@ it('declares shipped html cache extension contributions instead of deferring the
     $contributions = collect($contributes);
 
     $adminPage = $contributions->firstWhere('class', HtmlCacheAdminPagesContribution::class);
-    $dashboardWidgets = $contributions->firstWhere('class', HtmlCacheDashboardWidgetsContribution::class);
+    $dashboardFilamentWidgets = $contributions->firstWhere('class', HtmlCacheDashboardFilamentWidgetsContribution::class);
     $models = $contributions->firstWhere('class', HtmlCacheModelsContribution::class);
     $routes = $contributions->firstWhere('class', HtmlCacheFrontendRoutesContribution::class);
     $scheduledJob = $contributions->firstWhere('class', HtmlCacheStaleProcessingScheduleContribution::class);
@@ -69,7 +69,7 @@ it('declares shipped html cache extension contributions instead of deferring the
     $security = $manifest['security'] ?? null;
 
     throw_unless(is_array($adminPage), RuntimeException::class, 'Expected HTML cache admin page contribution array.');
-    throw_unless(is_array($dashboardWidgets), RuntimeException::class, 'Expected HTML cache dashboard widget contribution array.');
+    throw_unless(is_array($dashboardFilamentWidgets), RuntimeException::class, 'Expected HTML cache dashboard widget contribution array.');
     throw_unless(is_array($models), RuntimeException::class, 'Expected HTML cache model contribution array.');
     throw_unless(is_array($routes), RuntimeException::class, 'Expected HTML cache route contribution array.');
     throw_unless(is_array($scheduledJob), RuntimeException::class, 'Expected HTML cache scheduled job contribution array.');
@@ -81,12 +81,12 @@ it('declares shipped html cache extension contributions instead of deferring the
         ->and($adminPage)->toBeArray()
         ->and($adminPage['type'] ?? null)->toBe('admin-page')
         ->and($adminPage['pageClass'] ?? null)->toBe(MaintenanceCachePage::class)
-        ->and($dashboardWidgets)->toBeArray()
-        ->and($dashboardWidgets['type'] ?? null)->toBe('dashboard-widget')
-        ->and($dashboardWidgets['widgetClasses'] ?? null)->toBe([
-            HtmlCacheOverviewWidget::class,
-            CacheCoverageUrlsWidget::class,
-            HtmlCacheStaleQueueWidget::class,
+        ->and($dashboardFilamentWidgets)->toBeArray()
+        ->and($dashboardFilamentWidgets['type'] ?? null)->toBe('dashboard-widget')
+        ->and($dashboardFilamentWidgets['widgetClasses'] ?? null)->toBe([
+            HtmlCacheOverviewFilamentWidget::class,
+            CacheCoverageUrlsFilamentWidget::class,
+            HtmlCacheStaleQueueFilamentWidget::class,
         ])
         ->and($models)->toBeArray()
         ->and($models['type'] ?? null)->toBe('model')
@@ -112,12 +112,12 @@ it('declares shipped html cache extension contributions instead of deferring the
         ->and($scheduledJob['frequencyConfig'] ?? null)->toBe('capell-html-cache.invalidation.schedule')
         ->and($scheduledJob['enabledWhen'] ?? null)->toBe('capell-html-cache.invalidation.mode=scheduled')
         ->and(HtmlCacheAdminPagesContribution::compatibleCapellApiVersion())->toBe('^4.0')
-        ->and(HtmlCacheDashboardWidgetsContribution::compatibleCapellApiVersion())->toBe('^4.0')
+        ->and(HtmlCacheDashboardFilamentWidgetsContribution::compatibleCapellApiVersion())->toBe('^4.0')
         ->and(HtmlCacheModelsContribution::compatibleCapellApiVersion())->toBe('^4.0')
         ->and(HtmlCacheFrontendRoutesContribution::compatibleCapellApiVersion())->toBe('^4.0')
         ->and(HtmlCacheStaleProcessingScheduleContribution::compatibleCapellApiVersion())->toBe('^4.0')
         ->and(class_implements(HtmlCacheAdminPagesContribution::class))->toContain(ExtensionContribution::class)
-        ->and(class_implements(HtmlCacheDashboardWidgetsContribution::class))->toContain(RegistersExtensionWidget::class)
+        ->and(class_implements(HtmlCacheDashboardFilamentWidgetsContribution::class))->toContain(RegistersExtensionFilamentWidget::class)
         ->and(class_implements(HtmlCacheModelsContribution::class))->toContain(ExtensionContribution::class)
         ->and(class_implements(HtmlCacheFrontendRoutesContribution::class))->toContain(RegistersExtensionRoute::class)
         ->and(class_implements(HtmlCacheStaleProcessingScheduleContribution::class))->toContain(RunsScheduledExtensionJob::class);

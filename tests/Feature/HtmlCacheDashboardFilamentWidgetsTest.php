@@ -13,9 +13,9 @@ use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheDashboardStatsAction;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheStaleQueueRowsAction;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheUrlRowsAction;
 use Capell\HtmlCache\Filament\Settings\Contributors\HtmlCacheDashboardSettingsContributor;
-use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueWidget;
+use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueFilamentWidget;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
@@ -32,7 +32,7 @@ uses(HtmlCacheTestCase::class);
 /**
  * @param  SupportCollection<int, int>  $assignedSiteIds
  */
-function createHtmlCacheDashboardWidgetUser(SupportCollection $assignedSiteIds): Authenticatable
+function createHtmlCacheDashboardFilamentWidgetUser(SupportCollection $assignedSiteIds): Authenticatable
 {
     $user = new class extends Authenticatable implements FilamentUser
     {
@@ -92,18 +92,18 @@ it('registers HTML Cache dashboard widgets and settings contributor', function (
         ->map(fn (DashboardSettingsContributor $contributor): string => $contributor::class);
 
     expect($contributors)->toContain(HtmlCacheDashboardSettingsContributor::class)
-        ->and(CapellAdmin::getDashboardWidgets(DashboardEnum::Main))
-        ->toContain(HtmlCacheOverviewWidget::class)
-        ->toContain(CacheCoverageUrlsWidget::class)
-        ->toContain(HtmlCacheStaleQueueWidget::class);
+        ->and(CapellAdmin::getDashboardFilamentWidgets(DashboardEnum::Main))
+        ->toContain(HtmlCacheOverviewFilamentWidget::class)
+        ->toContain(CacheCoverageUrlsFilamentWidget::class)
+        ->toContain(HtmlCacheStaleQueueFilamentWidget::class);
 });
 
 it('renders HTML Cache dashboard widgets', function (string $widgetClass): void {
     Livewire::test($widgetClass)->assertSuccessful();
 })->with([
-    HtmlCacheOverviewWidget::class,
-    CacheCoverageUrlsWidget::class,
-    HtmlCacheStaleQueueWidget::class,
+    HtmlCacheOverviewFilamentWidget::class,
+    CacheCoverageUrlsFilamentWidget::class,
+    HtmlCacheStaleQueueFilamentWidget::class,
 ]);
 
 it('builds HTML Cache overview and URL rows from scoped cache data', function (): void {
@@ -116,7 +116,7 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
     $uncachedPage = Page::factory()->site($site)->withTranslations($language)->create();
     $hiddenPage = Page::factory()->site($hiddenSite)->withTranslations($language)->create();
 
-    test()->actingAs(createHtmlCacheDashboardWidgetUser(collect([$site->getKey()])));
+    test()->actingAs(createHtmlCacheDashboardFilamentWidgetUser(collect([$site->getKey()])));
     PageUrl::query()->forceDelete();
 
     PageUrl::factory()->page($cachedPage)->site($site)->language($language)->state([
@@ -203,7 +203,7 @@ it('builds stale queue rows with translated states from scoped rows', function (
     $site = Site::factory()->withTranslations()->create();
     $hiddenSite = Site::factory()->withTranslations()->create();
 
-    test()->actingAs(createHtmlCacheDashboardWidgetUser(collect([$site->getKey()])));
+    test()->actingAs(createHtmlCacheDashboardFilamentWidgetUser(collect([$site->getKey()])));
 
     StaleCachedUrl::query()->create([
         'url' => 'https://example.com/failing',

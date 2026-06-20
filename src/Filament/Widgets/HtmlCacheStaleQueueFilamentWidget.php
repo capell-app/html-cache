@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Filament\Widgets;
 
-use Capell\Admin\Contracts\CapellWidgetContract;
+use Capell\Admin\Contracts\CapellFilamentWidgetContract;
 use Capell\Admin\Filament\Concerns\GatedByRoleAndSettings;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheStaleQueueRowsAction;
 use Filament\Tables\Columns\TextColumn;
@@ -13,7 +13,7 @@ use Filament\Widgets\TableWidget as BaseWidget;
 use Illuminate\Support\Collection;
 use Override;
 
-final class HtmlCacheStaleQueueWidget extends BaseWidget implements CapellWidgetContract
+final class HtmlCacheStaleQueueFilamentWidget extends BaseWidget implements CapellFilamentWidgetContract
 {
     use GatedByRoleAndSettings;
 

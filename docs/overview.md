@@ -8,7 +8,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 
 Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.
 
-After install, admins get package-owned cache management surfaces. Public requests do not receive package-owned routes; the package contributes frontend middleware that can serve safe cached HTML for existing Capell frontend routes.
+After install, admins get package-owned management surfaces and public users may see package-owned frontend output or routes.
 
 Status details:
 
@@ -43,14 +43,14 @@ Screenshot contract: `screenshots.json`.
 - Config files: `packages/html-cache/config/capell-html-cache.php`.
 - Migrations: `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`, `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`.
 - Models: `CachedModelUrl`, `StaleCachedUrl`.
-- Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsWidget`, `HtmlCacheOverviewWidget`, `HtmlCacheStaleQueueWidget`.
+- Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsFilamentWidget`, `HtmlCacheOverviewFilamentWidget`, `HtmlCacheStaleQueueFilamentWidget`.
 - Livewire components: `SiteHealthCacheMap`.
 - Actions: `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `BuildHtmlCacheStaleQueueRowsAction`, `BuildHtmlCacheUrlRowsAction`, `and 14 more`.
 - Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`.
 - Jobs: `RegisterCachedModelUrlsJob`.
 - Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
+- Manifest contributions: `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`, `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`, `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`, `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`, `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`.
 - Health checks: `Capell\HtmlCache\Health\HtmlCacheHealthCheck`.
-- Manifest contributions: admin page, dashboard widgets, models, frontend route middleware, and scheduled stale-processing job.
 - Blade views: `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`, `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`.
 - Cache tags: `html-cache`.
 
@@ -65,10 +65,10 @@ Screenshot contract: `screenshots.json`.
 
 - Admin navigation: adds package-owned Filament classes when registered.
 - Permissions: `capell-html-cache.view`, `capell-html-cache.clear`.
-- Public routes: none. Frontend route contribution is middleware-only: `frontend.cache`, `frontend.model_events`, and `frontend.no_session_cookies_on_cache`.
+- Public routes: none detected in package route files.
 - Database changes: package migrations are declared.
 - Settings: no package settings declared.
-- Queues or schedules: `capell:html-cache:process-stale` is scheduled only when `capell-html-cache.invalidation.mode=scheduled`; the default frequency is `everyFiveMinutes`.
+- Queues or schedules: review package jobs or schedules before install.
 - Cache tags: `html-cache`.
 - Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
 
@@ -76,7 +76,6 @@ Screenshot contract: `screenshots.json`.
 
 - Run migrations before opening package resources or public routes.
 - Keep public Blade and cached HTML free of authoring markers, model IDs, permissions, signed editor URLs, and lazy database queries.
-- Treat hostile paths as uncacheable. Encoded dot segments, control bytes, backslashes, and oversized path segments are rejected before disk reads or writes.
 - Keep `composer.json`, `composer.local.json`, `capell.json`, docs, screenshots, and tests aligned when the package surface changes.
 
 ## Troubleshooting

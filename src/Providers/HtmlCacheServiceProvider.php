@@ -40,9 +40,9 @@ use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
 use Capell\HtmlCache\Filament\Settings\Contributors\HtmlCacheDashboardSettingsContributor;
-use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewWidget;
-use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueWidget;
+use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewFilamentWidget;
+use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueFilamentWidget;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
@@ -155,7 +155,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerAdminBridge()
             ->registerAdminExtenders()
             ->registerDashboardSettingsContributor()
-            ->registerDashboardWidgets()
+            ->registerDashboardFilamentWidgets()
             ->registerGeneratedOutputCoverage()
             ->registerModelInvalidationHooks()
             ->registerScheduledInvalidation()
@@ -267,11 +267,11 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         return $this;
     }
 
-    private function registerDashboardWidgets(): self
+    private function registerDashboardFilamentWidgets(): self
     {
-        CapellAdmin::registerDashboardWidget(HtmlCacheOverviewWidget::class, DashboardEnum::Main);
-        CapellAdmin::registerDashboardWidget(CacheCoverageUrlsWidget::class, DashboardEnum::Main);
-        CapellAdmin::registerDashboardWidget(HtmlCacheStaleQueueWidget::class, DashboardEnum::Main);
+        CapellAdmin::registerDashboardFilamentWidget(HtmlCacheOverviewFilamentWidget::class, DashboardEnum::Main);
+        CapellAdmin::registerDashboardFilamentWidget(CacheCoverageUrlsFilamentWidget::class, DashboardEnum::Main);
+        CapellAdmin::registerDashboardFilamentWidget(HtmlCacheStaleQueueFilamentWidget::class, DashboardEnum::Main);
 
         return $this;
     }

@@ -39,11 +39,11 @@
         },
         {
             "type": "dashboard-widget",
-            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheDashboardWidgetsContribution",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheDashboardFilamentWidgetsContribution",
             "widgetClasses": [
-                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheOverviewWidget",
-                "Capell\\HtmlCache\\Filament\\Widgets\\CacheCoverageUrlsWidget",
-                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheStaleQueueWidget"
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheOverviewFilamentWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\CacheCoverageUrlsFilamentWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheStaleQueueFilamentWidget"
             ]
         },
         {
@@ -129,10 +129,7 @@
         },
         "adminSurface": {
             "authorization": "permissions",
-            "permissions": [
-                "capell-html-cache.view",
-                "capell-html-cache.clear"
-            ]
+            "permissions": ["capell-html-cache.view", "capell-html-cache.clear"]
         }
     },
     "performance": {

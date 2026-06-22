@@ -65,21 +65,20 @@ it('does not create system pages while building site header actions', function (
 
     $site = Site::factory()->create();
 
-    expect(Page::query()
+    $systemPageCount = fn (): int => Page::query()
         ->where('site_id', $site->id)
         ->whereHas('type', fn (Builder $query): Builder => $query->whereIn('key', [
             PageTypeEnum::NotFound->value,
             PageTypeEnum::Maintenance->value,
         ]))
-        ->count())->toBe(0);
+        ->count();
+
+    // Site creation may already provision a static error (NotFound) page via the
+    // frontend error-page regeneration observer; that is unrelated to the header
+    // action extender under test. Assert the extender itself creates no new pages.
+    $countBeforeActions = $systemPageCount();
 
     resolve(MaintenanceSiteHeaderActionExtender::class)->actions();
 
-    expect(Page::query()
-        ->where('site_id', $site->id)
-        ->whereHas('type', fn (Builder $query): Builder => $query->whereIn('key', [
-            PageTypeEnum::NotFound->value,
-            PageTypeEnum::Maintenance->value,
-        ]))
-        ->count())->toBe(0);
+    expect($systemPageCount())->toBe($countBeforeActions);
 });

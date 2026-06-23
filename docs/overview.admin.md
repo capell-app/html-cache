@@ -1,7 +1,3 @@
-# HTML Cache
-
-<!-- prettier-ignore-start -->
-
 ## What it does for you
 
 HTML Cache makes your pages load faster for visitors by serving a saved copy. You can see how much of your site is cached, clear the cache for a page or the whole site when a change isn't showing, and turn on maintenance mode while you work.
@@ -26,10 +22,3 @@ Go to **HTML Cache** in the admin to see coverage and clear the cache.
 - Cached pages load faster for visitors.
 - Click **Clear cache** (or clear a selection) if a change isn't showing on the live site.
 - Turn on **maintenance mode** while you make big updates.
-
----
-
-For how to use HTML Cache, see the [admin guide](admin-guide.md).
-For developers: see the [README](../README.md).
-
-<!-- prettier-ignore-end -->

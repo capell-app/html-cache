@@ -123,9 +123,11 @@
             "forbidPublicBladeQueries": true
         },
         "externalHttpClients": {
-            "requiresTimeouts": false,
-            "requiresSecretRedaction": false,
-            "clients": []
+            "requiresTimeouts": true,
+            "requiresSecretRedaction": true,
+            "clients": [
+                "Capell\\HtmlCache\\Support\\Cache\\Purgers\\HttpSurrogateKeyCachePurger"
+            ]
         },
         "adminSurface": {
             "authorization": "permissions",

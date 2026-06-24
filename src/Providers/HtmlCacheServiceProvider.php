@@ -22,6 +22,7 @@ use Capell\Core\Models\SiteDomain;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
 use Capell\Frontend\Contracts\RenderedModelTracker;
+use Capell\Frontend\Contracts\StaticErrorPageStore;
 use Capell\Frontend\Contracts\StaticMaintenancePageStore;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
@@ -58,6 +59,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
+use Capell\HtmlCache\Support\Error\HtmlCacheStaticErrorPageStore;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
@@ -152,6 +154,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this
             ->registerPageCacheDisk()
             ->registerMaintenanceStorage()
+            ->registerErrorPageStorage()
             ->registerAdminBridge()
             ->registerAdminExtenders()
             ->registerDashboardSettingsContributor()
@@ -183,6 +186,17 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->singleton(
             StaticMaintenancePageStore::class,
             fn (): HtmlCacheStaticMaintenancePageStore => $this->app->make(HtmlCacheStaticMaintenancePageStore::class),
+        );
+
+        return $this;
+    }
+
+    private function registerErrorPageStorage(): self
+    {
+        $this->app->singleton(HtmlCacheStaticErrorPageStore::class);
+        $this->app->singleton(
+            StaticErrorPageStore::class,
+            fn (): HtmlCacheStaticErrorPageStore => $this->app->make(HtmlCacheStaticErrorPageStore::class),
         );
 
         return $this;

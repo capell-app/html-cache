@@ -35,6 +35,35 @@ return [
         'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
     ],
     'cache_vary_headers' => ['Accept-Encoding'],
+    'stateless_pagination' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Stateless, cacheable pagination
+        |--------------------------------------------------------------------------
+        |
+        | Public listing components (theme/showcase galleries, marketplace browse,
+        | blog/events archives) historically paginate and filter through stateful
+        | Livewire write requests. On a publicly cached page the session and CSRF
+        | cookies are stripped so the blob stays shareable, which makes those
+        | writes fail CSRF and surface as a 419 "page has expired".
+        |
+        | When enabled, opted-in components paginate/filter via plain GET requests
+        | (client-side for in-memory data, ?page=N fragments for DB-backed data)
+        | so the interaction issues no Livewire write and the response stays
+        | cacheable. Disable to restore the legacy stateful Livewire behaviour.
+        |
+        | "params" is the allow-list of query keys that may appear on a cacheable
+        | request without vetoing the page cache; any key outside this list still
+        | bypasses the cache as before.
+        */
+        'enabled' => Env::get('CAPELL_HTML_CACHE_STATELESS_PAGINATION', true),
+        'params' => [
+            'page', 'articles', 'article-archives', 'showcase_page',
+            'theme_search', 'theme_tag', 'theme_tier', 'theme_sort', 'topic', 'month',
+            'search', 'kind', 'tag', 'laravelVersion', 'filamentVersion', 'capellVersion',
+            'surface', 'certification', 'capability', 'category', 'tier', 'freeOnly', 'sort',
+        ],
+    ],
     'purge' => [
         /*
         |--------------------------------------------------------------------------

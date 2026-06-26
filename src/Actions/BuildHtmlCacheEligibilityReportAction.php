@@ -16,6 +16,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -72,7 +73,7 @@ final class BuildHtmlCacheEligibilityReportAction
 
         if ($request->query->has('signature')) {
             $reasons[] = HtmlCacheEligibilityReason::SignedPreviewRequest;
-        } elseif ($request->query->count() > 0) {
+        } elseif ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
             $reasons[] = HtmlCacheEligibilityReason::QueryStringPresent;
         }
 

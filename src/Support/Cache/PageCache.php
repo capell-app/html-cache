@@ -152,7 +152,7 @@ final class PageCache
             return false;
         }
 
-        if ($request->query->count() > 0) {
+        if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
             return false;
         }
 
@@ -236,7 +236,7 @@ final class PageCache
             return null;
         }
 
-        $filename = $this->aliasFilename(array_pop($segments));
+        $filename = $this->aliasFilename(array_pop($segments)) . StatelessPaginationRequest::cacheKeySuffix($laravelRequest);
         $extension = $this->guessFileExtension($laravelResponse);
 
         return [$this->getCachePath(implode('/', $segments)), $filename, $extension];
@@ -290,7 +290,7 @@ final class PageCache
             return null;
         }
 
-        $filename = $this->aliasFilename(array_pop($segments));
+        $filename = $this->aliasFilename(array_pop($segments)) . StatelessPaginationRequest::cacheKeySuffix($request);
 
         return $this->getCachePath(implode(DIRECTORY_SEPARATOR, $segments)) . DIRECTORY_SEPARATOR . $filename . $extension;
     }

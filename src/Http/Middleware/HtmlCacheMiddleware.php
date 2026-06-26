@@ -21,6 +21,7 @@ use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
@@ -184,7 +185,9 @@ final class HtmlCacheMiddleware
 
     private function shouldBypassHttpCache(Request $request, Response $response): bool
     {
-        if ($request->query->count() > 0 || $this->isInertiaRequest($request) || $response->isServerError()) {
+        if (($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request))
+            || $this->isInertiaRequest($request)
+            || $response->isServerError()) {
             return true;
         }
 
@@ -197,7 +200,11 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        if ($request->query->has('without_html_cache') || $request->query->count() > 0) {
+        if ($request->query->has('without_html_cache')) {
+            return true;
+        }
+
+        if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
             return true;
         }
 

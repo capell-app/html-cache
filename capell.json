@@ -87,13 +87,7 @@
     },
     "settings": [],
     "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
-    "capabilities": [
-        "full-page-cache",
-        "cache-blocking",
-        "surrogate-key-purge",
-        "cache-hit-telemetry",
-        "origin-stale-while-revalidate"
-    ],
+    "capabilities": ["cache-blocking"],
     "security": {
         "riskTier": "standard",
         "publicSurface": {

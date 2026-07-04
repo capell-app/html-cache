@@ -7,9 +7,11 @@ namespace Capell\HtmlCache\Observers;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Models\Site;
 use Capell\Core\Models\Translation;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
+use Capell\HtmlCache\Actions\MarkCachedUrlsForSiteStaleAction;
 use Illuminate\Database\Eloquent\Model;
 
 final class HtmlCacheModelInvalidationObserver
@@ -56,6 +58,12 @@ final class HtmlCacheModelInvalidationObserver
 
     public function updated(Model $model): void
     {
+        if ($model instanceof Site && $model->wasChanged('theme_id')) {
+            $this->dispatchMarkSiteCachedUrlsStale($model);
+
+            return;
+        }
+
         if (! $this->shouldInvalidateForModel($model)) {
             return;
         }
@@ -182,6 +190,23 @@ final class HtmlCacheModelInvalidationObserver
         $modelKey = $model->getKey();
 
         return is_numeric($modelKey) ? (int) $modelKey : null;
+    }
+
+    private function dispatchMarkSiteCachedUrlsStale(Site $site): void
+    {
+        $siteId = $this->integerModelKey($site);
+
+        if ($siteId === null) {
+            return;
+        }
+
+        if (app()->runningUnitTests() || app()->runningInConsole()) {
+            MarkCachedUrlsForSiteStaleAction::dispatchSync($siteId);
+
+            return;
+        }
+
+        MarkCachedUrlsForSiteStaleAction::dispatchAfterResponse($siteId);
     }
 
     private function isTimestampOnlyUpdate(Model $model): bool

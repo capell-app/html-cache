@@ -6,4 +6,4 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 
 require_once __DIR__ . '/Support/CachedModelUrlsTestSupport.php';
 
-pest()->extend(HtmlCacheTestCase::class)->group('html-cache')->in(__DIR__);
+pest()->extend(HtmlCacheTestCase::class)->group('html-cache')->in('.');

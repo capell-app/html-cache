@@ -65,6 +65,7 @@ use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
+use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
@@ -102,6 +103,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(HtmlCacheHitBuffer::class);
         $this->app->singleton(CachePurger::class, fn (): CachePurger => config('capell-html-cache.purge.driver') === 'http'
                 ? $this->app->make(HttpSurrogateKeyCachePurger::class)
                 : $this->app->make(NullCachePurger::class));
@@ -384,35 +386,17 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     private function dispatchClearAllHtmlCache(?array $cachePathSiteDomainAttributes = null): void
     {
         if ($this->usesScheduledInvalidation()) {
-            if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-                MarkAllCachedUrlsStaleAction::dispatchSync('all_changed', $cachePathSiteDomainAttributes);
-
-                return;
-            }
-
-            MarkAllCachedUrlsStaleAction::dispatchAfterResponse('all_changed', $cachePathSiteDomainAttributes);
+            MarkAllCachedUrlsStaleAction::dispatch('all_changed', $cachePathSiteDomainAttributes)->afterCommit();
 
             return;
         }
 
-        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearAllHtmlCacheAction::dispatchSync();
-
-            return;
-        }
-
-        ClearAllHtmlCacheAction::dispatchAfterResponse();
+        ClearAllHtmlCacheAction::dispatch()->afterCommit();
     }
 
     private function dispatchClearAllHtmlCacheImmediately(): void
     {
-        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearAllHtmlCacheAction::dispatchSync();
-
-            return;
-        }
-
-        ClearAllHtmlCacheAction::dispatchAfterResponse();
+        ClearAllHtmlCacheAction::dispatch()->afterCommit();
     }
 
     private function dispatchClearPageUrlCache(PageUrl $pageUrl): void
@@ -424,24 +408,12 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         }
 
         if ($this->usesScheduledInvalidation()) {
-            if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-                MarkCachedUrlStaleAction::dispatchSync($url, 'page_url_changed');
-
-                return;
-            }
-
-            MarkCachedUrlStaleAction::dispatchAfterResponse($url, 'page_url_changed');
+            MarkCachedUrlStaleAction::dispatch($url, 'page_url_changed')->afterCommit();
 
             return;
         }
 
-        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearCachedUrlAction::dispatchSync($url);
-
-            return;
-        }
-
-        ClearCachedUrlAction::dispatchAfterResponse($url);
+        ClearCachedUrlAction::dispatch($url)->afterCommit();
     }
 
     /**
@@ -453,13 +425,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return;
         }
 
-        if ($this->app->runningUnitTests() || $this->app->runningInConsole()) {
-            ClearCachedUrlsForSurrogateKeysAction::dispatchSync($surrogateKeys);
-
-            return;
-        }
-
-        ClearCachedUrlsForSurrogateKeysAction::dispatchAfterResponse($surrogateKeys);
+        ClearCachedUrlsForSurrogateKeysAction::dispatch($surrogateKeys)->afterCommit();
     }
 
     private function pageUrlFullUrl(PageUrl $pageUrl): ?string

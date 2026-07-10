@@ -10,6 +10,13 @@ use Capell\HtmlCache\Data\Dashboard\HtmlCacheDashboardStatsData;
 use Capell\HtmlCache\Enums\HtmlCacheKey;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Illuminate\Database\Eloquent\Model;
+
+/** @param array<string, mixed> $attributes */
+function htmlCachePathResolverSiteDomain(array $attributes): SiteDomain
+{
+    return Model::withoutEvents(static fn (): SiteDomain => new SiteDomain($attributes));
+}
 
 it('keeps html cache dashboard and cache map values typed', function (): void {
     $modelSummary = new CacheMapModelSummaryData('page', 'Pages', 4, 2);
@@ -30,7 +37,7 @@ it('keeps html cache dashboard and cache map values typed', function (): void {
 
 it('builds safe cache paths for domains, prefixes, errors and absolute urls', function (): void {
     $resolver = new HtmlCachePathResolver;
-    $domain = new SiteDomain([
+    $domain = htmlCachePathResolverSiteDomain([
         'scheme' => 'https',
         'domain' => 'example.test',
         'path' => '/docs',
@@ -44,7 +51,7 @@ it('builds safe cache paths for domains, prefixes, errors and absolute urls', fu
 });
 
 it('rejects unsafe cache path segments', function (): void {
-    $domain = new SiteDomain([
+    $domain = htmlCachePathResolverSiteDomain([
         'scheme' => 'https',
         'domain' => '../example.test',
         'path' => '/',
@@ -54,7 +61,7 @@ it('rejects unsafe cache path segments', function (): void {
 })->throws(InvalidArgumentException::class);
 
 it('rejects encoded unsafe cache path segments', function (string $url): void {
-    $domain = new SiteDomain([
+    $domain = htmlCachePathResolverSiteDomain([
         'scheme' => 'https',
         'domain' => 'example.test',
         'path' => '/',

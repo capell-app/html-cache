@@ -165,24 +165,12 @@ final class HtmlCacheModelInvalidationObserver
         }
 
         if (config('capell-html-cache.invalidation.mode', 'instant') === 'scheduled') {
-            if (app()->runningUnitTests() || app()->runningInConsole()) {
-                MarkCachedUrlsForModelStaleAction::dispatchSync($morphClass, $modelKey);
-
-                return;
-            }
-
-            MarkCachedUrlsForModelStaleAction::dispatchAfterResponse($morphClass, $modelKey);
+            MarkCachedUrlsForModelStaleAction::dispatch($morphClass, $modelKey)->afterCommit();
 
             return;
         }
 
-        if (app()->runningUnitTests() || app()->runningInConsole()) {
-            ClearCachedUrlsForModelAction::dispatchSync($morphClass, $modelKey);
-
-            return;
-        }
-
-        ClearCachedUrlsForModelAction::dispatchAfterResponse($morphClass, $modelKey);
+        ClearCachedUrlsForModelAction::dispatch($morphClass, $modelKey)->afterCommit();
     }
 
     private function integerModelKey(Model $model): ?int
@@ -200,13 +188,7 @@ final class HtmlCacheModelInvalidationObserver
             return;
         }
 
-        if (app()->runningUnitTests() || app()->runningInConsole()) {
-            MarkCachedUrlsForSiteStaleAction::dispatchSync($siteId);
-
-            return;
-        }
-
-        MarkCachedUrlsForSiteStaleAction::dispatchAfterResponse($siteId);
+        MarkCachedUrlsForSiteStaleAction::dispatch($siteId)->afterCommit();
     }
 
     private function isTimestampOnlyUpdate(Model $model): bool

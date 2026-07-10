@@ -4,30 +4,36 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Jobs\FlushHtmlCacheHitBatchJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 /**
- * @method static int run(Request $request, int $bytesServed)
+ * @method static void run(Request $request, int $bytesServed)
  */
 final class RecordHtmlCacheHitAction
 {
     use AsAction;
 
-    public function handle(Request $request, int $bytesServed): int
+    public function handle(Request $request, int $bytesServed): void
     {
-        if ($bytesServed < 0) {
-            $bytesServed = 0;
+        if (config('capell-html-cache.hit_recording.enabled', true) !== true) {
+            return;
         }
 
-        return CachedModelUrl::query()
-            ->where('url_hash', CachedModelUrl::hashUrl($request->fullUrl()))
-            ->update([
-                'hit_count' => DB::raw('hit_count + 1'),
-                'bytes_served' => DB::raw('bytes_served + ' . $bytesServed),
-                'last_hit_at' => now(),
-            ]);
+        $urlHash = CachedModelUrl::hashUrl($request->fullUrl());
+
+        if (! resolve(HtmlCacheHitBuffer::class)->record($urlHash, $bytesServed)) {
+            return;
+        }
+
+        $configuredDelay = config('capell-html-cache.hit_recording.flush_delay_seconds', 30);
+        $delay = is_numeric($configuredDelay) ? max(1, (int) $configuredDelay) : 30;
+
+        FlushHtmlCacheHitBatchJob::dispatch($urlHash)
+            ->delay($delay)
+            ->afterCommit();
     }
 }

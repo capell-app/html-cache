@@ -15,9 +15,9 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
@@ -93,17 +93,24 @@ final class PageCache
             return;
         }
 
-        $this->files->makeDirectory($path, 0775, true, true);
-
         if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
+            $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
+
+            if (! $this->reserveErrorPageSlot($errorPath)) {
+                return;
+            }
+
+            $this->files->makeDirectory($path, 0775, true, true);
             $this->writeCacheFile(
                 $laravelRequest,
-                $this->join([$path, $filename . self::ERROR_EXTENSION]),
+                $errorPath,
                 (string) $laravelResponse->getContent(),
             );
 
             return;
         }
+
+        $this->files->makeDirectory($path, 0775, true, true);
 
         if ($extension === 'html' && config('capell-html-cache.minify_html', true) === true) {
             $content = resolve(HtmlMinifier::class)->minify($content);
@@ -124,7 +131,7 @@ final class PageCache
             return false;
         }
 
-        return File::exists($path) ? File::get($path) : false;
+        return $this->readCacheFile($path);
     }
 
     public function getCacheErrorPage(Request $request): bool|string
@@ -135,7 +142,7 @@ final class PageCache
             return false;
         }
 
-        return File::exists($path) ? File::get($path) : false;
+        return $this->readCacheFile($path);
     }
 
     public function shouldCachePage(Request $request, SymfonyResponse $response): bool
@@ -218,6 +225,75 @@ final class PageCache
         }
 
         return $filename;
+    }
+
+    private function readCacheFile(string $path): bool|string
+    {
+        if (! $this->files->exists($path)) {
+            return false;
+        }
+
+        $configuredTimeToLive = config(
+            'capell-html-cache.filesystem_ttl_seconds',
+            config('capell-html-cache.cache_ttl', 3600),
+        );
+        $timeToLive = is_numeric($configuredTimeToLive) ? max(0, (int) $configuredTimeToLive) : 3600;
+
+        if ($timeToLive > 0 && $this->files->lastModified($path) <= now()->subSeconds($timeToLive)->timestamp) {
+            $this->files->delete($path);
+
+            return false;
+        }
+
+        return $this->files->get($path);
+    }
+
+    private function reserveErrorPageSlot(string $targetPath): bool
+    {
+        if ($this->files->exists($targetPath)) {
+            return true;
+        }
+
+        $configuredMaximum = config('capell-html-cache.error_pages.max_files_per_host', 500);
+        $maximum = is_numeric($configuredMaximum) ? max(0, (int) $configuredMaximum) : 500;
+
+        if ($maximum === 0) {
+            return false;
+        }
+
+        $root = $this->getCachePath();
+
+        if (! $this->files->isDirectory($root)) {
+            return true;
+        }
+
+        $errorPages = array_values(array_filter(
+            $this->files->allFiles($root),
+            static fn (SplFileInfo $file): bool => str_ends_with($file->getFilename(), self::ERROR_EXTENSION),
+        ));
+
+        if (count($errorPages) < $maximum) {
+            return true;
+        }
+
+        usort(
+            $errorPages,
+            static fn (SplFileInfo $first, SplFileInfo $second): int => $first->getMTime() <=> $second->getMTime(),
+        );
+
+        $configuredRetained = config('capell-html-cache.error_pages.retain_after_prune', 450);
+        $retained = is_numeric($configuredRetained) ? max(0, (int) $configuredRetained) : 450;
+        $retained = min($retained, max(0, $maximum - 1));
+        $deleteCount = max(1, count($errorPages) - $retained);
+        $deleted = 0;
+
+        foreach (array_slice($errorPages, 0, $deleteCount) as $errorPage) {
+            if ($this->files->delete($errorPage->getPathname())) {
+                $deleted++;
+            }
+        }
+
+        return count($errorPages) - $deleted < $maximum;
     }
 
     /**

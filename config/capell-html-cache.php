@@ -15,15 +15,24 @@ return [
     'write_enabled' => Env::get('CAPELL_WRITE_HTML_CACHE', true),
     'minify_html' => Env::get('CAPELL_MINIFY_HTML', true),
     'cache_ttl' => 3600,
+    'filesystem_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_FILESYSTEM_TTL_SECONDS', 3600),
+    'error_pages' => [
+        'max_files_per_host' => $integerEnv('CAPELL_HTML_CACHE_MAX_ERROR_FILES_PER_HOST', 500),
+        'retain_after_prune' => $integerEnv('CAPELL_HTML_CACHE_RETAIN_ERROR_FILES_AFTER_PRUNE', 450),
+    ],
+    'hit_recording' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_HIT_RECORDING', true),
+        'flush_delay_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_FLUSH_DELAY_SECONDS', 30),
+        'buffer_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_BUFFER_TTL_SECONDS', 3600),
+    ],
     'http_cache' => [
         /*
         |--------------------------------------------------------------------------
         | Public response cache-control ages
         |--------------------------------------------------------------------------
         |
-        | The filesystem page cache itself has no TTL; files live until model,
-        | route, or manual invalidation clears or refreshes them. These values
-        | only control HTTP/CDN cache headers on public cacheable responses.
+        | Filesystem entries are bounded independently by filesystem_ttl_seconds.
+        | These values control HTTP/CDN cache headers on public responses.
         | When shared_max_age is null, it falls back to cache_ttl / 6 for
         | backwards-compatible headers.
         */

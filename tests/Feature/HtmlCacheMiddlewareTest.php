@@ -8,7 +8,9 @@ use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
+use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Jobs\FlushHtmlCacheHitBatchJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
@@ -21,6 +23,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -71,6 +75,99 @@ beforeEach(function (): void {
     config()->set('capell-html-cache.enabled', true);
     config()->set('capell-html-cache.write_enabled', true);
     config()->set('capell-html-cache.cache_ttl', '3600');
+    config()->set('capell-html-cache.filesystem_ttl_seconds', 3600);
+    Cache::clear();
+});
+
+it('expires stale filesystem cache entries before serving them', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.filesystem_ttl_seconds', 60);
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/expired', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $pageCache = resolve(PageCache::class);
+    $pageCache->cache($request, response('expired html', 200, ['Content-Type' => 'text/html']));
+
+    $cachePath = Storage::disk('page_cache')->path('https.example.test/expired.html');
+    touch($cachePath, now()->subSeconds(61)->timestamp);
+
+    expect($pageCache->getCachePage($request))->toBeFalse()
+        ->and(File::exists($cachePath))->toBeFalse();
+});
+
+it('bounds cached not found pages and prunes the oldest entries', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.error_pages.max_files_per_host', 2);
+    config()->set('capell-html-cache.error_pages.retain_after_prune', 1);
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $firstRequest = Request::create('https://example.test/missing-one', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $firstRequest);
+    $pageCache = resolve(PageCache::class);
+    $pageCache->cache($firstRequest, response('first missing', 404, ['Content-Type' => 'text/html']));
+
+    $firstPath = Storage::disk('page_cache')->path('https.example.test/missing-one.404.html');
+    touch($firstPath, now()->subMinute()->timestamp);
+
+    foreach (['missing-two', 'missing-three'] as $path) {
+        $request = Request::create('https://example.test/' . $path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+        $pageCache->cache($request, response($path, 404, ['Content-Type' => 'text/html']));
+    }
+
+    $errorPages = collect(File::allFiles(Storage::disk('page_cache')->path('https.example.test')))
+        ->filter(static fn (SplFileInfo $file): bool => str_ends_with($file->getFilename(), PageCache::ERROR_EXTENSION));
+
+    expect($errorPages)->toHaveCount(2)
+        ->and(File::exists($firstPath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists('https.example.test/missing-three.404.html'))->toBeTrue();
+});
+
+it('batches html cache hit telemetry off the request path', function (): void {
+    Queue::fake();
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $url = 'https://example.test/batched';
+    $cachedModelUrl = CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/batched',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => SiteDomain::class,
+        'cacheable_id' => $siteDomain->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+    $request = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+
+    RecordHtmlCacheHitAction::run($request, 12);
+    RecordHtmlCacheHitAction::run($request, 18);
+
+    Queue::assertPushed(FlushHtmlCacheHitBatchJob::class, 1);
+    expect($cachedModelUrl->refresh()->hit_count)->toBe(0)
+        ->and($cachedModelUrl->bytes_served)->toBe(0);
+
+    (new FlushHtmlCacheHitBatchJob(CachedModelUrl::hashUrl($url)))->handle();
+
+    expect($cachedModelUrl->refresh()->hit_count)->toBe(2)
+        ->and($cachedModelUrl->bytes_served)->toBe(30)
+        ->and($cachedModelUrl->last_hit_at)->not->toBeNull();
 });
 
 it('bypasses cached html for requests with a session cookie by default', function (): void {
@@ -431,7 +528,7 @@ it('does not fail public responses when a cache write fails', function (): void 
     $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
 
     app()->instance('request', $request);
-    resolve(PageCache::class)->setCachePath('/dev/null');
+    app()->instance(PageCache::class, resolve(PageCache::class)->setCachePath('/dev/null'));
 
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,

@@ -5,8 +5,10 @@ declare(strict_types=1);
 use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Models\Language;
 use Capell\Core\Models\Page;
+use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
+use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
@@ -21,6 +23,7 @@ use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Database\Eloquent\Relations\MorphPivot;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -178,6 +181,40 @@ it('clears cached files and table rows for a url', function (): void {
         ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse()
         ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
+});
+
+it('queues page and page url lifecycle invalidation durably', function (): void {
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'durable-invalidation.test',
+        'path' => null,
+    ]);
+
+    Queue::fake();
+
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+
+    ClearAllHtmlCacheAction::assertPushed();
+
+    Queue::fake();
+
+    $pageUrl = PageUrl::factory()
+        ->for($siteDomain->site)
+        ->for($siteDomain->language)
+        ->page($page)
+        ->create([
+            'url' => '/durable',
+        ]);
+
+    ClearCachedUrlAction::assertPushed();
+
+    Queue::fake();
+    $pageUrl->delete();
+
+    ClearCachedUrlAction::assertPushed();
 });
 
 it('clears cached files and table rows for invalidated site surrogate keys', function (): void {

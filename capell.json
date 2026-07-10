@@ -77,7 +77,7 @@
     "database": {
         "migrations": true,
         "settings": false,
-        "requiredTables": []
+        "requiredTables": ["cached_model_urls", "stale_cached_urls"]
     },
     "commands": {
         "install": null,

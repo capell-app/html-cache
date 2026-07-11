@@ -25,7 +25,7 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
     config()->set('capell-html-cache.enabled', true);
 
     if ($page instanceof EloquentModel) {
-        $page->loadMissing('type');
+        $page->loadMissing('blueprint');
     }
 
     app()->instance(CapellFrontendContext::class, new CapellFrontendContext(

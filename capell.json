@@ -1,0 +1,234 @@
+{
+    "manifest-version": 3,
+    "name": "capell-app/html-cache",
+    "slug": "html-cache",
+    "displayName": "HTML Cache",
+    "kind": "package",
+    "capellApiVersion": "^0.0.1",
+    "version": "0.0.x-dev",
+    "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
+    "product": {
+        "group": "Capell Foundation",
+        "tier": "free",
+        "bundle": "foundation"
+    },
+    "namespace": "Capell\\HtmlCache",
+    "surfaces": ["admin", "frontend"],
+    "dependencies": {
+        "requires": [
+            "capell-app/admin",
+            "capell-app/core",
+            "capell-app/frontend"
+        ],
+        "supports": ["capell-app/site-discovery"],
+        "conflicts": []
+    },
+    "providers": {
+        "metadata": [],
+        "install": [],
+        "runtime": ["Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"],
+        "admin": [],
+        "frontend": []
+    },
+    "contributes": [
+        {
+            "type": "admin-page",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheAdminPagesContribution",
+            "pageClass": "Capell\\HtmlCache\\Filament\\Pages\\MaintenanceCachePage",
+            "labelKey": "capell-html-cache::admin.maintenance_cache"
+        },
+        {
+            "type": "dashboard-widget",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheDashboardFilamentWidgetsContribution",
+            "widgetClasses": [
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheOverviewFilamentWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\CacheCoverageUrlsFilamentWidget",
+                "Capell\\HtmlCache\\Filament\\Widgets\\HtmlCacheStaleQueueFilamentWidget"
+            ]
+        },
+        {
+            "type": "model",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheModelsContribution",
+            "modelClasses": [
+                "Capell\\HtmlCache\\Models\\CachedModelUrl",
+                "Capell\\HtmlCache\\Models\\StaleCachedUrl"
+            ],
+            "tables": ["cached_model_urls", "stale_cached_urls"]
+        },
+        {
+            "type": "route",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheFrontendRoutesContribution",
+            "routes": [],
+            "middlewareAliases": [
+                "frontend.cache",
+                "frontend.model_events",
+                "frontend.no_session_cookies_on_cache"
+            ]
+        },
+        {
+            "type": "scheduled-job",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheStaleProcessingScheduleContribution",
+            "command": "capell:html-cache:process-stale",
+            "frequencyConfig": "capell-html-cache.invalidation.schedule",
+            "defaultFrequency": "everyFiveMinutes",
+            "enabledWhen": "capell-html-cache.invalidation.mode=scheduled"
+        }
+    ],
+    "database": {
+        "migrations": true,
+        "settings": false,
+        "requiredTables": ["cached_model_urls", "stale_cached_urls"]
+    },
+    "commands": {
+        "install": null,
+        "setup": null,
+        "demo": null,
+        "doctor": null
+    },
+    "settings": [],
+    "permissions": ["capell-html-cache.view", "capell-html-cache.clear"],
+    "capabilities": ["cache-blocking"],
+    "security": {
+        "riskTier": "standard",
+        "publicSurface": {
+            "routeNames": [],
+            "auth": "none",
+            "csrfExemptRoutes": [],
+            "signedRoutes": [],
+            "tokenizedRoutes": [],
+            "webhookRoutes": [],
+            "throttledRoutes": []
+        },
+        "sensitiveData": {
+            "encryptedFields": [],
+            "hashedTokenFields": [
+                "cached_model_urls.url_hash",
+                "stale_cached_urls.url_hash"
+            ],
+            "redactedOutputClasses": [],
+            "plaintextJustifications": [
+                "stale_cached_urls.claim_token: Reviewed package field; not stored as a reusable secret by this package contract."
+            ]
+        },
+        "publicOutput": {
+            "cacheSafe": true,
+            "forbidAuthoringSurface": true,
+            "forbidSecrets": true,
+            "forbidPublicBladeQueries": true
+        },
+        "externalHttpClients": {
+            "requiresTimeouts": true,
+            "requiresSecretRedaction": true,
+            "clients": [
+                "Capell\\HtmlCache\\Support\\Cache\\Purgers\\HttpSurrogateKeyCachePurger"
+            ]
+        },
+        "adminSurface": {
+            "authorization": "permissions",
+            "permissions": ["capell-html-cache.view", "capell-html-cache.clear"]
+        }
+    },
+    "performance": {
+        "frontendRenderBudgetMs": 20,
+        "adminQueryBudget": 40,
+        "cacheTags": ["html-cache"],
+        "cacheSafety": {
+            "cacheable": true,
+            "variesBy": ["site", "locale"],
+            "sensitiveOutput": false,
+            "invalidationSources": [
+                {
+                    "model": "Capell\\Core\\Models\\Page",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\PageUrl",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\SiteDomain",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\Core\\Models\\Translation",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\HtmlCache\\Models\\CachedModelUrl",
+                    "events": ["saved", "deleted"]
+                },
+                {
+                    "model": "Capell\\HtmlCache\\Models\\StaleCachedUrl",
+                    "events": ["saved", "deleted"]
+                }
+            ],
+            "queueInvalidation": true
+        }
+    },
+    "healthChecks": [
+        {
+            "key": "html-cache.package-health",
+            "label": "HTML Cache package surfaces, providers, and install health are discoverable by Diagnostics.",
+            "class": "Capell\\HtmlCache\\Health\\HtmlCacheHealthCheck",
+            "severity": "critical",
+            "surface": "admin"
+        }
+    ],
+    "commercial": {
+        "proposedLicense": "free",
+        "requestedCertification": "first-party",
+        "supportPolicy": "capell-first-party",
+        "privateDocsRequested": false
+    },
+    "marketplace": {
+        "summary": "Serve Capell pages as static HTML for sub-millisecond responses — with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
+        "screenshots": [
+            {
+                "path": "docs/assets/marketplace/extension-card.jpg",
+                "alt": "HTML Cache extension preview image",
+                "caption": "HTML Cache extension preview"
+            },
+            {
+                "path": "docs/screenshots/html-cache-maintenance-cache-page.png",
+                "alt": "HTML Cache maintenance cache page in Capell admin",
+                "caption": "Maintenance cache page"
+            },
+            {
+                "path": "docs/screenshots/html-cache-cached-model-urls.png",
+                "alt": "HTML Cache cached model URLs resource index in Capell admin",
+                "caption": "Cached model URLs"
+            },
+            {
+                "path": "docs/screenshots/html-cache-dashboard-widgets.png",
+                "alt": "HTML Cache dashboard widgets for overview, coverage, and stale queue",
+                "caption": "Dashboard widgets"
+            },
+            {
+                "path": "docs/screenshots/html-cache-site-health-cache-map.png",
+                "alt": "HTML Cache site health cache-map diagnostics in Capell admin",
+                "caption": "Site health cache map"
+            },
+            {
+                "path": "docs/screenshots/html-cache-page-table-extension.png",
+                "alt": "HTML Cache page table cache indicator in the Capell Pages resource",
+                "caption": "Page table cache indicator"
+            },
+            {
+                "path": "docs/screenshots/html-cache-public-cache-hit.png",
+                "alt": "Anonymous public cache hit with safe cached public HTML",
+                "caption": "html cache public cache hit"
+            },
+            {
+                "path": "docs/screenshots/html-cache-maintenance-page.png",
+                "alt": "Static maintenance page output served from generated HTML",
+                "caption": "html cache maintenance page"
+            }
+        ],
+        "categories": ["admin", "foundation", "frontend"]
+    },
+    "scopes": ["backend", "frontend"],
+    "order": 45,
+    "contributionTraceability": {
+        "deferredContributions": []
+    }
+}

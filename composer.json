@@ -1,0 +1,67 @@
+{
+    "name": "capell-app/html-cache",
+    "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
+    "type": "library",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.4",
+        "capell-app/admin": "^0.0.4",
+        "capell-app/core": "^0.0.4",
+        "capell-app/frontend": "^0.0.4",
+        "laravel/framework": "^11.44.2|^12.0|^13.0",
+        "lorisleiva/laravel-actions": "^2.8",
+        "spatie/laravel-data": "^4.5",
+        "spatie/laravel-package-tools": "^1.14"
+    },
+    "suggest": {
+        "capell-app/site-discovery": "Enables public URL registry generated-output coverage reporting for cached HTML URLs."
+    },
+    "autoload": {
+        "psr-4": {
+            "Capell\\HtmlCache\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Capell\\HtmlCache\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"
+            ]
+        },
+        "branch-alias": {
+            "dev-main": "0.0.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "../../vendor/bin/pest tests --configuration=../../phpunit.xml",
+        "lint": "../../vendor/bin/pint --config=../../pint.json",
+        "analyse": "cd ../.. && COMPOSER=composer.local.json composer analyze"
+    },
+    "prefer-stable": true,
+    "homepage": "https://github.com/capell-app/html-cache",
+    "keywords": [
+        "capell",
+        "cms",
+        "laravel",
+        "cache",
+        "frontend"
+    ],
+    "authors": [
+        {
+            "name": "Capell Team",
+            "email": "team@capell.app",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "source": "https://github.com/capell-app/capell-packages",
+        "docs": "https://docs.capell.app/packages/html-cache"
+    }
+}

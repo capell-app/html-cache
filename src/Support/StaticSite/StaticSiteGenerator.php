@@ -63,7 +63,7 @@ final class StaticSiteGenerator
             'pageUrls' => fn (Builder $query): Builder => $query->whereHas(
                 'pageable',
                 fn (BuilderContract $query): BuilderContract => $query->whereHas(
-                    'type',
+                    'blueprint',
                     fn (BuilderContract $query): BuilderContract => $query->enabled()->accessible(),
                 ),
             ),
@@ -94,7 +94,7 @@ final class StaticSiteGenerator
                 'pageable',
                 fn (BuilderContract $query): BuilderContract => $query
                     ->whereHas(
-                        'type',
+                        'blueprint',
                         fn (BuilderContract $query): BuilderContract => $query->enabled()->accessible(),
                     ),
             )

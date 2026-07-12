@@ -67,7 +67,7 @@ it('does not create system pages while building site header actions', function (
 
     $systemPageCount = fn (): int => Page::query()
         ->where('site_id', $site->id)
-        ->whereHas('type', fn (Builder $query): Builder => $query->whereIn('key', [
+        ->whereHas('blueprint', fn (Builder $query): Builder => $query->whereIn('key', [
             PageTypeEnum::NotFound->value,
             PageTypeEnum::Maintenance->value,
         ]))

@@ -367,7 +367,7 @@ it('resolves cached page rows for page urls and pageable records', function (): 
 
     expect($method->invoke($column, $pageUrl)->is($cachedModelUrl))->toBeTrue()
         ->and($method->invoke($column, $page)->is($cachedModelUrl))->toBeTrue()
-        ->and(HtmlCacheHealthCheck::compatibleCapellApiVersion())->toBe('^4.0');
+        ->and(HtmlCacheHealthCheck::compatibleCapellApiVersion())->toBe('^1.0');
 });
 
 it('runs html cache console commands against static site and file cache paths', function (): void {

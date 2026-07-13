@@ -17,6 +17,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
+use RuntimeException;
 
 /**
  * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
@@ -148,7 +149,7 @@ final class ClearCachedUrlAction
         $keys = array_values(SurrogateKeyNormalizer::normalize($keys));
 
         if ($keys !== []) {
-            resolve(CachePurger::class)->purge($keys);
+            throw_unless(resolve(CachePurger::class)->purge($keys), RuntimeException::class, 'Unable to purge the cached URL surrogate keys.');
         }
     }
 }

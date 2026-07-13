@@ -12,12 +12,17 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
 require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
+
+beforeEach(function (): void {
+    Cache::flush();
+});
 
 it('reports unsafe cached public html through package diagnostics', function (): void {
     Storage::fake('page_cache');

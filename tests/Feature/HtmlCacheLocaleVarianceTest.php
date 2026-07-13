@@ -8,7 +8,9 @@ use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 uses(HtmlCacheTestCase::class);
 
@@ -16,6 +18,18 @@ beforeEach(function (): void {
     config()->set('capell-html-cache.enabled', true);
     config()->set('capell-html-cache.write_enabled', true);
 });
+
+function useIsolatedLocaleVariancePageCacheDisk(): void
+{
+    $root = storage_path('framework/testing/disks/page_cache-locale-variance/' . Str::uuid()->toString());
+    File::ensureDirectoryExists($root);
+
+    Storage::set('page_cache', Storage::build([
+        'driver' => 'local',
+        'root' => $root,
+        'throw' => true,
+    ]));
+}
 
 /**
  * The on-disk cache key is host+path only (no locale dimension). Locale variance
@@ -25,7 +39,7 @@ beforeEach(function (): void {
  * entirely so two locales on the same host+path are never cross-served.
  */
 it('does not cache or cross-serve two locales negotiated on the same host and path via query string', function (): void {
-    Storage::fake('page_cache');
+    useIsolatedLocaleVariancePageCacheDisk();
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
@@ -61,7 +75,7 @@ it('does not cache or cross-serve two locales negotiated on the same host and pa
 });
 
 it('bypasses same host and path locale variants negotiated by configured headers', function (): void {
-    Storage::fake('page_cache');
+    useIsolatedLocaleVariancePageCacheDisk();
     config()->set('capell-html-cache.bypass.headers', ['Accept-Language']);
 
     $siteDomain = SiteDomain::factory()->create([
@@ -93,7 +107,7 @@ it('bypasses same host and path locale variants negotiated by configured headers
 });
 
 it('serves a distinct cached file per host so distinct-host locales do not collide', function (): void {
-    Storage::fake('page_cache');
+    useIsolatedLocaleVariancePageCacheDisk();
 
     SiteDomain::factory()->create([
         'scheme' => 'https',

@@ -15,7 +15,13 @@ use Illuminate\Database\Eloquent\Model;
 /** @param array<string, mixed> $attributes */
 function htmlCachePathResolverSiteDomain(array $attributes): SiteDomain
 {
-    return Model::withoutEvents(static fn (): SiteDomain => new SiteDomain($attributes));
+    $siteDomain = Model::withoutEvents(static fn (): SiteDomain => new SiteDomain($attributes));
+
+    if (! $siteDomain instanceof SiteDomain) {
+        throw new RuntimeException('Expected a site domain model.');
+    }
+
+    return $siteDomain;
 }
 
 it('keeps html cache dashboard and cache map values typed', function (): void {

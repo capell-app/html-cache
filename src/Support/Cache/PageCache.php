@@ -299,6 +299,7 @@ final class PageCache
     /**
      * @return array<array-key, mixed>|null
      */
+    /** @return array{string, string, string}|null */
     private function getDirectoryAndFileNames(SymfonyRequest $request, SymfonyResponse $response): ?array
     {
         /** @var Request $laravelRequest */
@@ -352,7 +353,9 @@ final class PageCache
     private function getDefaultCachePath(): ?string
     {
         if ($this->container?->bound('path.public') === true) {
-            return $this->container->make('path.public') . '/page-cache';
+            $publicPath = $this->container->make('path.public');
+
+            return is_string($publicPath) ? $publicPath . '/page-cache' : null;
         }
 
         return null;

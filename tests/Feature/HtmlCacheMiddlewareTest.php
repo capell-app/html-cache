@@ -95,7 +95,7 @@ it('expires stale filesystem cache entries before serving them', function (): vo
     $pageCache->cache($request, response('expired html', 200, ['Content-Type' => 'text/html']));
 
     $cachePath = Storage::disk('page_cache')->path('https.example.test/expired.html');
-    touch($cachePath, now()->subSeconds(61)->timestamp);
+    touch($cachePath, now()->subSeconds(61)->getTimestamp());
 
     expect($pageCache->getCachePage($request))->toBeFalse()
         ->and(File::exists($cachePath))->toBeFalse();
@@ -118,7 +118,7 @@ it('bounds cached not found pages and prunes the oldest entries', function (): v
     $pageCache->cache($firstRequest, response('first missing', 404, ['Content-Type' => 'text/html']));
 
     $firstPath = Storage::disk('page_cache')->path('https.example.test/missing-one.404.html');
-    touch($firstPath, now()->subMinute()->timestamp);
+    touch($firstPath, now()->subMinute()->getTimestamp());
 
     foreach (['missing-two', 'missing-three'] as $path) {
         $request = Request::create('https://example.test/' . $path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
@@ -276,7 +276,10 @@ it('refuses to read or write cache files for hostile request path segments', fun
 
     $pageCache->cache($request, $response);
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe([]);
+    $cacheRoot = Storage::disk('page_cache')->path('');
+    $cachedFiles = File::isDirectory($cacheRoot) ? Storage::disk('page_cache')->allFiles() : [];
+
+    expect($cachedFiles)->toBe([]);
 })->with([
     'plain traversal' => ['https://example.test/unsafe/../secret'],
     'encoded traversal' => ['https://example.test/unsafe/%2e%2e/secret'],

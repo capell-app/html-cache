@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Contracts\Themes\ThemePreviewRendererInterface;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Blueprint;
 use Capell\Core\Models\Language;
@@ -890,6 +891,18 @@ it('builds maintenance cache page header actions', function (): void {
 it('toggles and generates site maintenance cache state', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-toggle.test');
     $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $siteDomain->site_id])));
+    app()->instance(ThemePreviewRendererInterface::class, new class implements ThemePreviewRendererInterface
+    {
+        public function render(
+            Theme $theme,
+            Site $site,
+            Page $page,
+            ?Language $language = null,
+            ?SiteDomain $siteDomain = null,
+        ): Response {
+            return new Response('<h1>Maintenance</h1>');
+        }
+    });
 
     $page = new MaintenanceCachePage;
     resolve(MaintenanceManifestStore::class)->setSiteActive((int) $siteDomain->site_id, false);

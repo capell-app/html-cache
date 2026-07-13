@@ -33,8 +33,22 @@ it('does not write public html cache for non-cacheable extension output', functi
         fn (): Response => response('extension html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe([])
+    expect(htmlCachePublicResponseFiles())->toBe([])
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('defensively rejects direct cache writes for non-cacheable extension error output', function (): void {
+    Storage::fake('page_cache');
+
+    $request = Request::create('https://example.test/protected', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    recordHtmlCacheExtensionContribution(cacheable: false);
+
+    resolve(PageCache::class)->cache(
+        $request,
+        response('unauthorized extension html', 401, ['Content-Type' => 'text/html']),
+    );
+
+    expect(htmlCachePublicResponseFiles())->toBe([]);
 });
 
 it('does not write public html cache for sensitive extension output', function (): void {
@@ -49,7 +63,7 @@ it('does not write public html cache for sensitive extension output', function (
         fn (): Response => response('sensitive extension html', 200, ['Content-Type' => 'text/html']),
     );
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe([])
+    expect(htmlCachePublicResponseFiles())->toBe([])
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
 
@@ -71,7 +85,7 @@ it('keeps session cookies on non-cacheable extension output', function (): void 
 
     $cookies = collect($response->headers->getCookies())->map->getName()->all();
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe([])
+    expect(htmlCachePublicResponseFiles())->toBe([])
         ->and($cookies)->toContain('capell_session')
         ->and($cookies)->toContain('XSRF-TOKEN');
 });
@@ -116,4 +130,13 @@ function recordHtmlCacheExtensionContribution(
         sensitiveOutput: $sensitiveOutput,
         variesBy: ['site', 'locale'],
     );
+}
+
+/** @return list<string> */
+function htmlCachePublicResponseFiles(): array
+{
+    return array_values(array_filter(
+        Storage::disk('page_cache')->allFiles(),
+        static fn (string $path): bool => ! str_starts_with($path, 'error/'),
+    ));
 }

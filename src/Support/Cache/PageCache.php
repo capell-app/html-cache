@@ -76,6 +76,13 @@ final class PageCache
         /** @var Response $laravelResponse */
         $laravelResponse = $response;
 
+        if (! in_array($laravelResponse->getStatusCode(), [
+            SymfonyResponse::HTTP_OK,
+            SymfonyResponse::HTTP_NOT_FOUND,
+        ], true)) {
+            return;
+        }
+
         if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypass($laravelRequest)) {
             return;
         }

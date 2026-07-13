@@ -4,7 +4,7 @@
     "slug": "html-cache",
     "displayName": "HTML Cache",
     "kind": "package",
-    "capellApiVersion": "^1.0",
+    "capellApiVersion": "^4.0",
     "version": "1.x-dev",
     "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
     "product": {

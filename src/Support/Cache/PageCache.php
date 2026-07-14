@@ -10,6 +10,7 @@ use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use ErrorException;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
@@ -252,7 +253,15 @@ final class PageCache
             return false;
         }
 
-        return $this->files->get($path);
+        try {
+            return $this->files->get($path);
+        } catch (ErrorException $exception) {
+            if (! $this->files->exists($path)) {
+                return false;
+            }
+
+            throw $exception;
+        }
     }
 
     private function reserveErrorPageSlot(string $targetPath): bool

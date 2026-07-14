@@ -1014,6 +1014,34 @@ it('skips page cache reads and writes for oversized hostile request paths', func
     expect(File::exists($cachePath))->toBeFalse();
 });
 
+it('treats a cache file deleted during a concurrent read as a cache miss', function (): void {
+    $filesystem = new class extends Filesystem
+    {
+        private int $existsCalls = 0;
+
+        public function exists($path): bool
+        {
+            $this->existsCalls++;
+
+            return $this->existsCalls === 1;
+        }
+
+        public function get($path, $lock = false): string
+        {
+            throw new ErrorException('Cache file disappeared during read.');
+        }
+
+        public function lastModified($path): int
+        {
+            return time();
+        }
+    };
+
+    $cache = (new PageCache($filesystem))->setCachePath(storage_path('framework/testing-page-cache-race'));
+
+    expect($cache->getCachePage(Request::create('/race')))->toBeFalse();
+});
+
 it('skips page cache reads and writes for encoded hostile request paths', function (string $path): void {
     $cachePath = storage_path('framework/testing-page-cache-hostile-paths');
     File::deleteDirectory($cachePath);

@@ -18,7 +18,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\Response;
 
 final class StaticSiteGenerator
 {
@@ -167,17 +166,12 @@ final class StaticSiteGenerator
         $response = $kernel->handle($request);
         $kernel->terminate($request, $response);
 
-        if (! $this->isSuccessfulStaticResponse($response)) {
-            Log::info('Problem accessing url', ['url' => $url, 'status' => $response->getStatusCode()]);
+        if (! $response->isSuccessful()) {
+            throw new RuntimeException(sprintf(
+                'Static generation request [%s] returned HTTP %d.',
+                $url,
+                $response->getStatusCode(),
+            ));
         }
-    }
-
-    private function isSuccessfulStaticResponse(Response $response): bool
-    {
-        if ($response->isSuccessful()) {
-            return true;
-        }
-
-        return $response->isRedirection();
     }
 }

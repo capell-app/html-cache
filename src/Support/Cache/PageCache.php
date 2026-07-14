@@ -10,7 +10,6 @@ use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
-use ErrorException;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Request;
@@ -22,6 +21,7 @@ use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+use Throwable;
 
 final class PageCache
 {
@@ -255,8 +255,10 @@ final class PageCache
 
         try {
             return $this->files->get($path);
-        } catch (ErrorException $exception) {
-            if (! $this->files->exists($path)) {
+        } catch (Throwable $exception) {
+            clearstatcache(true, $path);
+
+            if (! is_file($path)) {
                 return false;
             }
 

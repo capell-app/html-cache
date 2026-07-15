@@ -1,0 +1,40 @@
+{
+    "whatThisPluginAdds": {
+        "text": "HTML Cache stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration with public-output safety checks.",
+        "evidence": [
+            "capell.json",
+            "src/Http/Middleware/HtmlCacheMiddleware.php",
+            "src/Models/CachedModelUrl.php",
+            "src/Models/StaleCachedUrl.php"
+        ]
+    },
+    "surfaceOutcome": {
+        "text": "Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.",
+        "evidence": [
+            "docs/overview.admin.md",
+            "docs/screenshots.json",
+            "src/Filament/Pages/MaintenanceCachePage.php",
+            "tests/Feature/HtmlCacheMiddlewareTest.php"
+        ]
+    },
+    "whyItMatters": {
+        "developers": {
+            "text": "Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable.",
+            "evidence": [
+                "src/Actions/RecordCachedModelUrlsAction.php",
+                "src/Actions/MarkCachedUrlsForModelStaleAction.php",
+                "src/Actions/RefreshCachedUrlAtomicallyAction.php",
+                "tests/Feature/StaleCachedUrlsTest.php"
+            ]
+        },
+        "teams": {
+            "text": "Teams can see whether important URLs are cached and recover from stale output without weakening the rule that admin and authoring details stay out of public files.",
+            "evidence": [
+                "docs/admin-guide.md",
+                "src/Actions/BuildHtmlCacheEligibilityReportAction.php",
+                "src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php",
+                "tests/Feature/ExtensionCacheSafetyTest.php"
+            ]
+        }
+    }
+}

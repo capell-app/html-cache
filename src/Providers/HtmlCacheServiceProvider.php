@@ -21,6 +21,7 @@ use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
+use Capell\Frontend\Contracts\FrontendOutputCacheInvalidator;
 use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\Frontend\Contracts\StaticErrorPageStore;
 use Capell\Frontend\Contracts\StaticMaintenancePageStore;
@@ -56,6 +57,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
@@ -103,6 +105,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $this->app->singleton(HtmlCachePathResolver::class);
         $this->app->singleton(HtmlCacheStore::class);
+        $this->app->singleton(FrontendOutputCacheInvalidator::class, HtmlFrontendOutputCacheInvalidator::class);
         $this->app->singleton(HtmlCacheHitBuffer::class);
         $this->app->singleton(CachePurger::class, fn (): CachePurger => config('capell-html-cache.purge.driver') === 'http'
                 ? $this->app->make(HttpSurrogateKeyCachePurger::class)

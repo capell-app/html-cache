@@ -21,6 +21,7 @@ use Symfony\Component\Finder\SplFileInfo;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+use Throwable;
 
 final class PageCache
 {
@@ -252,7 +253,17 @@ final class PageCache
             return false;
         }
 
-        return $this->files->get($path);
+        try {
+            return $this->files->get($path);
+        } catch (Throwable $exception) {
+            clearstatcache(true, $path);
+
+            if (! is_file($path)) {
+                return false;
+            }
+
+            throw $exception;
+        }
     }
 
     private function reserveErrorPageSlot(string $targetPath): bool

@@ -274,7 +274,7 @@ it('visits static urls internally with host and port server headers', function (
 
             return true;
         }))
-        ->andReturn(new Response('', Response::HTTP_OK), new Response('', Response::HTTP_FOUND));
+        ->andReturn(new Response('', Response::HTTP_OK), new Response('', Response::HTTP_OK));
     $kernel->shouldReceive('terminate')->twice();
 
     app()->instance(HttpKernel::class, $kernel);
@@ -290,6 +290,29 @@ it('visits static urls internally with host and port server headers', function (
         ['uri' => '/path', 'host' => 'example.test:8080', 'https' => 'off'],
     ]);
 });
+
+it('fails internal static generation when a public URL does not render successfully', function (int $status): void {
+    $kernel = Mockery::mock(HttpKernel::class);
+    $kernel->shouldReceive('handle')
+        ->once()
+        ->andReturn(new Response('Unusable page', $status));
+    $kernel->shouldReceive('terminate')->once();
+
+    app()->instance(HttpKernel::class, $kernel);
+
+    $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
+
+    expect(fn (): mixed => $method->invoke(
+        new StaticSiteGenerator(new Site),
+        'https://example.test/unusable-page',
+    ))->toThrow(
+        RuntimeException::class,
+        "Static generation request [https://example.test/unusable-page] returned HTTP {$status}.",
+    );
+})->with([
+    'redirect' => Response::HTTP_FOUND,
+    'server error' => Response::HTTP_INTERNAL_SERVER_ERROR,
+]);
 
 it('logs invalid internal static urls instead of dispatching them', function (): void {
     Log::shouldReceive('warning')

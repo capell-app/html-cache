@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +20,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class WriteRefreshedHtmlCacheFileAction
 {
+    use AsFake;
     use AsObject;
 
     public function handle(Response $response, StaleCachedUrl $staleCachedUrl): void

@@ -8,6 +8,7 @@ use Capell\Admin\Data\Diagnostics\DiagnosticCheckData;
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Builder;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
@@ -15,6 +16,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class BuildCachedModelUrlDiagnosticsAction
 {
+    use AsFake;
     use AsObject;
 
     /**

@@ -11,14 +11,16 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static HtmlCacheDashboardStatsData run()
  */
 final class BuildHtmlCacheDashboardStatsAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     public function handle(): HtmlCacheDashboardStatsData
     {

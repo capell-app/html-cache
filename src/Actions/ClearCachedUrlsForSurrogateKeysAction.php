@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Collection;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -14,6 +15,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class ClearCachedUrlsForSurrogateKeysAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

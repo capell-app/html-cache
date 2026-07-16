@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 use Throwable;
@@ -19,6 +20,7 @@ use Throwable;
  */
 final class RefreshOriginStaleCachedUrlAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

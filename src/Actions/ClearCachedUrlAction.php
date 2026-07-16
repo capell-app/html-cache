@@ -15,6 +15,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Illuminate\Database\Eloquent\Collection;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
@@ -24,6 +25,7 @@ use RuntimeException;
  */
 final class ClearCachedUrlAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

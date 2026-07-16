@@ -11,14 +11,16 @@ use Capell\HtmlCache\Data\CacheMap\CacheMapResourceSummaryData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static CacheMapOverviewData run(?int $siteId = null)
  */
 final class BuildCacheMapOverviewAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     public function handle(?int $siteId = null): CacheMapOverviewData
     {

@@ -20,6 +20,7 @@ use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -29,6 +30,7 @@ use Throwable;
  */
 final class BuildHtmlCacheEligibilityReportAction
 {
+    use AsFake;
     use AsObject;
 
     public function handle(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null): HtmlCacheEligibilityReportData

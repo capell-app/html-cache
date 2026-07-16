@@ -10,6 +10,7 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -18,6 +19,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class MarkAllCachedUrlsStaleAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

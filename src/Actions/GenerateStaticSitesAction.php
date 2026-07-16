@@ -8,6 +8,7 @@ use Capell\Core\Models\Site;
 use Capell\HtmlCache\Enums\HtmlCacheKey;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
@@ -15,6 +16,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class GenerateStaticSitesAction
 {
+    use AsFake;
     use AsObject;
 
     private string $cacheKey = HtmlCacheKey::GeneratingStaticSite->value;

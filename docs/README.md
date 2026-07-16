@@ -8,6 +8,7 @@ Start at the [package README](../README.md) when deciding whether to install thi
 
 | Doc                                         | Use it for                                                                         |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [Admin Guide](admin-guide.md)               | Configure cache behavior and investigate cache health.                             |
 | [Cache Invalidation](cache-invalidation.md) | Focused package workflow, setup, troubleshooting, or implementation details.       |
 | [Overview](overview.md)                     | Package boundary, runtime surfaces, install notes, and first troubleshooting path. |
 

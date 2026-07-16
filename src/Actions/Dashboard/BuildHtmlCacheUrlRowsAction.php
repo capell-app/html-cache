@@ -11,14 +11,16 @@ use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static Collection<int, array{id: string, state: string, url: string, site: string, hits: string, last_hit: string, cached_at: string, last_seen: string}> run(string $mode, int $limit = 5)
  */
 final class BuildHtmlCacheUrlRowsAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     /**
      * @return Collection<int, array{id: string, state: string, url: string, site: string, hits: string, last_hit: string, cached_at: string, last_seen: string}>

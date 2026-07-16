@@ -6,8 +6,8 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Contracts\Pageable;
 use Capell\Core\Models\PageUrl;
-use Lorisleiva\Actions\Concerns\AsAction;
 use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
@@ -15,8 +15,8 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class DeletePageCacheAction
 {
-    use AsAction;
     use AsFake;
+    use AsJob;
     use AsObject;
 
     public function handle(Pageable|PageUrl $record, ?bool $refresh = null): bool

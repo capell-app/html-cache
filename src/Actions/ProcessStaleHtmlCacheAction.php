@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Actions;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 use Throwable;
@@ -16,6 +17,7 @@ use Throwable;
  */
 final class ProcessStaleHtmlCacheAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

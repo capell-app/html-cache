@@ -9,14 +9,16 @@ use Capell\HtmlCache\Data\CacheMap\CacheMapResourceSummaryData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static array<array-key, mixed> run(string $modelType, ?int $siteId = null, ?string $search = null, int $limit = 5)
  */
 final class ListCacheMapResourceOptionsAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     /**
      * @return list<CacheMapResourceSummaryData>

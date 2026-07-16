@@ -37,7 +37,7 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 2. Find the **URL** whose saved copy is out of date.
 3. Use **Clear URL** on that row to remove its saved copy for that site and language. Other sites and languages are left alone.
 4. The page rebuilds its saved copy the next time a visitor loads it.
-5. To clear several related pages at once, use **Clear selection** in the cache map view.
+5. To clear more than one page, clear each affected URL. **Clear selection** in the Cache Map only resets its filters; it does not clear cached pages.
 
 ### How to turn on maintenance mode while you work
 

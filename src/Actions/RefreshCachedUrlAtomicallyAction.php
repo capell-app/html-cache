@@ -16,6 +16,7 @@ use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
@@ -26,6 +27,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class RefreshCachedUrlAtomicallyAction
 {
+    use AsFake;
     use AsObject;
 
     public function handle(StaleCachedUrl $staleCachedUrl): void

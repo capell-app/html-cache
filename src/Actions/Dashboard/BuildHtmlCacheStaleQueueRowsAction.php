@@ -7,14 +7,16 @@ namespace Capell\HtmlCache\Actions\Dashboard;
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Illuminate\Support\Collection;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static Collection<int, array{id: string, url: string, status: string, attempts: int, reason: string, updated: string}> run(int $limit = 5)
  */
 final class BuildHtmlCacheStaleQueueRowsAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     /**
      * @return Collection<int, array{id: string, url: string, status: string, attempts: int, reason: string, updated: string}>

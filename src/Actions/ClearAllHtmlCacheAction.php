@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Actions;
 use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -15,6 +16,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class ClearAllHtmlCacheAction
 {
+    use AsFake;
     use AsJob;
     use AsObject;
 

@@ -12,6 +12,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Illuminate\Database\Eloquent\Builder;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use Throwable;
 
@@ -20,6 +21,7 @@ use Throwable;
  */
 final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
 {
+    use AsFake;
     use AsObject;
 
     /**

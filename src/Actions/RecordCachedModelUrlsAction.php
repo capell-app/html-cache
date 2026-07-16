@@ -11,6 +11,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
+use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
@@ -18,6 +19,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
  */
 final class RecordCachedModelUrlsAction
 {
+    use AsFake;
     use AsObject;
 
     /**

@@ -8,14 +8,16 @@ use Capell\HtmlCache\Jobs\FlushHtmlCacheHitBatchJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Illuminate\Http\Request;
-use Lorisleiva\Actions\Concerns\AsAction;
+use Lorisleiva\Actions\Concerns\AsFake;
+use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
  * @method static void run(Request $request, int $bytesServed)
  */
 final class RecordHtmlCacheHitAction
 {
-    use AsAction;
+    use AsFake;
+    use AsObject;
 
     public function handle(Request $request, int $bytesServed): void
     {

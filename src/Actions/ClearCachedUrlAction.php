@@ -49,9 +49,9 @@ final class ClearCachedUrlAction
         if (! $siteDomain instanceof SiteDomain) {
             $resolved = LoadSiteDomainFromUrlAction::run($urlString);
 
-            if (is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain) {
+            if (is_array($resolved)) {
                 $siteDomain = $resolved[0];
-                $path = is_string($resolved[1] ?? null) ? $resolved[1] : $path;
+                $path = $resolved[1];
             }
         }
 

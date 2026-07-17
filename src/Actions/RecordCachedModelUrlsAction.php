@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
-use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
@@ -32,8 +31,8 @@ final class RecordCachedModelUrlsAction
         }
 
         $resolved = LoadSiteDomainFromUrlAction::run($url);
-        $siteDomain = is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain ? $resolved[0] : null;
-        $path = is_array($resolved) && is_string($resolved[1] ?? null)
+        $siteDomain = is_array($resolved) ? $resolved[0] : null;
+        $path = is_array($resolved)
             ? $resolved[1]
             : resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
         $urlHash = CachedModelUrl::hashUrl($url);

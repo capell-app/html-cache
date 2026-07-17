@@ -33,7 +33,7 @@ final class RefreshCachedUrlAtomicallyAction
     public function handle(StaleCachedUrl $staleCachedUrl): void
     {
         $resolved = LoadSiteDomainFromUrlAction::run($staleCachedUrl->url);
-        $siteDomain = is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain ? $resolved[0] : null;
+        $siteDomain = is_array($resolved) ? $resolved[0] : null;
 
         if (! $siteDomain instanceof SiteDomain) {
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);

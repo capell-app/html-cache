@@ -121,8 +121,8 @@ final class MarkCachedUrlStaleAction
         }
 
         $resolved = LoadSiteDomainFromUrlAction::run($url);
-        $siteDomain = is_array($resolved) && ($resolved[0] ?? null) instanceof SiteDomain ? $resolved[0] : null;
-        $path = is_array($resolved) && is_string($resolved[1] ?? null)
+        $siteDomain = is_array($resolved) ? $resolved[0] : null;
+        $path = is_array($resolved)
             ? $resolved[1]
             : resolve(HtmlCachePathResolver::class)->normalizePathFromUrl($url);
         $urlHash = CachedModelUrl::hashUrl($url);

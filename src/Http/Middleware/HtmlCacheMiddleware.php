@@ -259,7 +259,7 @@ final class HtmlCacheMiddleware
         $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
         $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
 
-        if (! $report instanceof HtmlCacheEligibilityReportData || ! $report->eligible) {
+        if (! $report->eligible) {
             return false;
         }
 

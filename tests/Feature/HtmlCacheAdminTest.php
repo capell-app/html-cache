@@ -61,7 +61,7 @@ it('does not register the cached model urls resource as an admin page', function
     CapellAdmin::clearAdminSurfaceContributions();
 
     (new HtmlCacheAdminBridge)->register(
-        new AdminBridgeRegistrar,
+        resolve(AdminBridgeRegistrar::class),
         AdminBridgeContextData::forPackage('capell-app/html-cache'),
     );
 

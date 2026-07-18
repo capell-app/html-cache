@@ -139,7 +139,11 @@
         },
         "adminSurface": {
             "authorization": "permissions",
-            "permissions": ["capell-html-cache.view", "capell-html-cache.clear"]
+            "permissions": [
+                "capell-html-cache.view",
+                "capell-html-cache.clear",
+                "capell-html-cache.maintenance.manage"
+            ]
         }
     },
     "performance": {

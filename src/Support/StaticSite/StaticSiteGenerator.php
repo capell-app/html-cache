@@ -32,7 +32,8 @@ final class StaticSiteGenerator
         ?Closure $checkpoint = null,
         ?Closure $end = null,
     ): void {
-        throw_unless($this->site->siteDomains, RuntimeException::class, 'No site domains found for static HTML generation.');
+        $this->site->loadMissing('siteDomains');
+        throw_if($this->site->siteDomains->isEmpty(), RuntimeException::class, 'No site domains found for static HTML generation.');
 
         foreach ($this->site->siteDomains as $siteDomain) {
             $this->processSiteDomain($siteDomain, $start, $prepare, $checkpoint, $end);
@@ -119,7 +120,7 @@ final class StaticSiteGenerator
             return;
         }
 
-        VisitUrlAction::dispatch($url);
+        VisitUrlAction::run($url);
     }
 
     private function refreshPageCache(PageUrl $pageUrl, SiteDomain $siteDomain): void

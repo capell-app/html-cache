@@ -95,8 +95,8 @@ final class MarkCachedUrlStaleAction
         $pathSiteDomain = $cachePathSiteDomain instanceof SiteDomain ? $cachePathSiteDomain : $siteDomain;
 
         if ($pathSiteDomain instanceof SiteDomain) {
-            $cachePath = $pathResolver->pathForUrl($cachedModelUrl->path, $pathSiteDomain);
-            $errorCachePath = $pathResolver->pathForUrl($cachedModelUrl->path, $pathSiteDomain, error: true);
+            $cachePath = $pathResolver->pathForRequestUrl($cachedModelUrl->url, $pathSiteDomain);
+            $errorCachePath = $pathResolver->pathForRequestUrl($cachedModelUrl->url, $pathSiteDomain, error: true);
         }
 
         $this->upsertStaleUrl(
@@ -131,8 +131,8 @@ final class MarkCachedUrlStaleAction
 
         if ($siteDomain instanceof SiteDomain) {
             $pathResolver = resolve(HtmlCachePathResolver::class);
-            $cachePath = $pathResolver->pathForUrl($path, $siteDomain);
-            $errorCachePath = $pathResolver->pathForUrl($path, $siteDomain, error: true);
+            $cachePath = $pathResolver->pathForRequestUrl($url, $siteDomain);
+            $errorCachePath = $pathResolver->pathForRequestUrl($url, $siteDomain, error: true);
         }
 
         $this->upsertStaleUrl(

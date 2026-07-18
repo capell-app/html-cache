@@ -10,7 +10,7 @@ use Capell\Core\Contracts\Pageable;
 use Capell\Core\Models\Language;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
-use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
@@ -18,7 +18,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
-use RuntimeException;
 
 /**
  * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
@@ -57,19 +56,19 @@ final class ClearCachedUrlAction
 
         if (! $siteDomain instanceof SiteDomain || $siteDomain->domain === null || $siteDomain->domain === '') {
             $this->deleteFilesFromCachedRows($cachedModelUrls);
-            $this->purgeSurrogateKeys($cachedModelUrls);
+            $this->purgeEdgeCache($cachedModelUrls, $urlString);
             $cachedModelUrls->each->delete();
 
             return false;
         }
 
         $this->deleteFilesFromCachedRows($cachedModelUrls);
-        $this->purgeSurrogateKeys($cachedModelUrls);
+        $this->purgeEdgeCache($cachedModelUrls, $urlString);
 
         $pathResolver = resolve(HtmlCachePathResolver::class);
         $store = resolve(HtmlCacheStore::class);
-        $store->delete($pathResolver->pathForUrl($path, $siteDomain));
-        $store->delete($pathResolver->pathForUrl($path, $siteDomain, error: true));
+        $store->delete($pathResolver->pathForRequestUrl($urlString, $siteDomain));
+        $store->delete($pathResolver->pathForRequestUrl($urlString, $siteDomain, error: true));
 
         $cachedModelUrls->each->delete();
 
@@ -118,8 +117,8 @@ final class ClearCachedUrlAction
                 continue;
             }
 
-            $files[] = $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain);
-            $files[] = $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain, error: true);
+            $files[] = $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain);
+            $files[] = $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain, error: true);
         }
 
         foreach (array_unique($files) as $file) {
@@ -130,7 +129,7 @@ final class ClearCachedUrlAction
     /**
      * @param  Collection<int, CachedModelUrl>  $cachedModelUrls
      */
-    private function purgeSurrogateKeys(Collection $cachedModelUrls): void
+    private function purgeEdgeCache(Collection $cachedModelUrls, string $url): void
     {
         $keys = [];
 
@@ -150,8 +149,9 @@ final class ClearCachedUrlAction
 
         $keys = array_values(SurrogateKeyNormalizer::normalize($keys));
 
-        if ($keys !== []) {
-            throw_unless(resolve(CachePurger::class)->purge($keys), RuntimeException::class, 'Unable to purge the cached URL surrogate keys.');
-        }
+        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(
+            tags: $keys,
+            urls: filter_var($url, FILTER_VALIDATE_URL) !== false ? [$url] : [],
+        ));
     }
 }

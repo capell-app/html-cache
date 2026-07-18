@@ -9,6 +9,8 @@ use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\Site;
 use Capell\Frontend\Actions\GenerateMaintenancePageCacheAction;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
+use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -90,6 +92,7 @@ class MaintenanceCachePage extends Page implements HasActions
         }
 
         resolve(MaintenanceManifestStore::class)->setSiteActive($siteId, ! $current);
+        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(tags: ['site-' . $siteId]));
 
         Notification::make()
             ->success()
@@ -136,6 +139,7 @@ class MaintenanceCachePage extends Page implements HasActions
 
                     $this->generateAccessibleMaintenancePages();
                     resolve(MaintenanceManifestStore::class)->setGlobalActive(true);
+                    PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
                     Artisan::call('down', ['--secret' => $secret]);
                     Cookie::queue(MaintenanceModeBypassCookie::create($secret));
 
@@ -151,6 +155,7 @@ class MaintenanceCachePage extends Page implements HasActions
                 ->authorize(fn (): bool => $this->canManageGlobalMaintenance())
                 ->action(function (): void {
                     resolve(MaintenanceManifestStore::class)->setGlobalActive(false);
+                    PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
                     Artisan::call('up');
 
                     Notification::make()

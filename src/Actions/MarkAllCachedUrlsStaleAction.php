@@ -45,10 +45,10 @@ final class MarkAllCachedUrlsStaleAction
                     : $cachedModelUrl->siteDomain;
 
                 $cachePath = $pathSiteDomain instanceof SiteDomain
-                    ? $pathResolver->pathForUrl($cachedModelUrl->path, $pathSiteDomain)
+                    ? $pathResolver->pathForRequestUrl($cachedModelUrl->url, $pathSiteDomain)
                     : null;
                 $errorCachePath = $pathSiteDomain instanceof SiteDomain
-                    ? $pathResolver->pathForUrl($cachedModelUrl->path, $pathSiteDomain, error: true)
+                    ? $pathResolver->pathForRequestUrl($cachedModelUrl->url, $pathSiteDomain, error: true)
                     : null;
 
                 $rows[] = $this->staleUrlRow($cachedModelUrl, $cachePath, $errorCachePath, $reason);

@@ -261,7 +261,9 @@ it('uses configured public cache-control ages for cached responses', function ()
         ->toContain('public')
         ->toContain('s-maxage=900')
         ->toContain('max-age=120')
-        ->toContain('stale-while-revalidate=3600');
+        ->toContain('stale-while-revalidate=3600')
+        ->and((string) $response->headers->get('Cache-Tag'))->toContain('host-example-test')
+        ->and((string) $response->headers->get('Surrogate-Key'))->toContain('host-example-test');
 });
 
 it('refuses to read or write cache files for hostile request path segments', function (string $url): void {
@@ -923,9 +925,10 @@ it('serves stale cached html while refreshing the origin cache after response', 
     );
 
     capell_expect($response->getContent())->toBe('old cached html')
-        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached html')
-        ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
-        ->and($staleCachedUrl->processed_at)->not->toBeNull();
+        ->and($staleCachedUrl->refresh()->last_error)->toBeNull()
+        ->and($staleCachedUrl->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($staleCachedUrl->processed_at)->not->toBeNull()
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('fresh cached html');
 });
 
 it('wraps web middleware before stripping cacheable response cookies', function (): void {

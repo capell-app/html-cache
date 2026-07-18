@@ -69,7 +69,7 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
         }
 
         /** @var Builder<CachedModelUrl> $query */
-        $query = CachedModelUrl::query();
+        $query = SiteScope::applyForCurrentActor(CachedModelUrl::query(), denyWhenMissingActor: true);
 
         if ($this->siteId !== null) {
             $query->where('site_id', $this->siteId);
@@ -79,6 +79,10 @@ final class SiteHealthCacheMap extends Component implements HasActions, HasSchem
 
         if ($record instanceof CachedModelUrl) {
             return $record;
+        }
+
+        if (! in_array($key, $this->clearedCacheMapRecordKeys, true)) {
+            return null;
         }
 
         return (new CachedModelUrl)->forceFill([

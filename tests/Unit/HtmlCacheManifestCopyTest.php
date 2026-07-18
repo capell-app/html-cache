@@ -17,6 +17,7 @@ use Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution;
 use Capell\HtmlCache\Manifest\HtmlCacheModelsContribution;
 use Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 
 it('keeps html cache marketplace and composer copy outcome-led and aligned', function (): void {
@@ -92,10 +93,12 @@ it('declares shipped html cache extension contributions instead of deferring the
         ->and($models['type'] ?? null)->toBe('model')
         ->and($models['modelClasses'] ?? null)->toBe([
             CachedModelUrl::class,
+            HtmlCacheGenerationRun::class,
             StaleCachedUrl::class,
         ])
         ->and($models['tables'] ?? null)->toBe([
             'cached_model_urls',
+            'html_cache_generation_runs',
             'stale_cached_urls',
         ])
         ->and($routes)->toBeArray()

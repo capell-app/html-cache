@@ -12,6 +12,8 @@ use Capell\Tests\Fixtures\Models\User;
 use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Cookie;
 
 uses(HtmlCacheTestCase::class);
 
@@ -84,6 +86,42 @@ it('reports invalid stale refresh claims', function (): void {
     expect($report->hasReason(HtmlCacheEligibilityReason::StaleClaimInvalid))->toBeTrue();
 });
 
+it('rejects response directives and state that are unsafe for a shared cache', function (Response $response, HtmlCacheEligibilityReason $reason): void {
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->eligible)->toBeFalse()
+        ->and($report->hasReason($reason))->toBeTrue();
+})->with([
+    'private' => [fn (): Response => response('private', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'private, max-age=0']), HtmlCacheEligibilityReason::ResponsePrivate],
+    'no cache' => [fn (): Response => response('fresh', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'no-cache, max-age=30']), HtmlCacheEligibilityReason::ResponseNoCache],
+    'unsupported vary' => [fn (): Response => response('varied', 200, ['Content-Type' => 'text/html', 'Vary' => 'Accept-Language']), HtmlCacheEligibilityReason::UnsupportedVaryHeader],
+    'remaining cookie' => [function (): Response {
+        $response = response('cookie', 200, ['Content-Type' => 'text/html']);
+        $response->headers->setCookie(new Cookie('personalisation', 'one'));
+
+        return $response;
+    }, HtmlCacheEligibilityReason::ResponseSetsCookie],
+]);
+
+it('never writes authenticated responses even when authenticated cache reads are enabled', function (): void {
+    config()->set('capell-html-cache.cache_skip_authenticated', false);
+
+    $request = Request::create('https://example.test/account', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->cookies->set('capell_session', 'session-value');
+    $request->setUserResolver(fn (): User => User::factory()->create());
+    app()->instance('request', $request);
+
+    $report = BuildHtmlCacheEligibilityReportAction::run(
+        $request,
+        response('personalised', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect($report->hasReason(HtmlCacheEligibilityReason::AuthenticatedOrSessionRequest))->toBeTrue();
+});
+
 it('renders the diagnose command as json', function (): void {
     $this->artisan('capell:html-cache:diagnose', [
         'url' => 'https://example.test/about',
@@ -91,4 +129,20 @@ it('renders the diagnose command as json', function (): void {
     ])
         ->expectsOutputToContain('"url": "https:\\/\\/example.test\\/about"')
         ->assertExitCode(0);
+});
+
+it('can diagnose the rendered response contract', function (): void {
+    Route::get('/diagnostic-response', fn (): Response => response(
+        'private response',
+        200,
+        ['Content-Type' => 'text/html', 'Cache-Control' => 'private, max-age=30', 'Vary' => 'Accept-Language'],
+    ));
+
+    $this->artisan('capell:html-cache:diagnose', [
+        'url' => '/diagnostic-response',
+        '--render' => true,
+        '--json' => true,
+    ])
+        ->expectsOutputToContain('"response": {')
+        ->assertSuccessful();
 });

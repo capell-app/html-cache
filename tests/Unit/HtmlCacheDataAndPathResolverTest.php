@@ -10,6 +10,11 @@ use Capell\HtmlCache\Data\Dashboard\HtmlCacheDashboardStatsData;
 use Capell\HtmlCache\Enums\HtmlCacheKey;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
+use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Illuminate\Http\Request;
+
+uses(HtmlCacheTestCase::class);
 use Illuminate\Database\Eloquent\Model;
 
 /** @param array<string, mixed> $attributes */
@@ -39,6 +44,29 @@ it('keeps html cache dashboard and cache map values typed', function (): void {
             'capell-html-cache.clear',
             'capell-html-cache.maintenance.manage',
         ]);
+});
+
+it('resolves query variants to the same files used by the page cache', function (): void {
+    config()->set('capell-html-cache.enabled', true);
+    config()->set('capell-html-cache.stateless_pagination.enabled', true);
+    config()->set('capell-html-cache.stateless_pagination.params', ['page']);
+    $domain = htmlCachePathResolverSiteDomain([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $url = 'https://example.test/articles?page=2';
+    $suffix = StatelessPaginationRequest::cacheKeySuffix(Request::create($url));
+
+    expect((new HtmlCachePathResolver)->pathForRequestUrl($url, $domain))
+        ->toBe('https.example.test/articles' . $suffix . '.html');
+
+    $domain->path = '/uk';
+    $prefixedUrl = 'https://example.test/uk/articles?page=2';
+    $prefixedSuffix = StatelessPaginationRequest::cacheKeySuffix(Request::create($prefixedUrl));
+
+    expect((new HtmlCachePathResolver)->pathForRequestUrl($prefixedUrl, $domain))
+        ->toBe('https.example.test/uk/articles' . $prefixedSuffix . '.html');
 });
 
 it('builds safe cache paths for domains, prefixes, errors and absolute urls', function (): void {

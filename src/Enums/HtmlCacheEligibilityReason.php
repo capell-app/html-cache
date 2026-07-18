@@ -20,6 +20,10 @@ enum HtmlCacheEligibilityReason: string
     case NonHtmlResponse = 'non_html_response';
     case UncacheableResponseStatus = 'uncacheable_response_status';
     case ResponseNoStore = 'response_no_store';
+    case ResponsePrivate = 'response_private';
+    case ResponseNoCache = 'response_no_cache';
+    case ResponseSetsCookie = 'response_sets_cookie';
+    case UnsupportedVaryHeader = 'unsupported_vary_header';
     case FrontendContextNotCacheable = 'frontend_context_not_cacheable';
     case PackageCacheBlocking = 'package_cache_blocking';
     case PackageSensitiveOutput = 'package_sensitive_output';

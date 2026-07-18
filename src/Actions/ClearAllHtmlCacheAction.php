@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
@@ -28,6 +29,7 @@ final class ClearAllHtmlCacheAction
 
         if ($result->successful()) {
             CachedModelUrl::query()->delete();
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
         }
 
         return $result;

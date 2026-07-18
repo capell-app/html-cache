@@ -8,7 +8,6 @@ use Capell\Core\Contracts\Pageable;
 use Capell\Core\Enums\UrlTypeEnum;
 use Capell\Core\Models\PageUrl;
 use Capell\Frontend\Actions\AssertPublicRenderContractAction;
-use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -16,6 +15,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\PublicResponseCachePolicy;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Illuminate\Http\Request;
@@ -36,7 +36,7 @@ final class BuildHtmlCacheEligibilityReportAction
     public function handle(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null): HtmlCacheEligibilityReportData
     {
         $reasons = [
-            ...$this->requestReasons($request),
+            ...$this->requestReasons($request, $response instanceof Response),
             ...$this->configurationReasons($response),
             ...$this->packageReasons(),
             ...$this->staleClaimReasons($request),
@@ -65,7 +65,7 @@ final class BuildHtmlCacheEligibilityReportAction
     /**
      * @return list<HtmlCacheEligibilityReason>
      */
-    private function requestReasons(Request $request): array
+    private function requestReasons(Request $request, bool $forCacheWrite): array
     {
         $reasons = [];
 
@@ -95,7 +95,7 @@ final class BuildHtmlCacheEligibilityReportAction
             $reasons[] = HtmlCacheEligibilityReason::ConfiguredBypassRule;
         }
 
-        if (config('capell-html-cache.cache_skip_authenticated', true) === true
+        if (($forCacheWrite || config('capell-html-cache.cache_skip_authenticated', true) === true)
             && ($this->hasSessionCookie($request) || $request->user() !== null)) {
             $reasons[] = HtmlCacheEligibilityReason::AuthenticatedOrSessionRequest;
         }
@@ -193,9 +193,7 @@ final class BuildHtmlCacheEligibilityReportAction
             $reasons[] = HtmlCacheEligibilityReason::NonHtmlResponse;
         }
 
-        if (str_contains((string) $response->headers->get('Cache-Control'), 'no-store')) {
-            $reasons[] = HtmlCacheEligibilityReason::ResponseNoStore;
-        }
+        $reasons = [...$reasons, ...resolve(PublicResponseCachePolicy::class)->reasons($response)];
 
         if ($this->containsAuthoringSurface($response)) {
             $reasons[] = HtmlCacheEligibilityReason::UnsafePublicOutput;
@@ -252,11 +250,7 @@ final class BuildHtmlCacheEligibilityReportAction
 
     private function frontendContextShouldCache(): bool
     {
-        try {
-            return FrontendContext::shouldCachePage();
-        } catch (Throwable) {
-            return true;
-        }
+        return true;
     }
 
     private function cacheState(Request $request, ?CachedModelUrl $cachedUrl, ?StaleCachedUrl $staleCachedUrl): string

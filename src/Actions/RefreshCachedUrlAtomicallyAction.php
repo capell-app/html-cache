@@ -6,11 +6,11 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
-use Capell\Frontend\Contracts\CacheBypassResolver;
-use Capell\Frontend\Support\Context\FrontendContext;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
@@ -48,23 +48,8 @@ final class RefreshCachedUrlAtomicallyAction
 
         try {
             $kernel = resolve(HttpKernel::class);
-            $htmlCacheEnabled = config('capell-html-cache.enabled', true);
-            $previousCacheBypassResolver = resolve(CacheBypassResolver::class);
-
-            config()->set('capell-html-cache.enabled', false);
-            app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
-            {
-                public function shouldBypass(): bool
-                {
-                    return true;
-                }
-            });
-
             $response = $kernel->handle($request);
             $kernel->terminate($request, $response);
-
-            config()->set('capell-html-cache.enabled', $htmlCacheEnabled);
-            app()->instance(CacheBypassResolver::class, $previousCacheBypassResolver);
 
             if ($response->isServerError()) {
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
@@ -72,10 +57,13 @@ final class RefreshCachedUrlAtomicallyAction
 
             if (! $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl)) {
                 throw new RuntimeException(sprintf(
-                    'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Status: %d. Content-Type: %s. Query count: %d.',
+                    'Unable to refresh stale HTML cache for "%s"; response was not cacheable. Status: %d. Content-Type: %s. Cache-Control: %s. Vary: %s. Cookies: %d. Query count: %d.',
                     $staleCachedUrl->url,
                     $response->getStatusCode(),
                     (string) $response->headers->get('Content-Type'),
+                    (string) $response->headers->get('Cache-Control'),
+                    (string) $response->headers->get('Vary'),
+                    count($response->headers->getCookies()),
                     $request->query->count(),
                 ));
             }
@@ -83,14 +71,6 @@ final class RefreshCachedUrlAtomicallyAction
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
             $this->deleteAlternateStatusFile($staleCachedUrl, $response);
         } finally {
-            if (isset($htmlCacheEnabled)) {
-                config()->set('capell-html-cache.enabled', $htmlCacheEnabled);
-            }
-
-            if (isset($previousCacheBypassResolver)) {
-                app()->instance(CacheBypassResolver::class, $previousCacheBypassResolver);
-            }
-
             app()->instance('request', $previousRequest);
         }
     }
@@ -128,6 +108,8 @@ final class RefreshCachedUrlAtomicallyAction
 
     private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl): bool
     {
+        $response = CacheableResponseCookieStripper::strip($response);
+
         if (config('capell-html-cache.write_enabled', true) !== true) {
             return false;
         }
@@ -146,11 +128,8 @@ final class RefreshCachedUrlAtomicallyAction
             return false;
         }
 
-        if ($response->getStatusCode() !== Response::HTTP_NOT_FOUND && ! FrontendContext::shouldCachePage()) {
-            return false;
-        }
-
         WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl);
+        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
 
         return true;
     }
@@ -213,6 +192,7 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $query->delete();
+        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
     }
 
     private function deleteAlternateStatusFile(StaleCachedUrl $staleCachedUrl, Response $response): void

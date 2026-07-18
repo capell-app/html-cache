@@ -59,6 +59,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\Purgers\CloudflareCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
 use Capell\HtmlCache\Support\Error\HtmlCacheStaticErrorPageStore;
@@ -94,7 +95,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasViews('capell-html-cache')
             ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
             ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
-            ->hasMigration('2026_06_07_000001_add_telemetry_to_cached_model_urls_table');
+            ->hasMigration('2026_06_07_000001_add_telemetry_to_cached_model_urls_table')
+            ->hasMigration('2026_07_18_000001_create_html_cache_generation_runs_table');
     }
 
     public function registeringPackage(): void
@@ -107,9 +109,13 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->singleton(HtmlCacheStore::class);
         $this->app->singleton(FrontendOutputCacheInvalidator::class, HtmlFrontendOutputCacheInvalidator::class);
         $this->app->singleton(HtmlCacheHitBuffer::class);
-        $this->app->singleton(CachePurger::class, fn (): CachePurger => config('capell-html-cache.purge.driver') === 'http'
-                ? $this->app->make(HttpSurrogateKeyCachePurger::class)
-                : $this->app->make(NullCachePurger::class));
+        $this->app->singleton(CachePurger::class, function (): CachePurger {
+            return match (config('capell-html-cache.purge.driver')) {
+                'cloudflare' => $this->app->make(CloudflareCachePurger::class),
+                'http' => $this->app->make(HttpSurrogateKeyCachePurger::class),
+                default => $this->app->make(NullCachePurger::class),
+            };
+        });
         $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
         $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());

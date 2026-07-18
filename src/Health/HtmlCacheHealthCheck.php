@@ -30,6 +30,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     private const array REQUIRED_TABLES = [
         'cached_model_urls',
         'stale_cached_urls',
+        'html_cache_generation_runs',
     ];
 
     public static function compatibleCapellApiVersion(): string
@@ -46,6 +47,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
 
         return collect([
             $check->pageCacheDiskWritableCheck(),
+            $check->pageCacheDiskLocalPathCheck(),
             $check->frontendCacheMiddlewareWiredCheck(),
             $check->storageTablesCheck(),
             $check->staleProcessingCommandRegisteredCheck(),
@@ -56,6 +58,22 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     {
         return self::runDiagnostics()
             ->every(static fn (DoctorCheckResultData $result): bool => $result->passed);
+    }
+
+    public function pageCacheDiskLocalPathCheck(): DoctorCheckResultData
+    {
+        $supportsLocalPaths = $this->pageCacheDiskSupportsLocalPaths();
+
+        return new DoctorCheckResultData(
+            label: (string) __('capell-html-cache::health.local_path.label'),
+            passed: $supportsLocalPaths,
+            message: $supportsLocalPaths
+                ? (string) __('capell-html-cache::health.local_path.passed')
+                : (string) __('capell-html-cache::health.local_path.failed'),
+            remediation: $supportsLocalPaths
+                ? null
+                : (string) __('capell-html-cache::health.local_path.remediation'),
+        );
     }
 
     /**
@@ -173,6 +191,17 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
                     // Cleanup is best-effort; the probe result above is the diagnostic signal.
                 }
             }
+        }
+    }
+
+    public function pageCacheDiskSupportsLocalPaths(): bool
+    {
+        try {
+            $root = Storage::disk(self::PAGE_CACHE_DISK)->path('');
+
+            return $root !== '' && str_starts_with($root, DIRECTORY_SEPARATOR);
+        } catch (Throwable) {
+            return false;
         }
     }
 

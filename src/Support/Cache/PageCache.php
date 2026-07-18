@@ -120,13 +120,19 @@ final class PageCache
 
         $this->files->makeDirectory($path, 0775, true, true);
 
+        $targetPath = $this->join([$path, $filename . '.' . $extension]);
+
+        if (! $this->reserveVariantSlot($targetPath, StatelessPaginationRequest::cacheKeySuffix($laravelRequest))) {
+            return;
+        }
+
         if ($extension === 'html' && config('capell-html-cache.minify_html', true) === true) {
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
         $this->writeCacheFile(
             $laravelRequest,
-            $this->join([$path, $filename . '.' . $extension]),
+            $targetPath,
             $content,
         );
     }
@@ -188,6 +194,10 @@ final class PageCache
         }
 
         if ($this->sessionHasUserState($request)) {
+            return false;
+        }
+
+        if (! resolve(PublicResponseCachePolicy::class)->isCacheable($response)) {
             return false;
         }
 
@@ -312,6 +322,44 @@ final class PageCache
         }
 
         return count($errorPages) - $deleted < $maximum;
+    }
+
+    private function reserveVariantSlot(string $targetPath, string $suffix): bool
+    {
+        if ($suffix === '' || $this->files->exists($targetPath)) {
+            return true;
+        }
+
+        $configuredMaximum = config('capell-html-cache.stateless_pagination.max_variants_per_path', 100);
+        $maximum = is_numeric($configuredMaximum) ? max(0, (int) $configuredMaximum) : 100;
+
+        if ($maximum === 0) {
+            return false;
+        }
+
+        $directory = dirname($targetPath);
+        $filename = basename($targetPath);
+        $markerPosition = strpos($filename, '~');
+
+        if ($markerPosition === false) {
+            return true;
+        }
+
+        $prefix = substr($filename, 0, $markerPosition) . '~';
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $variants = array_values(array_filter(
+            $this->files->files($directory),
+            static fn (SplFileInfo $file): bool => str_starts_with($file->getFilename(), $prefix)
+                && $file->getExtension() === $extension,
+        ));
+
+        if (count($variants) < $maximum) {
+            return true;
+        }
+
+        usort($variants, static fn (SplFileInfo $first, SplFileInfo $second): int => $first->getMTime() <=> $second->getMTime());
+
+        return $this->files->delete($variants[0]->getPathname());
     }
 
     /**

@@ -43,6 +43,11 @@ return [
     'origin_stale_while_revalidate' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
     ],
+    'request_coalescing' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_REQUEST_COALESCING', true),
+        'lock_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_LOCK_SECONDS', 15),
+        'wait_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_WAIT_SECONDS', 3),
+    ],
     'cache_vary_headers' => ['Accept-Encoding'],
     'stateless_pagination' => [
         /*
@@ -66,6 +71,9 @@ return [
         | bypasses the cache as before.
         */
         'enabled' => Env::get('CAPELL_HTML_CACHE_STATELESS_PAGINATION', true),
+        'max_query_length' => $integerEnv('CAPELL_HTML_CACHE_MAX_QUERY_LENGTH', 512),
+        'max_parameters' => $integerEnv('CAPELL_HTML_CACHE_MAX_QUERY_PARAMETERS', 12),
+        'max_variants_per_path' => $integerEnv('CAPELL_HTML_CACHE_MAX_VARIANTS_PER_PATH', 100),
         'params' => [
             'page', 'articles', 'article-archives', 'showcase_page',
             'theme_search', 'theme_tag', 'theme_tier', 'theme_sort', 'topic', 'month',
@@ -89,6 +97,9 @@ return [
         'method' => Env::get('CAPELL_HTML_CACHE_PURGE_METHOD', 'post'),
         'surrogate_key_header' => Env::get('CAPELL_HTML_CACHE_PURGE_HEADER', 'Surrogate-Key'),
         'timeout_seconds' => (int) Env::get('CAPELL_HTML_CACHE_PURGE_TIMEOUT_SECONDS', 5),
+        'cloudflare' => [
+            'zone_id' => Env::get('CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID'),
+        ],
     ],
     'cache_skip_authenticated' => true,
     'bypass' => [
@@ -117,9 +128,13 @@ return [
         'retry_backoff_minutes' => (int) Env::get('CAPELL_HTML_CACHE_RETRY_BACKOFF_MINUTES', 5),
         'max_attempts' => (int) Env::get('CAPELL_HTML_CACHE_MAX_ATTEMPTS', 5),
     ],
+    'retention' => [
+        'processed_stale_days' => $integerEnv('CAPELL_HTML_CACHE_PROCESSED_STALE_RETENTION_DAYS', 7),
+        'generation_run_days' => $integerEnv('CAPELL_HTML_CACHE_GENERATION_RUN_RETENTION_DAYS', 30),
+    ],
     'model_event_registration_mode' => Env::get('CAPELL_MODEL_EVENT_REGISTRATION_MODE', 'deferred'),
     'static_generation' => [
-        'internal_requests' => Env::get('CAPELL_STATIC_HTML_INTERNAL_REQUESTS', false),
+        'internal_requests' => Env::get('CAPELL_STATIC_HTML_INTERNAL_REQUESTS', true),
     ],
     'site_health_public_html_scan_limit' => (int) Env::get('CAPELL_HTML_CACHE_SITE_HEALTH_SCAN_LIMIT', 100),
     'site_health_unindexed_public_html_scan_limit' => (int) Env::get('CAPELL_HTML_CACHE_SITE_HEALTH_UNINDEXED_SCAN_LIMIT', 25),

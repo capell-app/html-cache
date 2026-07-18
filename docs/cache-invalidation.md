@@ -25,6 +25,62 @@ If a stale URL no longer resolves to an enabled site domain, the processor treat
 
 Failed refreshes retry after the configured backoff until `max_attempts` is reached. Rows that keep failing are marked `exhausted` for diagnostics and manual follow-up instead of being retried forever.
 
+Every successful URL clear or stale refresh also queues an edge purge. A full local clear and global maintenance transitions queue a complete edge purge. Purge failures retry independently, so a temporary CDN API failure does not roll back the origin cache operation.
+
+## Cloudflare
+
+Cloudflare does not cache HTML by default. Configure a Cloudflare Cache Rule that makes the intended anonymous public routes cache eligible, while bypassing admin, account, preview, signed, personalised, and cookie-varying routes. Capell emits `Cache-Control`, `Cache-Tag`, and `Surrogate-Key` headers on cacheable responses.
+
+### Production cache rule
+
+The `capell.app` zone uses an active Cache Rule named `Capell anonymous public HTML`. It is deliberately narrower than "all requests":
+
+```text
+(http.host eq "capell.app" and http.request.method in {"GET" "HEAD"} and not starts_with(http.request.uri.path, "/admin") and not starts_with(http.request.uri.path, "/api") and not starts_with(http.request.uri.path, "/livewire") and not starts_with(http.request.uri.path, "/filament") and not starts_with(http.request.uri.path, "/login") and not starts_with(http.request.uri.path, "/logout") and not starts_with(http.request.uri.path, "/register") and not starts_with(http.request.uri.path, "/account") and not starts_with(http.request.uri.path, "/checkout") and not starts_with(http.request.uri.path, "/billing") and not starts_with(http.request.uri.path, "/up") and not http.cookie contains "capell_session=")
+```
+
+Use these rule settings:
+
+- **Cache eligibility:** Eligible for cache.
+- **Edge TTL:** Use the origin `Cache-Control` header when present; bypass cache when it is absent.
+- **Browser TTL:** Respect origin TTL.
+- **Cache key:** Keep Cloudflare's default query-string behaviour. Capell rejects unsafe or unknown variants at the origin.
+
+Do not replace the Edge TTL policy with "ignore cache-control". Capell relies on `private`, `no-store`, and `no-cache` to keep authenticated, signed, preview, personalised, and otherwise unsafe responses out of the shared edge cache. The path and session-cookie conditions are an additional guard, not a replacement for the origin response policy.
+
+The saved production rule and active rule list are shown below.
+
+![Full Cloudflare edit view for the Capell anonymous public HTML cache rule with the sidebar collapsed](screenshots/cloudflare-capell-app-cache-rule.jpg)
+
+![Cloudflare Edge TTL and Browser TTL settings for the Capell anonymous public HTML cache rule](screenshots/cloudflare-capell-app-cache-ttl.jpg)
+
+![Cloudflare cache rule list showing the Capell anonymous public HTML rule active](screenshots/cloudflare-capell-app-cache-rules-active.jpg)
+
+After deploying or changing the rule, make two anonymous requests to a public page. The first response should normally be `MISS`; the second should be `HIT` and include an `Age` header. An excluded or private route must remain `DYNAMIC` or `BYPASS`:
+
+```bash
+curl -sS -D - -o /dev/null https://capell.app/ \
+    | rg -i '^(cache-control|cf-cache-status|age):'
+curl -sS -D - -o /dev/null https://capell.app/ \
+    | rg -i '^(cache-control|cf-cache-status|age):'
+curl -sS -D - -o /dev/null https://capell.app/login \
+    | rg -i '^(cache-control|cf-cache-status|age):'
+```
+
+The production check on 18 July 2026 returned `MISS` then `HIT` for `/` and `/pricing`. `/login` returned `Cache-Control: no-cache, private` and `CF-Cache-Status: DYNAMIC` on both requests.
+
+Use the native Cloudflare purge adapter:
+
+```env
+CAPELL_HTML_CACHE_PURGE_DRIVER=cloudflare
+CAPELL_HTML_CACHE_PURGE_TOKEN=your-zone-cache-purge-token
+CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID=your-32-character-zone-id
+```
+
+The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
+
+The `page_cache` disk must expose local filesystem paths because refreshes use atomic file replacement. Use a local disk for a single web node or a shared POSIX filesystem mounted by every web and queue node. Object-storage disks are not supported. Site Health reports an error when the disk cannot provide local paths.
+
 ## Main Actions
 
 | Action                              | Use it when                                                                  |
@@ -91,6 +147,7 @@ RecordCachedModelUrlsAction::run($url, [
 | `capell-html-cache.http_cache.shared_max_age`               | `s-maxage` value for public cached responses; defaults to `cache_ttl / 6` when unset.                                                                     |
 | `capell-html-cache.http_cache.browser_max_age`              | Browser `max-age` value for public cached responses.                                                                                                      |
 | `capell-html-cache.http_cache.stale_while_revalidate`       | CDN/browser `stale-while-revalidate` directive value.                                                                                                     |
+| `capell-html-cache.request_coalescing.*`                    | Short per-URL lock and wait values that collapse simultaneous origin cache misses into one render.                                                        |
 | `capell-html-cache.cache_skip_authenticated`                | Keeps authenticated responses out of the public cache.                                                                                                    |
 | `capell-html-cache.bypass.paths`                            | Wildcard path rules that bypass public cache reads and writes.                                                                                            |
 | `capell-html-cache.bypass.cookies`                          | Wildcard cookie-name rules that bypass public cache reads and writes. Use for personalization or variant cookies that are not encoded in the URL.         |
@@ -102,8 +159,13 @@ RecordCachedModelUrlsAction::run($url, [
 | `capell-html-cache.invalidation.processing_timeout_minutes` | Minutes before a `processing` stale row may be claimed again.                                                                                             |
 | `capell-html-cache.invalidation.retry_backoff_minutes`      | Minutes before a failed stale row may be retried.                                                                                                         |
 | `capell-html-cache.invalidation.max_attempts`               | Maximum refresh attempts before a stale row becomes `exhausted`.                                                                                          |
+| `capell-html-cache.retention.processed_stale_days`          | Days to retain completed stale-refresh rows for diagnostics.                                                                                              |
+| `capell-html-cache.retention.generation_run_days`           | Days to retain completed or failed static-generation run records.                                                                                         |
+| `capell-html-cache.purge.driver`                            | Edge purge adapter: `null`, `http`, or `cloudflare`.                                                                                                      |
+| `capell-html-cache.purge.token`                             | Bearer token for the configured edge purge API.                                                                                                           |
+| `capell-html-cache.purge.cloudflare.zone_id`                | Cloudflare zone ID used by the native purge adapter.                                                                                                      |
 | `capell-html-cache.model_event_registration_mode`           | Controls model event registration timing; default is `deferred`.                                                                                          |
-| `capell-html-cache.static_generation.internal_requests`     | Lets static generation render through the current Laravel kernel.                                                                                         |
+| `capell-html-cache.static_generation.internal_requests`     | Renders static generation through the current Laravel kernel; enabled by default for reliable completion reporting.                                       |
 | `capell-html-cache.public_html_authoring_markers`           | Strings used by diagnostics to detect authoring leakage in public HTML.                                                                                   |
 
 ## Console
@@ -116,10 +178,13 @@ The package command is:
 
 ```text
 capell:html-cache:process-stale {--limit=}
+capell:html-cache:diagnose {url?} {--site=} {--render} {--json}
 capell:static-site {--site=} {--internal} {--refresh}
 ```
 
 `capell:html-cache:process-stale` is scheduled automatically when `capell-html-cache.invalidation.mode` is `scheduled`. `--limit` overrides the configured batch size for one run.
+
+`capell:html-cache:diagnose --render` renders the URL through the current kernel and reports the actual response status, cache directives, `Vary`, cookies, and edge tag headers. Without `--render`, it performs the cheaper request/index eligibility check only.
 
 `--internal` renders through the current Laravel kernel. `--refresh` deletes affected cached files before rendering.
 

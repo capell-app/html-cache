@@ -49,8 +49,8 @@ final class MarkCachedUrlsForModelStaleAction
             );
 
             $siteDomain = $cachedModelUrl->siteDomain;
-            $cachePath = $siteDomain === null ? null : $pathResolver->pathForUrl($cachedModelUrl->path, $siteDomain);
-            $errorCachePath = $siteDomain === null ? null : $pathResolver->pathForUrl($cachedModelUrl->path, $siteDomain, error: true);
+            $cachePath = $siteDomain === null ? null : $pathResolver->pathForRequestUrl($cachedModelUrl->url, $siteDomain);
+            $errorCachePath = $siteDomain === null ? null : $pathResolver->pathForRequestUrl($cachedModelUrl->url, $siteDomain, error: true);
 
             $rows[] = $this->staleUrlRow(
                 staleKey: $staleKey,

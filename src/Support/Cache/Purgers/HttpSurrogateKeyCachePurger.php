@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\Cache\Purgers;
 
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use InvalidArgumentException;
 use Throwable;
@@ -14,15 +15,12 @@ final class HttpSurrogateKeyCachePurger implements CachePurger
 {
     public function __construct(private readonly HttpFactory $http) {}
 
-    /**
-     * @param  list<string>  $surrogateKeys
-     */
-    public function purge(array $surrogateKeys): bool
+    public function purge(EdgeCachePurgeData $purge): bool
     {
         $endpoint = config('capell-html-cache.purge.endpoint');
-        $normalizedKeys = SurrogateKeyNormalizer::normalize($surrogateKeys);
+        $normalizedKeys = SurrogateKeyNormalizer::normalize($purge->tags);
 
-        if (! is_string($endpoint) || trim($endpoint) === '' || $normalizedKeys === []) {
+        if (! is_string($endpoint) || trim($endpoint) === '' || ($normalizedKeys === [] && $purge->urls === [] && ! $purge->purgeAll)) {
             return false;
         }
 
@@ -62,6 +60,8 @@ final class HttpSurrogateKeyCachePurger implements CachePurger
             ->send(in_array($method, ['post', 'put', 'patch', 'delete'], true) ? strtoupper($method) : 'POST', $resolvedEndpoint['url'], [
                 'json' => [
                     'surrogate_keys' => $normalizedKeys,
+                    'urls' => $purge->urls,
+                    'purge_all' => $purge->purgeAll,
                 ],
             ]);
 

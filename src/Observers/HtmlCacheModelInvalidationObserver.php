@@ -9,6 +9,7 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\Translation;
+use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForSiteStaleAction;
@@ -33,6 +34,12 @@ final class HtmlCacheModelInvalidationObserver
 
     public function created(Model $model): void
     {
+        if ($this->requiresImmediateGlobalInvalidation($model)) {
+            ClearAllHtmlCacheAction::dispatch()->afterCommit();
+
+            return;
+        }
+
         if ($this->isExcludedRouteModel($model)) {
             return;
         }
@@ -58,6 +65,12 @@ final class HtmlCacheModelInvalidationObserver
 
     public function updated(Model $model): void
     {
+        if ($this->requiresImmediateGlobalInvalidation($model)) {
+            ClearAllHtmlCacheAction::dispatch()->afterCommit();
+
+            return;
+        }
+
         if ($model instanceof Site && $model->wasChanged('theme_id')) {
             $this->dispatchMarkSiteCachedUrlsStale($model);
 
@@ -89,6 +102,12 @@ final class HtmlCacheModelInvalidationObserver
 
     public function deleted(Model $model): void
     {
+        if ($this->requiresImmediateGlobalInvalidation($model)) {
+            ClearAllHtmlCacheAction::dispatch()->afterCommit();
+
+            return;
+        }
+
         if ($this->isExcludedRouteModel($model)) {
             return;
         }
@@ -197,5 +216,10 @@ final class HtmlCacheModelInvalidationObserver
 
         return $changedAttributes !== []
             && array_diff($changedAttributes, [$model->getUpdatedAtColumn()]) === [];
+    }
+
+    private function requiresImmediateGlobalInvalidation(Model $model): bool
+    {
+        return in_array($model->getTable(), ['access_gate_areas'], true);
     }
 }

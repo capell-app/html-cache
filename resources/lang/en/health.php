@@ -15,6 +15,12 @@ return [
         'passed' => 'The frontend.cache middleware alias resolves to the HTML cache middleware and is present in the frontend route stack.',
         'remediation' => 'Ensure HtmlCacheServiceProvider registers the frontend.cache middleware alias and inserts it into the frontend route middleware registry.',
     ],
+    'local_path' => [
+        'failed' => 'The page_cache disk does not expose local filesystem paths required for atomic HTML writes.',
+        'label' => 'HTML cache disk supports atomic local paths',
+        'passed' => 'The page_cache disk exposes local filesystem paths for atomic HTML writes.',
+        'remediation' => 'Use a local or shared POSIX filesystem disk. Object-storage drivers are not supported by the HTML file cache.',
+    ],
     'stale_command' => [
         'failed' => 'Scheduled invalidation is active but the :command command is not registered.',
         'label' => 'Scheduled stale-regeneration command registered',
@@ -25,7 +31,7 @@ return [
     'tables' => [
         'failed' => 'Missing tables: :tables.',
         'label' => 'HTML cache storage tables',
-        'passed' => 'The cached_model_urls dependency index and stale_cached_urls queue tables are present.',
+        'passed' => 'The HTML cache dependency index, stale queue, and static generation run tables are present.',
         'remediation' => 'Run the Capell migrations to create the HTML cache storage tables.',
     ],
 ];

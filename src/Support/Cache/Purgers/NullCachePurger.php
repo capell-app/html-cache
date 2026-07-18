@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\Cache\Purgers;
 
 use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 
 final class NullCachePurger implements CachePurger
 {
-    /**
-     * @param  list<string>  $surrogateKeys
-     */
-    public function purge(array $surrogateKeys): bool
+    public function purge(EdgeCachePurgeData $purge): bool
     {
         return true;
     }

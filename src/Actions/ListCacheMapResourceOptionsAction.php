@@ -35,8 +35,7 @@ final class ListCacheMapResourceOptionsAction
 
         $search = is_string($search) ? trim($search) : '';
 
-        /** @var EloquentCollection<int, CachedModelUrl> $rows */
-        $rows = $query
+        $resourceQuery = $query
             ->select('cacheable_type', 'cacheable_id')
             ->selectRaw('COUNT(*) as dependency_count')
             ->selectRaw('COUNT(DISTINCT url_hash) as url_count')
@@ -44,7 +43,14 @@ final class ListCacheMapResourceOptionsAction
             ->orderByDesc('url_count')
             ->orderByDesc('dependency_count')
             ->orderBy('cacheable_id')
-            ->get();
+            ->with('cacheable');
+
+        if ($search === '') {
+            $resourceQuery->limit(max(1, $limit));
+        }
+
+        /** @var EloquentCollection<int, CachedModelUrl> $rows */
+        $rows = $resourceQuery->get();
 
         return array_values($rows
             ->map(fn (CachedModelUrl $row): CacheMapResourceSummaryData => new CacheMapResourceSummaryData(
@@ -52,7 +58,7 @@ final class ListCacheMapResourceOptionsAction
                 modelType: $row->cacheable_type,
                 modelLabel: class_basename($row->cacheable_type),
                 resourceId: $row->cacheable_id,
-                label: $this->resourceLabel($row->cacheable_type, $row->cacheable_id),
+                label: $row->cacheableLabel(),
                 dependencyCount: (int) $row->getAttribute('dependency_count'),
                 urlCount: (int) $row->getAttribute('url_count'),
             ))
@@ -60,21 +66,6 @@ final class ListCacheMapResourceOptionsAction
             ->take($limit)
             ->values()
             ->all());
-    }
-
-    private function resourceLabel(string $modelType, int $resourceId): string
-    {
-        $record = CachedModelUrl::query()
-            ->with('cacheable')
-            ->where('cacheable_type', $modelType)
-            ->where('cacheable_id', $resourceId)
-            ->first();
-
-        if ($record instanceof CachedModelUrl) {
-            return $record->cacheableLabel();
-        }
-
-        return class_basename($modelType) . ' #' . $resourceId;
     }
 
     private function resourceKey(string $modelType, int $resourceId): string

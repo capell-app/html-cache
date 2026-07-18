@@ -9,23 +9,27 @@ use Capell\Core\Models\Language;
 use Capell\Core\Models\Site;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
+use Capell\Frontend\Contracts\FrontendContextReader;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
-use Capell\Frontend\Support\Context\FrontendContext;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
+use Capell\HtmlCache\Actions\ResolveEdgeCacheTagsAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\PublicResponseCachePolicy;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Exception;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -62,7 +66,13 @@ final class HtmlCacheMiddleware
         }
 
         if (config('capell-html-cache.enabled', true) !== true) {
-            return $this->applyCacheHeaders($request, $next($request));
+            $response = $next($request);
+
+            if ($request->attributes->get(self::SYNTHETIC_RENDER_ATTRIBUTE) === true) {
+                return $response;
+            }
+
+            return $this->applyCacheHeaders($request, $response);
         }
 
         $forceCacheReadBypass = $this->shouldForceCacheReadBypass($request);
@@ -103,6 +113,30 @@ final class HtmlCacheMiddleware
             }
         }
 
+        if (! $forceCacheReadBypass && config('capell-html-cache.request_coalescing.enabled', true) === true) {
+            try {
+                $coalescedResponse = Cache::lock(
+                    'capell-html-cache:render:' . hash('sha256', $request->fullUrl()),
+                    $this->positiveConfigInteger('capell-html-cache.request_coalescing.lock_seconds', 15),
+                )->block(
+                    $this->positiveConfigInteger('capell-html-cache.request_coalescing.wait_seconds', 3),
+                    fn (): Response => $this->cachedResponseAfterWaiting($pageCache, $request)
+                        ?? $this->handleCacheMiss($pageCache, $request, $next),
+                );
+
+                if ($coalescedResponse instanceof Response) {
+                    return $coalescedResponse;
+                }
+            } catch (LockTimeoutException) {
+                // Availability wins if a slow origin render outlives the short coalescing wait.
+            }
+        }
+
+        return $this->handleCacheMiss($pageCache, $request, $next);
+    }
+
+    private function handleCacheMiss(PageCache $pageCache, Request $request, Closure $next): Response
+    {
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $next($request));
 
         if ($this->containsAuthoringSurface($request, $response)) {
@@ -121,6 +155,27 @@ final class HtmlCacheMiddleware
         $response->headers->set('X-Frontend-Cache', 'MISS');
 
         return $this->applyCacheHeaders($request, $response, forcePublic: $cached);
+    }
+
+    private function cachedResponseAfterWaiting(PageCache $pageCache, Request $request): ?Response
+    {
+        $cachedPage = $pageCache->getCachePage($request);
+
+        if (is_string($cachedPage)) {
+            RecordHtmlCacheHitAction::run($request, strlen($cachedPage));
+
+            return $this->cacheHitResponse($cachedPage, Response::HTTP_OK);
+        }
+
+        $cachedErrorPage = $pageCache->getCacheErrorPage($request);
+
+        if (is_string($cachedErrorPage)) {
+            RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
+
+            return $this->cacheHitResponse($cachedErrorPage, Response::HTTP_NOT_FOUND);
+        }
+
+        return null;
     }
 
     private function containsAuthoringSurface(Request $request, Response $response): bool
@@ -191,7 +246,7 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        return str_contains((string) $response->headers->get('Cache-Control'), 'no-store');
+        return ! resolve(PublicResponseCachePolicy::class)->isCacheable($response);
     }
 
     private function shouldBypassCacheRead(Request $request): bool
@@ -280,7 +335,7 @@ final class HtmlCacheMiddleware
         $response->headers->set('Content-Type', 'text/html');
         $response->headers->set('X-Frontend-Cache', 'HIT');
 
-        return $this->applyCacheHeaders(request(), $response, applySurrogateKey: false, forcePublic: true);
+        return $this->applyCacheHeaders(request(), $response, forcePublic: true);
     }
 
     private function refreshStaleCachedUrlAfterResponse(Request $request): void
@@ -343,18 +398,18 @@ final class HtmlCacheMiddleware
         $response->headers->set('Vary', implode(', ', config('capell-html-cache.cache_vary_headers', ['Accept-Encoding'])));
 
         if ($applySurrogateKey) {
-            $this->applySurrogateKey($response);
+            $this->applySurrogateKey($request, $response);
         }
 
         return $response;
     }
 
-    private function applySurrogateKey(Response $response): void
+    private function applySurrogateKey(Request $request, Response $response): void
     {
         $keys = [];
 
         try {
-            $context = FrontendContext::current();
+            $context = resolve(FrontendContextReader::class);
 
             if ($context->page() instanceof Pageable) {
                 $keys[] = 'page-' . $context->page()->getKey();
@@ -373,6 +428,7 @@ final class HtmlCacheMiddleware
 
         $keys = [
             ...$keys,
+            ...ResolveEdgeCacheTagsAction::run($request),
             ...resolve(ExtensionCacheSafetyResolver::class)->cacheTags(),
         ];
 
@@ -380,6 +436,7 @@ final class HtmlCacheMiddleware
 
         if ($keys !== []) {
             $response->headers->set('Surrogate-Key', implode(' ', $keys));
+            $response->headers->set('Cache-Tag', implode(',', $keys));
         }
     }
 
@@ -462,5 +519,10 @@ final class HtmlCacheMiddleware
         $value = config($key, $default);
 
         return is_numeric($value) ? max(0, (int) $value) : $default;
+    }
+
+    private function positiveConfigInteger(string $key, int $default): int
+    {
+        return max(1, $this->nonNegativeConfigInteger($key, $default));
     }
 }

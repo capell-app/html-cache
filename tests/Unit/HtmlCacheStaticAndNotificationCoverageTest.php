@@ -34,6 +34,7 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
 use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
@@ -58,7 +59,6 @@ use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -232,12 +232,15 @@ it('tracks static site extension handlers and rejects sites without domains', fu
         'status' => true,
     ]);
 
-    (new StaticSiteGenerator($orphanSite))->process();
+    expect(function () use ($orphanSite): void {
+        (new StaticSiteGenerator($orphanSite))->process();
+    })
+        ->toThrow(RuntimeException::class, 'No site domains found for static HTML generation.');
 
     expect($registry->has('feed'))->toBeFalse();
 });
 
-it('updates static generation cache counters even when generation fails', function (): void {
+it('records a failed static generation run when generation fails', function (): void {
     $siteWithDomain = htmlCacheResidualCoverageSiteDomain('cache-counter.test')->site;
     $site = Site::query()->forceCreate([
         'name' => 'Cache Counter Site',
@@ -247,17 +250,22 @@ it('updates static generation cache counters even when generation fails', functi
         'status' => true,
     ]);
 
-    Cache::put('static-generation-test', 2);
+    $run = HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_RUNNING,
+        'total_sites' => 1,
+        'started_at' => now(),
+    ]);
 
-    GenerateStaticSiteAction::run($site, 'static-generation-test');
+    expect(function () use ($site, $run): void {
+        GenerateStaticSiteAction::run($site, $run->id);
+    })
+        ->toThrow(RuntimeException::class, 'No site domains found for static HTML generation.');
 
-    expect(Cache::get('static-generation-test'))->toBe(1);
+    $run->refresh();
 
-    Cache::put('static-generation-test', 1);
-
-    GenerateStaticSiteAction::run($site, 'static-generation-test');
-
-    expect(Cache::has('static-generation-test'))->toBeFalse();
+    expect($run->status)->toBe(HtmlCacheGenerationRun::STATUS_FAILED)
+        ->and($run->failed_sites)->toBe(1)
+        ->and($run->finished_at)->not->toBeNull();
 });
 
 it('visits static urls internally with host and port server headers', function (): void {
@@ -711,7 +719,9 @@ it('covers static generation and page deletion actions directly', function (): v
         'cacheable_id' => $page->getKey(),
     ]);
 
+    Queue::fake();
     GenerateStaticSitesAction::run(collect([$siteDomain->site]));
+    GenerateStaticSiteAction::assertPushed();
 
     expect(DeletePageCacheAction::run($pageUrl, refresh: false))->toBeTrue()
         ->and(DeletePageCacheAction::run($page, refresh: false))->toBeTrue();
@@ -732,6 +742,7 @@ it('covers cache map component record and selection state helpers', function ():
     ]);
     $encoded = base64_encode($page->getMorphClass() . '|' . $page->getKey());
 
+    $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $siteDomain->site_id])));
     $component = new SiteHealthCacheMap;
     $component->mount($siteDomain->site_id);
     $component->rememberClearedCacheMapRecordKey((string) $cached->id);
@@ -745,14 +756,14 @@ it('covers cache map component record and selection state helpers', function ():
 
     expect($component->getTableRecord(null))->toBeNull()
         ->and($cachedRecord->is($cached))->toBeTrue()
-        ->and($component->getTableRecord('999999'))->toBeInstanceOf(CachedModelUrl::class)
+        ->and($component->getTableRecord('999999'))->toBeNull()
         ->and($component->selectedResource())->toBeNull()
         ->and($component->clearedCacheMapRecordKeys)->toBe([(string) $cached->id]);
 
     $component->selectedResourceKey = $encoded;
 
     expect($component->selectedResource()?->resourceId)->toBe((int) $page->getKey())
-        ->and($component->detailUrlCount())->toBe(0);
+        ->and($component->detailUrlCount())->toBe(1);
 });
 
 it('wraps html cache storage and maintenance page storage operations', function (): void {

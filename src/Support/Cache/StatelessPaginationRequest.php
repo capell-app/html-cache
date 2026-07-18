@@ -43,8 +43,21 @@ final class StatelessPaginationRequest
             return false;
         }
 
-        foreach (array_keys($request->query->all()) as $key) {
+        $queryString = (string) $request->getQueryString();
+        $maximumQueryLength = config('capell-html-cache.stateless_pagination.max_query_length', 512);
+        $maximumParameters = config('capell-html-cache.stateless_pagination.max_parameters', 12);
+
+        if (strlen($queryString) > (is_numeric($maximumQueryLength) ? max(1, (int) $maximumQueryLength) : 512)
+            || $request->query->count() > (is_numeric($maximumParameters) ? max(1, (int) $maximumParameters) : 12)) {
+            return false;
+        }
+
+        foreach ($request->query->all() as $key => $value) {
             if (! in_array((string) $key, $allowed, true)) {
+                return false;
+            }
+
+            if (! is_scalar($value)) {
                 return false;
             }
         }

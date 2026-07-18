@@ -6,8 +6,11 @@ namespace Capell\HtmlCache\Console\Commands;
 
 use Capell\Core\Models\PageUrl;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 final class DiagnoseHtmlCacheCommand extends Command
 {
@@ -16,6 +19,7 @@ final class DiagnoseHtmlCacheCommand extends Command
     protected $signature = 'capell:html-cache:diagnose
         {url? : Absolute URL or path to inspect}
         {--site= : Optional site id used to resolve a PageUrl row for diagnostics}
+        {--render : Render the URL through the current Laravel kernel and inspect the real response}
         {--json : Output the report as JSON}';
 
     public function handle(): int
@@ -23,15 +27,19 @@ final class DiagnoseHtmlCacheCommand extends Command
         $url = $this->url();
         $request = Request::create($url, \Symfony\Component\HttpFoundation\Request::METHOD_GET);
         $pageUrl = $this->pageUrl($request);
-        $report = BuildHtmlCacheEligibilityReportAction::run($request, pageUrl: $pageUrl);
+        $response = $this->option('render') === true ? $this->renderResponse($request) : null;
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, response: $response, pageUrl: $pageUrl);
 
         if ($this->option('json') === true) {
-            $this->line(json_encode($report->toArray(), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+            $this->line(json_encode([
+                ...$report->toArray(),
+                'response' => $response instanceof Response ? $this->responseMetadata($response) : null,
+            ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 
             return Command::SUCCESS;
         }
 
-        $this->table(['Field', 'Value'], [
+        $rows = [
             ['URL', $report->url],
             ['Eligible', $report->eligible ? 'yes' : 'no'],
             ['Reasons', $report->reasonCodes() === [] ? 'none' : implode(', ', $report->reasonCodes())],
@@ -40,9 +48,54 @@ final class DiagnoseHtmlCacheCommand extends Command
             ['Cache state', $report->cacheState],
             ['Stale', $report->stale ? 'yes' : 'no'],
             ['Last cached at', $report->lastCachedAt ?? 'never'],
-        ]);
+        ];
+
+        if ($response instanceof Response) {
+            $metadata = $this->responseMetadata($response);
+            $rows[] = ['Response status', (string) $metadata['status']];
+            $rows[] = ['Cache-Control', $metadata['cache_control']];
+            $rows[] = ['Vary', $metadata['vary']];
+            $rows[] = ['Set-Cookie count', (string) $metadata['set_cookie_count']];
+            $rows[] = ['Surrogate-Key', $metadata['surrogate_key']];
+            $rows[] = ['Cache-Tag', $metadata['cache_tag']];
+        }
+
+        $this->table(['Field', 'Value'], $rows);
 
         return Command::SUCCESS;
+    }
+
+    private function renderResponse(Request $request): Response
+    {
+        $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
+        $previousRequest = resolve('request');
+        $cacheEnabled = config('capell-html-cache.enabled', true);
+        app()->instance('request', $request);
+        config()->set('capell-html-cache.enabled', false);
+
+        try {
+            $kernel = resolve(HttpKernel::class);
+            $response = $kernel->handle($request);
+            $kernel->terminate($request, $response);
+
+            return $response;
+        } finally {
+            config()->set('capell-html-cache.enabled', $cacheEnabled);
+            app()->instance('request', $previousRequest);
+        }
+    }
+
+    /** @return array{status: int, cache_control: string, vary: string, set_cookie_count: int, surrogate_key: string, cache_tag: string} */
+    private function responseMetadata(Response $response): array
+    {
+        return [
+            'status' => $response->getStatusCode(),
+            'cache_control' => (string) $response->headers->get('Cache-Control'),
+            'vary' => (string) $response->headers->get('Vary'),
+            'set_cookie_count' => count($response->headers->getCookies()),
+            'surrogate_key' => (string) $response->headers->get('Surrogate-Key'),
+            'cache_tag' => (string) $response->headers->get('Cache-Tag'),
+        ];
     }
 
     private function url(): string

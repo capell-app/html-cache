@@ -103,11 +103,14 @@ it('adds cacheable extension tags to the surrogate key header', function (): voi
     );
 
     $surrogateKey = (string) $response->headers->get('Surrogate-Key');
+    $cacheTag = (string) $response->headers->get('Cache-Tag');
 
     expect($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
         ->and(resolve(PageCache::class)->getCacheErrorPage($request))->toBe('extension missing html')
         ->and($surrogateKey)->toContain('extension-editorial-tools')
-        ->and($surrogateKey)->toContain('content-article');
+        ->and($surrogateKey)->toContain('content-article')
+        ->and($cacheTag)->toContain('extension-editorial-tools')
+        ->and($cacheTag)->toContain('content-article');
 });
 
 /**

@@ -5,10 +5,39 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\Cache;
 
 use Capell\Core\Models\SiteDomain;
+use Illuminate\Http\Request;
 use InvalidArgumentException;
 
 final class HtmlCachePathResolver
 {
+    public function pathForRequestUrl(string $url, SiteDomain $siteDomain, bool $error = false): string
+    {
+        $request = Request::create($url);
+        $path = $this->normalizePathFromUrl($url);
+        $domainPath = rtrim($siteDomain->path ?? '', '/');
+
+        if ($domainPath !== '') {
+            if ($path === $domainPath) {
+                $path = '/';
+            } elseif (str_starts_with($path, $domainPath . '/')) {
+                $path = substr($path, strlen($domainPath));
+            }
+        }
+
+        $suffix = StatelessPaginationRequest::cacheKeySuffix($request);
+
+        if ($suffix === '') {
+            return $this->pathForUrl($path, $siteDomain, $error);
+        }
+
+        $lastSlash = strrpos($path, '/');
+        $directory = $lastSlash === false ? '' : substr($path, 0, $lastSlash + 1);
+        $filename = $lastSlash === false ? $path : substr($path, $lastSlash + 1);
+        $variantPath = $directory . ($filename === '' ? 'pc__index__pc' : $filename) . $suffix;
+
+        return $this->pathForUrl($variantPath, $siteDomain, $error);
+    }
+
     public function pathForUrl(string $url, SiteDomain $siteDomain, bool $error = false): string
     {
         $this->assertSafeSegment('scheme', $siteDomain->scheme);

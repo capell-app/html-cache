@@ -134,8 +134,8 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
             }
 
             $files = [
-                $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain),
-                $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain, error: true),
+                $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain),
+                $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain, error: true),
             ];
 
             foreach ($files as $file) {

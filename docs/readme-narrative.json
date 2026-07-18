@@ -1,6 +1,6 @@
 {
     "whatThisPluginAdds": {
-        "text": "HTML Cache stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration with public-output safety checks.",
+        "text": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees. It stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration.",
         "evidence": [
             "capell.json",
             "src/Http/Middleware/HtmlCacheMiddleware.php",

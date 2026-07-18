@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Contracts;
 
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
+
 interface CachePurger
 {
-    /**
-     * @param  list<string>  $surrogateKeys
-     */
-    public function purge(array $surrogateKeys): bool;
+    public function purge(EdgeCachePurgeData $purge): bool;
 }

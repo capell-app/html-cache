@@ -9,7 +9,6 @@ use Capell\Core\Models\Site;
 use Capell\Core\Models\Theme;
 use Capell\Frontend\Contracts\FrontendContextReader;
 use Capell\Frontend\Facades\Frontend;
-use Capell\Frontend\Support\CapellFrontendContext;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Livewire\Livewire;
@@ -28,64 +27,62 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
         $page->loadMissing('blueprint');
     }
 
-    app()->instance(CapellFrontendContext::class, new CapellFrontendContext(
-        new readonly class($page) implements FrontendContextReader
+    app()->instance(FrontendContextReader::class, new readonly class($page) implements FrontendContextReader
+    {
+        public function __construct(private ?Pageable $page) {}
+
+        public function site(): ?Site
         {
-            public function __construct(private ?Pageable $page) {}
+            return null;
+        }
 
-            public function site(): ?Site
-            {
-                return null;
-            }
+        public function language(): ?Language
+        {
+            return null;
+        }
 
-            public function language(): ?Language
-            {
-                return null;
-            }
+        public function page(): ?Pageable
+        {
+            return $this->page;
+        }
 
-            public function page(): ?Pageable
-            {
-                return $this->page;
-            }
+        public function layout(): ?Layout
+        {
+            return null;
+        }
 
-            public function layout(): ?Layout
-            {
-                return null;
-            }
+        public function theme(): ?Theme
+        {
+            return null;
+        }
 
-            public function theme(): ?Theme
-            {
-                return null;
-            }
+        /**
+         * @return array<string, mixed>
+         */
+        public function params(): array
+        {
+            return [];
+        }
 
-            /**
-             * @return array<string, mixed>
-             */
-            public function params(): array
-            {
-                return [];
-            }
+        public function slug(): ?string
+        {
+            return null;
+        }
 
-            public function slug(): ?string
-            {
-                return null;
-            }
+        public function isError(): bool
+        {
+            return false;
+        }
 
-            public function isError(): bool
-            {
-                return false;
-            }
+        public function setFrontendData(string $key, mixed $value): self
+        {
+            return $this;
+        }
 
-            public function setFrontendData(string $key, mixed $value): self
-            {
-                return $this;
-            }
-
-            public function getFrontendData(?string $key = null): mixed
-            {
-                return $key === null ? [] : null;
-            }
-        },
-    ));
-    Frontend::clearResolvedInstance(CapellFrontendContext::class);
+        public function getFrontendData(?string $key = null): mixed
+        {
+            return $key === null ? [] : null;
+        }
+    });
+    Frontend::clearResolvedInstance(FrontendContextReader::class);
 }

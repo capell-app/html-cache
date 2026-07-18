@@ -23,6 +23,8 @@ final class ProcessStaleHtmlCacheAction
 
     public function handle(?int $limit = null): int
     {
+        PruneHtmlCacheMetadataAction::run();
+
         $batchSize = max(1, $limit ?? $this->configuredBatchSize(config('capell-html-cache.invalidation.batch_size', 100)));
         $processed = 0;
         $emptyPasses = 0;

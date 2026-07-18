@@ -42,10 +42,10 @@ final class MarkCachedUrlsForSiteStaleAction
             ->lazyById(column: 'cached_model_urls.id', alias: 'id')
             ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, $reason, $pathResolver): void {
                 $cachePath = $cachedModelUrl->siteDomain !== null
-                    ? $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain)
+                    ? $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain)
                     : null;
                 $errorCachePath = $cachedModelUrl->siteDomain !== null
-                    ? $pathResolver->pathForUrl($cachedModelUrl->path, $cachedModelUrl->siteDomain, error: true)
+                    ? $pathResolver->pathForRequestUrl($cachedModelUrl->url, $cachedModelUrl->siteDomain, error: true)
                     : null;
 
                 $rows[] = $this->staleUrlRow($cachedModelUrl, $cachePath, $errorCachePath, $reason);

@@ -31,13 +31,30 @@ final class CacheableResponseCookieStripper
     public static function strip(Response $response): Response
     {
         $cookieNamesToStrip = self::cookieNamesToStrip();
+        $removedFrameworkCookie = false;
 
         foreach ($response->headers->getCookies() as $cookie) {
             if (in_array($cookie->getName(), $cookieNamesToStrip, true)) {
                 $response->headers->removeCookie($cookie->getName(), $cookie->getPath(), $cookie->getDomain());
+                $removedFrameworkCookie = true;
             }
         }
 
+        if ($removedFrameworkCookie && self::hasFrameworkSessionCacheControl($response)) {
+            $response->headers->remove('Cache-Control');
+        }
+
         return $response;
+    }
+
+    private static function hasFrameworkSessionCacheControl(Response $response): bool
+    {
+        $directives = array_map(
+            static fn (string $directive): string => trim(strtolower($directive)),
+            explode(',', (string) $response->headers->get('Cache-Control')),
+        );
+        sort($directives);
+
+        return $directives === ['max-age=0', 'must-revalidate', 'no-cache', 'no-store', 'private'];
     }
 }

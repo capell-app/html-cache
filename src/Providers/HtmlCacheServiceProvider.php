@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Providers;
 
 use Capell\Admin\Contracts\AdminTools\AdminToolItem;
 use Capell\Admin\Contracts\Cache\AdminCacheCleaner;
+use Capell\Admin\Contracts\Cache\StaticSiteGenerationDispatcher;
 use Capell\Admin\Contracts\DashboardSettingsContributor;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthReportExtender;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthWidget;
@@ -54,6 +55,7 @@ use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
+use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
@@ -106,6 +108,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->registerPageCacheDisk();
 
         $this->app->singleton(HtmlCachePathResolver::class);
+        $this->app->singleton(StaticSiteGenerationDispatcher::class, HtmlCacheStaticSiteGenerationDispatcher::class);
         $this->app->singleton(HtmlCacheStore::class);
         $this->app->singleton(FrontendOutputCacheInvalidator::class, HtmlFrontendOutputCacheInvalidator::class);
         $this->app->singleton(HtmlCacheHitBuffer::class);

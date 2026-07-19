@@ -7,9 +7,9 @@ namespace Capell\HtmlCache\Filament\Pages;
 use BackedEnum;
 use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\Site;
-use Capell\Frontend\Actions\GenerateMaintenancePageCacheAction;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
+use Capell\HtmlCache\Actions\QueueMaintenancePageGenerationAction;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Filament\Actions\Action;
@@ -88,7 +88,17 @@ class MaintenanceCachePage extends Page implements HasActions
         $current = data_get($manifest, 'sites.' . $siteId . '.active') === true;
 
         if (! $current && data_get($manifest, 'sites.' . $siteId . '.domains', []) === []) {
-            GenerateMaintenancePageCacheAction::run($site);
+            QueueMaintenancePageGenerationAction::run(
+                new Collection([$site]),
+                activateSiteId: $siteId,
+            );
+
+            Notification::make()
+                ->success()
+                ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
+                ->send();
+
+            return;
         }
 
         resolve(MaintenanceManifestStore::class)->setSiteActive($siteId, ! $current);
@@ -104,11 +114,11 @@ class MaintenanceCachePage extends Page implements HasActions
     {
         $site = $this->authorizedSite($siteId);
 
-        GenerateMaintenancePageCacheAction::run($site);
+        QueueMaintenancePageGenerationAction::run(new Collection([$site]));
 
         Notification::make()
             ->success()
-            ->title(__('capell-html-cache::admin.maintenance_cache_generated'))
+            ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
             ->send();
     }
 
@@ -126,7 +136,7 @@ class MaintenanceCachePage extends Page implements HasActions
 
                     Notification::make()
                         ->success()
-                        ->title(__('capell-html-cache::admin.maintenance_cache_generated'))
+                        ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
                         ->send();
                 }),
             Action::make('enable-global-maintenance')
@@ -137,15 +147,16 @@ class MaintenanceCachePage extends Page implements HasActions
                 ->action(function (): void {
                     $secret = Str::random(32);
 
-                    $this->generateAccessibleMaintenancePages();
-                    resolve(MaintenanceManifestStore::class)->setGlobalActive(true);
-                    PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
-                    Artisan::call('down', ['--secret' => $secret]);
+                    QueueMaintenancePageGenerationAction::run(
+                        $this->accessibleSites(enabledOnly: true),
+                        enableGlobal: true,
+                        secret: $secret,
+                    );
                     Cookie::queue(MaintenanceModeBypassCookie::create($secret));
 
                     Notification::make()
                         ->success()
-                        ->title(__('capell-html-cache::admin.global_maintenance_enabled'))
+                        ->title(__('capell-html-cache::admin.global_maintenance_queued'))
                         ->send();
                 }),
             Action::make('disable-global-maintenance')
@@ -228,13 +239,19 @@ class MaintenanceCachePage extends Page implements HasActions
     /**
      * @throws AuthorizationException
      */
-    private function generateAccessibleMaintenancePages(): void
+    /** @return Collection<int, Site> */
+    private function accessibleSites(bool $enabledOnly = false): Collection
     {
         throw_unless(self::canManageMaintenance(), AuthorizationException::class);
 
-        $this->accessibleSitesQuery(enabledOnly: true)
+        return $this->accessibleSitesQuery(enabledOnly: $enabledOnly)
             ->with(['language', 'siteDomains.language', 'theme', 'translations'])
             ->ordered()
-            ->each(fn (Site $site): array => GenerateMaintenancePageCacheAction::run($site));
+            ->get();
+    }
+
+    private function generateAccessibleMaintenancePages(): void
+    {
+        QueueMaintenancePageGenerationAction::run($this->accessibleSites(enabledOnly: true));
     }
 }

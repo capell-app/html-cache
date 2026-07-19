@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Admin\Contracts\Cache\StaticSiteGenerationDispatcher;
 use Capell\Core\Contracts\Themes\ThemePreviewRendererInterface;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Blueprint;
@@ -20,6 +21,7 @@ use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\GenerateStaticSitesAction;
 use Capell\HtmlCache\Actions\NotifyClearCachedPagesAction;
+use Capell\HtmlCache\Actions\QueueMaintenancePageGenerationAction;
 use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
@@ -32,12 +34,14 @@ use Capell\HtmlCache\Health\HtmlCacheHealthCheck;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
+use Capell\HtmlCache\Jobs\GenerateMaintenancePagesJob;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
 use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
+use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
@@ -727,6 +731,11 @@ it('covers static generation and page deletion actions directly', function (): v
         ->and(DeletePageCacheAction::run($page, refresh: false))->toBeTrue();
 });
 
+it('binds static site generation to the durable html cache dispatcher', function (): void {
+    expect(resolve(StaticSiteGenerationDispatcher::class))
+        ->toBeInstanceOf(HtmlCacheStaticSiteGenerationDispatcher::class);
+});
+
 it('covers cache map component record and selection state helpers', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('component.test');
     $page = htmlCacheResidualCoveragePage($siteDomain);
@@ -952,6 +961,30 @@ it('toggles and generates site maintenance cache state', function (): void {
     $page->generateSite((int) $siteDomain->site_id);
 
     expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.domains'))->not->toBe([]);
+
+    $run = HtmlCacheGenerationRun::query()->latest('created_at')->first();
+
+    expect($run)->toBeInstanceOf(HtmlCacheGenerationRun::class)
+        ->and($run?->status)->toBe(HtmlCacheGenerationRun::STATUS_COMPLETED)
+        ->and($run?->completed_sites)->toBe(1);
+});
+
+it('queues maintenance page generation with persisted progress', function (): void {
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-queued.test');
+    Queue::fake();
+
+    $run = QueueMaintenancePageGenerationAction::run(collect([$siteDomain->site]));
+
+    expect($run->status)->toBe(HtmlCacheGenerationRun::STATUS_PENDING)
+        ->and($run->total_sites)->toBe(1)
+        ->and(fn (): HtmlCacheGenerationRun => QueueMaintenancePageGenerationAction::run(collect([$siteDomain->site])))
+        ->toThrow(RuntimeException::class, 'A cache generation run is already active.');
+
+    Queue::assertPushed(
+        GenerateMaintenancePagesJob::class,
+        fn (GenerateMaintenancePagesJob $job): bool => $job->runId === $run->id
+            && $job->siteIds === [(int) $siteDomain->site_id],
+    );
 });
 
 it('scopes maintenance cache page site operations to assigned sites', function (): void {

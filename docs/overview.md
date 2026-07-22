@@ -12,6 +12,8 @@ Run the package migrations and make sure the `page_cache` filesystem is writable
 
 HTML Cache has no settings screen; its runtime, bypass, cache-age, invalidation, and optional CDN purge behaviour comes from `capell-html-cache` configuration and environment values. Run `capell:html-cache:diagnose <url>` after setup or whenever a URL will not cache; the report gives the actual eligibility reasons and stale state.
 
+For Cloudflare, follow the production rule, purge-token, and `CF-Cache-Status` checks in [HTML Cache Invalidation](cache-invalidation.md#cloudflare). The edge rule must respect Capell's origin `Cache-Control` headers; never force-cache private or authenticated responses.
+
 ## Where it shows up
 
 - Dashboard widgets show overall state, cached/uncached URL coverage, hit totals, and the stale-refresh queue when those widgets are enabled for the dashboard.

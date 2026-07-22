@@ -48,6 +48,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         return collect([
             $check->pageCacheDiskWritableCheck(),
             $check->pageCacheDiskLocalPathCheck(),
+            $check->multiNodePurgeSafetyCheck(),
             $check->frontendCacheMiddlewareWiredCheck(),
             $check->storageTablesCheck(),
             $check->staleProcessingCommandRegisteredCheck(),
@@ -92,6 +93,39 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $writable
                 ? null
                 : (string) __('capell-html-cache::health.disk.remediation'),
+        );
+    }
+
+    /**
+     * Warns when node-local cache files cannot be invalidated across every web node.
+     */
+    public function multiNodePurgeSafetyCheck(): DoctorCheckResultData
+    {
+        $webNodeCount = $this->configuredWebNodeCount();
+        $pageCacheDriver = $this->pageCacheDiskDriver();
+        $purgeDriver = $this->configuredPurgeDriver();
+        $usesMultipleWebNodes = $webNodeCount > 1;
+        $usesLocalPageCacheDisk = $pageCacheDriver === 'local';
+        $usesSharedPageCacheDisk = config('capell-html-cache.deployment.shared_page_cache', false) === true;
+        $hasEdgePurgeDriver = in_array($purgeDriver, ['cloudflare', 'http'], true);
+        $passed = ! $usesMultipleWebNodes
+            || ! $usesLocalPageCacheDisk
+            || $usesSharedPageCacheDisk
+            || $hasEdgePurgeDriver;
+
+        return new DoctorCheckResultData(
+            label: (string) __('capell-html-cache::health.multi_node_purge.label'),
+            passed: $passed,
+            message: $this->multiNodePurgeMessage(
+                webNodeCount: $webNodeCount,
+                pageCacheDriver: $pageCacheDriver,
+                purgeDriver: $purgeDriver,
+                usesSharedPageCacheDisk: $usesSharedPageCacheDisk,
+                hasEdgePurgeDriver: $hasEdgePurgeDriver,
+            ),
+            remediation: $passed
+                ? null
+                : (string) __('capell-html-cache::health.multi_node_purge.remediation'),
         );
     }
 
@@ -248,6 +282,64 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     public function usesScheduledInvalidation(): bool
     {
         return config('capell-html-cache.invalidation.mode', 'instant') === 'scheduled';
+    }
+
+    private function configuredWebNodeCount(): int
+    {
+        $configuredWebNodeCount = config('capell-html-cache.deployment.web_node_count', 1);
+
+        return is_numeric($configuredWebNodeCount) ? max(1, (int) $configuredWebNodeCount) : 1;
+    }
+
+    private function pageCacheDiskDriver(): string
+    {
+        $driver = config('filesystems.disks.' . self::PAGE_CACHE_DISK . '.driver');
+
+        return is_string($driver) && $driver !== '' ? strtolower($driver) : 'unconfigured';
+    }
+
+    private function configuredPurgeDriver(): string
+    {
+        $driver = config('capell-html-cache.purge.driver', 'null');
+
+        return is_string($driver) && $driver !== '' ? strtolower($driver) : 'null';
+    }
+
+    private function multiNodePurgeMessage(
+        int $webNodeCount,
+        string $pageCacheDriver,
+        string $purgeDriver,
+        bool $usesSharedPageCacheDisk,
+        bool $hasEdgePurgeDriver,
+    ): string {
+        if ($webNodeCount === 1) {
+            return (string) __('capell-html-cache::health.multi_node_purge.single_node');
+        }
+
+        if ($pageCacheDriver !== 'local') {
+            return (string) __('capell-html-cache::health.multi_node_purge.non_local_disk', [
+                'nodes' => $webNodeCount,
+                'driver' => $pageCacheDriver,
+            ]);
+        }
+
+        if ($usesSharedPageCacheDisk) {
+            return (string) __('capell-html-cache::health.multi_node_purge.shared_disk', [
+                'nodes' => $webNodeCount,
+            ]);
+        }
+
+        if ($hasEdgePurgeDriver) {
+            return (string) __('capell-html-cache::health.multi_node_purge.edge_driver', [
+                'nodes' => $webNodeCount,
+                'driver' => $purgeDriver,
+            ]);
+        }
+
+        return (string) __('capell-html-cache::health.multi_node_purge.failed', [
+            'nodes' => $webNodeCount,
+            'driver' => $purgeDriver,
+        ]);
     }
 
     private function staleProcessingCommandMessage(bool $usesScheduledInvalidation, bool $commandRegistered): string

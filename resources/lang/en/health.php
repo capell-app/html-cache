@@ -21,6 +21,15 @@ return [
         'passed' => 'The page_cache disk exposes local filesystem paths for atomic HTML writes.',
         'remediation' => 'Use a local or shared POSIX filesystem disk. Object-storage drivers are not supported by the HTML file cache.',
     ],
+    'multi_node_purge' => [
+        'failed' => 'HTML Cache is configured for :nodes web nodes, but page_cache is node-local and the :driver purge driver cannot invalidate peer nodes.',
+        'label' => 'HTML cache multi-node purge safety',
+        'single_node' => 'HTML Cache is configured for one web node, so local invalidation reaches the complete origin cache.',
+        'non_local_disk' => 'HTML Cache is configured for :nodes web nodes and the page_cache disk uses the :driver driver. Confirm the separate local-path diagnostic before serving cached HTML.',
+        'shared_disk' => 'HTML Cache is configured for :nodes web nodes using an acknowledged shared page_cache filesystem.',
+        'edge_driver' => 'HTML Cache is configured for :nodes web nodes with the :driver edge purge driver.',
+        'remediation' => 'Use one web node, mount one shared POSIX page_cache directory on every web and queue node and set CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true, or configure the HTTP or Cloudflare purge driver. Node-local multi-node HTML caching without an edge purge driver is unsupported.',
+    ],
     'stale_command' => [
         'failed' => 'Scheduled invalidation is active but the :command command is not registered.',
         'label' => 'Scheduled stale-regeneration command registered',

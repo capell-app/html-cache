@@ -25,9 +25,9 @@ Status details:
 
 **For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable.
 
-**For teams:** Teams can see whether important URLs are cached and recover from stale output without weakening the rule that admin and authoring details stay out of public files.
+**For teams:** Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.
 
-Evidence: [`src/Actions/RecordCachedModelUrlsAction.php`](src/Actions/RecordCachedModelUrlsAction.php), [`src/Actions/MarkCachedUrlsForModelStaleAction.php`](src/Actions/MarkCachedUrlsForModelStaleAction.php), [`src/Actions/RefreshCachedUrlAtomicallyAction.php`](src/Actions/RefreshCachedUrlAtomicallyAction.php), [`tests/Feature/StaleCachedUrlsTest.php`](tests/Feature/StaleCachedUrlsTest.php), [`docs/admin-guide.md`](docs/admin-guide.md), [`src/Actions/BuildHtmlCacheEligibilityReportAction.php`](src/Actions/BuildHtmlCacheEligibilityReportAction.php), [`src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php`](src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php), [`tests/Feature/ExtensionCacheSafetyTest.php`](tests/Feature/ExtensionCacheSafetyTest.php).
+Evidence: [`src/Actions/RecordCachedModelUrlsAction.php`](src/Actions/RecordCachedModelUrlsAction.php), [`src/Actions/MarkCachedUrlsForModelStaleAction.php`](src/Actions/MarkCachedUrlsForModelStaleAction.php), [`src/Actions/RefreshCachedUrlAtomicallyAction.php`](src/Actions/RefreshCachedUrlAtomicallyAction.php), [`tests/Feature/StaleCachedUrlsTest.php`](tests/Feature/StaleCachedUrlsTest.php), [`docs/admin-guide.md`](docs/admin-guide.md), [`docs/cache-invalidation.md`](docs/cache-invalidation.md), [`src/Health/HtmlCacheHealthCheck.php`](src/Health/HtmlCacheHealthCheck.php), [`src/Actions/BuildHtmlCacheEligibilityReportAction.php`](src/Actions/BuildHtmlCacheEligibilityReportAction.php), [`src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php`](src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php), [`tests/Feature/ExtensionCacheSafetyTest.php`](tests/Feature/ExtensionCacheSafetyTest.php).
 
 ## Screens And Workflow
 
@@ -54,9 +54,9 @@ Screenshot contract: `docs/screenshots.json`.
 - Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsFilamentWidget`, `HtmlCacheOverviewFilamentWidget`, `HtmlCacheStaleQueueFilamentWidget`.
 - Livewire components: `SiteHealthCacheMap`.
 - Extension contracts: `CachePurger`, `PageCacheNotifiable`.
-- Actions: `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `BuildHtmlCacheStaleQueueRowsAction`, `and 20 more`.
+- Actions: `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `BuildHtmlCacheStaleQueueRowsAction`, `and 22 more`.
 - Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`.
-- Jobs: `FlushHtmlCacheHitBatchJob`, `RegisterCachedModelUrlsJob`.
+- Jobs: `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
 - Scheduled commands: `capell:html-cache:process-stale`.
 - Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
 - Manifest contributions: `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`, `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`, `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`, `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`, `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`.
@@ -83,7 +83,7 @@ Screenshot contract: `docs/screenshots.json`.
 - Database changes: package migrations are declared.
 - Config: `config/capell-html-cache.php`.
 - Settings: no package settings declared.
-- Queues or schedules: scheduled commands `capell:html-cache:process-stale`; queue jobs `FlushHtmlCacheHitBatchJob`, `RegisterCachedModelUrlsJob`.
+- Queues or schedules: scheduled commands `capell:html-cache:process-stale`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
 - Cache tags: `html-cache`.
 - Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
 

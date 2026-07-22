@@ -27,6 +27,41 @@ Failed refreshes retry after the configured backoff until `max_attempts` is reac
 
 Every successful URL clear or stale refresh also queues an edge purge. A full local clear and global maintenance transitions queue a complete edge purge. Purge failures retry independently, so a temporary CDN API failure does not roll back the origin cache operation.
 
+## Deployment Topology And Purge Reach
+
+HTML Cache supports three production topologies:
+
+1. One web node with a local `page_cache` disk.
+2. Multiple web or queue nodes mounting the same shared POSIX `page_cache` directory.
+3. Multiple web nodes with a configured `http` or `cloudflare` purge driver and public traffic delivered through that cache layer.
+
+Multiple web nodes with separate node-local `page_cache` directories and the default `null` purge driver are unsupported. A clear job deletes files only from the node that runs it, so another node can continue serving stale HTML.
+
+Declare the topology so Diagnostics can detect this unsafe combination:
+
+```env
+CAPELL_HTML_CACHE_WEB_NODE_COUNT=2
+CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=false
+```
+
+Set `CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true` only when every web and queue node mounts the same POSIX directory. Otherwise configure the HTTP or Cloudflare purge driver. The **HTML cache multi-node purge safety** health check fails when more than one web node is declared while `page_cache` is local, shared storage is not acknowledged, and `purge.driver` is `null`.
+
+The `stale_cached_urls` table is not a cross-node purge journal. Scheduled invalidation runs `capell:html-cache:process-stale` with `onOneServer()`, and each row has one global claim and processed state. It safely regenerates one shared cache entry, but it cannot make every node consume the same deletion. A correct per-node journal would require stable node identities, membership and retirement rules, per-node acknowledgements, and bounded retention; do not treat scheduled mode as a workaround for node-local multi-node storage.
+
+## Personalised Route Bypass Examples
+
+The package defaults cannot know application-specific routes, cookies, or request headers. Configure every shared URL whose response varies by visitor state, for example:
+
+```php
+'bypass' => [
+    'paths' => ['/cart', '/cart/*', '/account/*', '/checkout/*'],
+    'cookies' => ['currency_*', 'customer_segment'],
+    'headers' => ['Accept-Language', 'X-Geo-Country'],
+],
+```
+
+Use only the rules your application needs. A header rule bypasses caching whenever that header is present; it does not create a cache variant.
+
 ## Cloudflare
 
 Cloudflare does not cache HTML by default. Configure a Cloudflare Cache Rule that makes the intended anonymous public routes cache eligible, while bypassing admin, account, preview, signed, personalised, and cookie-varying routes. Capell emits `Cache-Control`, `Cache-Tag`, and `Surrogate-Key` headers on cacheable responses.
@@ -79,7 +114,7 @@ CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID=your-32-character-zone-id
 
 The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
 
-The `page_cache` disk must expose local filesystem paths because refreshes use atomic file replacement. Use a local disk for a single web node or a shared POSIX filesystem mounted by every web and queue node. Object-storage disks are not supported. Site Health reports an error when the disk cannot provide local paths.
+The `page_cache` disk must expose local filesystem paths because refreshes use atomic file replacement. Use a local disk for a single web node or a shared POSIX filesystem mounted by every web and queue node. Object-storage disks are not supported. Site Health reports an error when the disk cannot provide local paths; the deployment-topology check separately reports unsafe multi-node purge configuration.
 
 ## Main Actions
 
@@ -164,9 +199,13 @@ RecordCachedModelUrlsAction::run($url, [
 | `capell-html-cache.purge.driver`                            | Edge purge adapter: `null`, `http`, or `cloudflare`.                                                                                                      |
 | `capell-html-cache.purge.token`                             | Bearer token for the configured edge purge API.                                                                                                           |
 | `capell-html-cache.purge.cloudflare.zone_id`                | Cloudflare zone ID used by the native purge adapter.                                                                                                      |
+| `capell-html-cache.deployment.web_node_count`               | Number of web nodes that may serve public HTML; used by the deployment-topology health diagnostic.                                                        |
+| `capell-html-cache.deployment.shared_page_cache`            | Acknowledges that every web and queue node mounts the same POSIX `page_cache` directory.                                                                  |
 | `capell-html-cache.model_event_registration_mode`           | Controls model event registration timing; default is `deferred`.                                                                                          |
 | `capell-html-cache.static_generation.internal_requests`     | Renders static generation through the current Laravel kernel; enabled by default for reliable completion reporting.                                       |
 | `capell-html-cache.public_html_authoring_markers`           | Strings used by diagnostics to detect authoring leakage in public HTML.                                                                                   |
+
+Hit telemetry is operational metadata, not a durable event log. Pending counters and the scheduled-flush marker expire after `hit_recording.buffer_ttl_seconds`; if queue workers remain unavailable longer than that window, some hit and byte totals can be lost. This does not affect cached HTML correctness. Monitor queue workers and set the TTL longer than the longest outage for which telemetry must be retained.
 
 ## Console
 

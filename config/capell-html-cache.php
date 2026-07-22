@@ -101,6 +101,19 @@ return [
             'zone_id' => Env::get('CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID'),
         ],
     ],
+    'deployment' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Deployment topology
+        |--------------------------------------------------------------------------
+        |
+        | Declare the number of web nodes so Site Health can detect unsupported
+        | node-local multi-node cache storage. Set shared_page_cache only when
+        | every web and queue node mounts the same POSIX page_cache directory.
+        */
+        'web_node_count' => max(1, $integerEnv('CAPELL_HTML_CACHE_WEB_NODE_COUNT', 1)),
+        'shared_page_cache' => Env::get('CAPELL_HTML_CACHE_SHARED_PAGE_CACHE', false),
+    ],
     'cache_skip_authenticated' => true,
     'bypass' => [
         /*

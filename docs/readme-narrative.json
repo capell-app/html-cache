@@ -28,9 +28,11 @@
             ]
         },
         "teams": {
-            "text": "Teams can see whether important URLs are cached and recover from stale output without weakening the rule that admin and authoring details stay out of public files.",
+            "text": "Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.",
             "evidence": [
                 "docs/admin-guide.md",
+                "docs/cache-invalidation.md",
+                "src/Health/HtmlCacheHealthCheck.php",
                 "src/Actions/BuildHtmlCacheEligibilityReportAction.php",
                 "src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php",
                 "tests/Feature/ExtensionCacheSafetyTest.php"

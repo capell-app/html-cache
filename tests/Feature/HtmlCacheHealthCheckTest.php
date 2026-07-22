@@ -20,9 +20,53 @@ it('passes all diagnostics when the cache is fully wired', function (): void {
 
     $results = HtmlCacheHealthCheck::runDiagnostics();
 
-    expect($results)->toHaveCount(5)
+    expect($results)->toHaveCount(6)
         ->and($results->every(static fn (DoctorCheckResultData $result): bool => $result->passed))->toBeTrue()
         ->and(HtmlCacheHealthCheck::passed())->toBeTrue();
+});
+
+it('warns when multiple web nodes use node local cache storage without an edge purge driver', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.deployment.web_node_count', 2);
+    config()->set('capell-html-cache.deployment.shared_page_cache', false);
+    config()->set('capell-html-cache.purge.driver', 'null');
+
+    $result = (new HtmlCacheHealthCheck)->multiNodePurgeSafetyCheck();
+
+    expect($result->passed)->toBeFalse()
+        ->and($result->message)->toContain('2 web nodes')
+        ->and($result->message)->toContain('node-local')
+        ->and($result->remediation)->toContain('shared POSIX')
+        ->and($result->remediation)->toContain('Cloudflare')
+        ->and(HtmlCacheHealthCheck::passed())->toBeFalse();
+});
+
+it('accepts an acknowledged shared page cache for multiple web nodes', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.deployment.web_node_count', 3);
+    config()->set('capell-html-cache.deployment.shared_page_cache', true);
+    config()->set('capell-html-cache.purge.driver', 'null');
+
+    $result = (new HtmlCacheHealthCheck)->multiNodePurgeSafetyCheck();
+
+    expect($result->passed)->toBeTrue()
+        ->and($result->message)->toContain('3 web nodes')
+        ->and($result->message)->toContain('shared page_cache')
+        ->and($result->remediation)->toBeNull();
+});
+
+it('accepts a configured edge purge driver for multiple web nodes', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.deployment.web_node_count', 4);
+    config()->set('capell-html-cache.deployment.shared_page_cache', false);
+    config()->set('capell-html-cache.purge.driver', 'cloudflare');
+
+    $result = (new HtmlCacheHealthCheck)->multiNodePurgeSafetyCheck();
+
+    expect($result->passed)->toBeTrue()
+        ->and($result->message)->toContain('4 web nodes')
+        ->and($result->message)->toContain('cloudflare')
+        ->and($result->remediation)->toBeNull();
 });
 
 it('reports the disk writable, middleware wired, and tables present checks individually', function (): void {

@@ -15,14 +15,15 @@ final readonly class HtmlCacheHitBuffer
         private Repository $cache,
     ) {}
 
-    public function record(string $urlHash, int $bytesServed): bool
+    public function record(string $urlHash, int $bytesServed, int $sampleWeight = 1): bool
     {
         $timeToLive = $this->bufferTimeToLive();
+        $sampleWeight = max(1, $sampleWeight);
 
         $this->cache->add($this->hitsKey($urlHash), 0, $timeToLive);
         $this->cache->add($this->bytesKey($urlHash), 0, $timeToLive);
-        $this->cache->increment($this->hitsKey($urlHash));
-        $this->cache->increment($this->bytesKey($urlHash), max(0, $bytesServed));
+        $this->cache->increment($this->hitsKey($urlHash), $sampleWeight);
+        $this->cache->increment($this->bytesKey($urlHash), max(0, $bytesServed) * $sampleWeight);
 
         return $this->claimFlush($urlHash);
     }

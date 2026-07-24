@@ -8,6 +8,7 @@ use Capell\HtmlCache\Jobs\FlushHtmlCacheHitBatchJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Lottery;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -26,8 +27,16 @@ final class RecordHtmlCacheHitAction
         }
 
         $urlHash = CachedModelUrl::hashUrl($request->fullUrl());
+        $configuredSampleRate = config('capell-html-cache.hit_recording.sample_rate', 10);
+        $sampleRate = app()->environment('testing')
+            ? 1
+            : max(1, is_numeric($configuredSampleRate) ? (int) $configuredSampleRate : 10);
 
-        if (! resolve(HtmlCacheHitBuffer::class)->record($urlHash, $bytesServed)) {
+        if ($sampleRate > 1 && Lottery::odds(1, $sampleRate)->choose() !== true) {
+            return;
+        }
+
+        if (! resolve(HtmlCacheHitBuffer::class)->record($urlHash, $bytesServed, $sampleRate)) {
             return;
         }
 

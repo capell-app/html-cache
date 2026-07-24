@@ -22,6 +22,43 @@ require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
+it('keeps cached files available while a full manual clear queues refreshes', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+    CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+
+    test()->artisan('capell:html-cache:clear')
+        ->expectsOutput('HTML cache marked stale (1 URL(s) queued for refresh).')
+        ->assertSuccessful();
+
+    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
+        ->and(StaleCachedUrl::query()->where('url', $url)->where('reason', 'manual_clear')->exists())->toBeTrue();
+});
+
 it('marks indexed translation urls stale in scheduled mode', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.invalidation.mode', 'scheduled');

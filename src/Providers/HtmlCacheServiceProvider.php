@@ -27,6 +27,7 @@ use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\Frontend\Contracts\StaticErrorPageStore;
 use Capell\Frontend\Contracts\StaticMaintenancePageStore;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
+use Capell\HtmlCache\Actions\AssertHtmlCacheInvalidationTopologyAction;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForSurrogateKeysAction;
@@ -164,6 +165,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         if (! $this->isPackageInstalled()) {
             return;
         }
+
+        AssertHtmlCacheInvalidationTopologyAction::run();
 
         $this
             ->registerPageCacheDisk()

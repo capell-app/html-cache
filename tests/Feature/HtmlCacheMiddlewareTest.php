@@ -223,6 +223,60 @@ it('can serve cached html for requests with a session cookie when configured', f
         ->and((string) $response->headers->get('Cache-Control'))->toContain('public');
 });
 
+it('serves a proved state-free shell to an anonymous session cookie while authenticated users still bypass', function (): void {
+    Storage::fake('page_cache');
+    config()->set('session.cookie', 'capell_session');
+    config()->set('capell-html-cache.anonymous_session_cookie.shared_paths', ['start/build']);
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $cacheRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $cacheRequest);
+    resolve(PageCache::class)->cache($cacheRequest, response('static shell', 200, ['Content-Type' => 'text/html']));
+
+    $anonymousRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $anonymousRequest->cookies->set('capell_session', 'anonymous-session');
+    $anonymousResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $anonymousRequest,
+        fn (): Response => response('unexpected origin', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($anonymousResponse->getContent())->toBe('static shell')
+        ->and($anonymousResponse->headers->get('X-Frontend-Cache'))->toBe('HIT')
+        ->and((string) $anonymousResponse->headers->get('Cache-Control'))->toContain('public');
+
+    $authenticatedRequest = Request::create('https://example.test/start/build', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $authenticatedRequest->cookies->set('capell_session', 'authenticated-session');
+    $authenticatedRequest->setUserResolver(fn (): User => User::factory()->create());
+    $authenticatedResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $authenticatedRequest,
+        fn (): Response => response('private origin', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($authenticatedResponse->getContent())->toBe('private origin')
+        ->and((string) $authenticatedResponse->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('keeps explicit private state endpoints private when a shared shell wildcard also matches', function (): void {
+    config()->set('session.cookie', 'capell_session');
+    config()->set('capell-html-cache.anonymous_session_cookie.shared_paths', ['site-briefs/*']);
+    config()->set('capell-html-cache.anonymous_session_cookie.private_paths', ['site-briefs/*.state']);
+
+    $request = Request::create('https://example.test/site-briefs/reference.state', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->cookies->set('capell_session', 'anonymous-session');
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('private state', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->getContent())->toBe('private state')
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
 it('uses configured public cache-control ages for cached responses', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.http_cache.shared_max_age', 900);

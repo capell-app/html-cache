@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Console\Commands;
 
-use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
+use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Console\Command;
 use Throwable;
@@ -21,7 +21,7 @@ final class ClearHtmlCacheCommand extends Command
 
         if (! is_string($slug) || $slug === '') {
             try {
-                $result = ClearAllHtmlCacheAction::run();
+                $marked = MarkAllCachedUrlsStaleAction::run('manual_clear');
             } catch (Throwable $throwable) {
                 $this->error(sprintf(
                     'Unable to clear the HTML cache. Check filesystem permissions for [%s]. %s',
@@ -32,17 +32,7 @@ final class ClearHtmlCacheCommand extends Command
                 return Command::FAILURE;
             }
 
-            if (! $result->successful()) {
-                $this->error(sprintf(
-                    'Unable to clear the HTML cache. Check filesystem permissions for [%s]. Failed paths: %s',
-                    public_path('page-cache'),
-                    implode(', ', $result->failures()),
-                ));
-
-                return Command::FAILURE;
-            }
-
-            $this->info(sprintf('HTML cache cleared (%d item(s) removed).', $result->deletedCount()));
+            $this->info(sprintf('HTML cache marked stale (%d URL(s) queued for refresh).', $marked));
 
             return Command::SUCCESS;
         }

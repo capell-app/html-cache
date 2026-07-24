@@ -22,6 +22,7 @@ return [
     ],
     'hit_recording' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_HIT_RECORDING', true),
+        'sample_rate' => $integerEnv('CAPELL_HTML_CACHE_HIT_SAMPLE_RATE', 10),
         'flush_delay_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_FLUSH_DELAY_SECONDS', 30),
         'buffer_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_BUFFER_TTL_SECONDS', 3600),
     ],
@@ -115,6 +116,15 @@ return [
         'shared_page_cache' => Env::get('CAPELL_HTML_CACHE_SHARED_PAGE_CACHE', false),
     ],
     'cache_skip_authenticated' => true,
+    'anonymous_session_cookie' => [
+        /*
+        | Anonymous session cookies may use shared cache reads only on shells
+        | that the consuming application has proved state-free. Authenticated
+        | users always retain the normal private bypass.
+        */
+        'shared_paths' => [],
+        'private_paths' => [],
+    ],
     'bypass' => [
         /*
         |--------------------------------------------------------------------------

@@ -272,7 +272,7 @@ final class HtmlCacheMiddleware
         }
 
         if (config('capell-html-cache.cache_skip_authenticated', true) === true
-            && ($this->hasIncomingSessionCookie($request) || $request->user() !== null)) {
+            && ($this->sessionCookieRequiresPrivateResponse($request) || $request->user() !== null)) {
             return true;
         }
 
@@ -373,7 +373,7 @@ final class HtmlCacheMiddleware
 
         if (! $forcePublic && (
             ! $request->isMethod('GET')
-            || $this->hasIncomingSessionCookie($request)
+            || $this->sessionCookieRequiresPrivateResponse($request)
             || $request->headers->has('Authorization')
         )) {
             $response->headers->set('Cache-Control', 'private, no-store');
@@ -468,9 +468,30 @@ final class HtmlCacheMiddleware
         return $request->attributes->get(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, false) === true;
     }
 
+    private function sessionCookieRequiresPrivateResponse(Request $request): bool
+    {
+        if (! $this->hasIncomingSessionCookie($request)) {
+            return false;
+        }
+
+        if ($request->user() !== null) {
+            return true;
+        }
+
+        $privatePaths = config('capell-html-cache.anonymous_session_cookie.private_paths', []);
+
+        if (is_array($privatePaths) && $privatePaths !== [] && $request->is(...$privatePaths)) {
+            return true;
+        }
+
+        $sharedPaths = config('capell-html-cache.anonymous_session_cookie.shared_paths', []);
+
+        return ! is_array($sharedPaths) || $sharedPaths === [] || ! $request->is(...$sharedPaths);
+    }
+
     private function stripCookiesForCacheableAnonymousRequest(Request $request, Response $response): Response
     {
-        if (! $request->isMethod('GET') || $this->hasIncomingSessionCookie($request) || $request->headers->has('Authorization')) {
+        if (! $request->isMethod('GET') || $this->sessionCookieRequiresPrivateResponse($request) || $request->headers->has('Authorization')) {
             return $response;
         }
 

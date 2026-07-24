@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
+use RuntimeException;
 
 /**
  * @method static int run(string $reason = 'all_changed', ?array<string, mixed> $cachePathSiteDomainAttributes = null)
@@ -66,7 +67,11 @@ final class MarkAllCachedUrlsStaleAction
         }
 
         if ($marked === 0) {
-            ClearAllHtmlCacheAction::run();
+            $result = ClearAllHtmlCacheAction::run();
+
+            if (! $result->successful()) {
+                throw new RuntimeException('Unable to remove untracked HTML cache paths: ' . implode(', ', $result->failures()));
+            }
         }
 
         return $marked;

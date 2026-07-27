@@ -108,11 +108,12 @@ Use the native Cloudflare purge adapter:
 
 ```env
 CAPELL_HTML_CACHE_PURGE_DRIVER=cloudflare
+CAPELL_HTML_CACHE_PURGE_REQUIRED=true
 CAPELL_HTML_CACHE_PURGE_TOKEN=your-zone-cache-purge-token
 CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID=your-32-character-zone-id
 ```
 
-The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
+The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. When an invalidation contains both, the adapter sends both operations and treats either failure as a failed job. Run `capell:html-cache:edge-purge:verify --driver=cloudflare` during deployment to validate the selected driver and credential presence without transmitting the token or purging content. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
 
 The `page_cache` disk must expose local filesystem paths because refreshes use atomic file replacement. Use a local disk for a single web node or a shared POSIX filesystem mounted by every web and queue node. Object-storage disks are not supported. Site Health reports an error when the disk cannot provide local paths; the deployment-topology check separately reports unsafe multi-node purge configuration.
 
@@ -197,6 +198,7 @@ RecordCachedModelUrlsAction::run($url, [
 | `capell-html-cache.retention.processed_stale_days`          | Days to retain completed stale-refresh rows for diagnostics.                                                                                              |
 | `capell-html-cache.retention.generation_run_days`           | Days to retain completed or failed static-generation run records.                                                                                         |
 | `capell-html-cache.purge.driver`                            | Edge purge adapter: `null`, `http`, or `cloudflare`.                                                                                                      |
+| `capell-html-cache.purge.required`                          | Makes the null driver fail publication invalidation instead of succeeding as a local-only no-op.                                                          |
 | `capell-html-cache.purge.token`                             | Bearer token for the configured edge purge API.                                                                                                           |
 | `capell-html-cache.purge.cloudflare.zone_id`                | Cloudflare zone ID used by the native purge adapter.                                                                                                      |
 | `capell-html-cache.deployment.web_node_count`               | Number of web nodes that may serve public HTML; used by the deployment-topology health diagnostic.                                                        |
@@ -218,6 +220,7 @@ The package command is:
 ```text
 capell:html-cache:process-stale {--limit=}
 capell:html-cache:diagnose {url?} {--site=} {--render} {--json}
+capell:html-cache:edge-purge:verify {--driver=}
 capell:static-site {--site=} {--internal} {--refresh}
 ```
 

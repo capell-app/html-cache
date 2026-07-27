@@ -16,6 +16,12 @@ it('keeps the null cache purger as a successful no-op', function (): void {
     expect((new NullCachePurger)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeTrue();
 });
 
+it('fails closed when edge purge is required and the null purger is resolved', function (): void {
+    config()->set('capell-html-cache.purge.required', true);
+
+    expect((new NullCachePurger)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeFalse();
+});
+
 it('sends normalized surrogate keys to the configured http purge endpoint', function (): void {
     Http::fake([
         'https://93.184.216.34/purge' => Http::response(['ok' => true]),
@@ -55,7 +61,7 @@ it('does not send purge credentials to private or insecure endpoints', function 
     Http::assertNothingSent();
 });
 
-it('uses the Cloudflare zone purge API with URL purges as the precise baseline', function (): void {
+it('requires both precise URL and related tag purges to succeed at Cloudflare', function (): void {
     Http::fake([
         'https://api.cloudflare.com/client/v4/zones/0123456789abcdef0123456789abcdef/purge_cache' => Http::response(['success' => true]),
     ]);
@@ -69,9 +75,28 @@ it('uses the Cloudflare zone purge API with URL purges as the precise baseline',
 
     expect($purged)->toBeTrue();
 
+    Http::assertSentCount(2);
     Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.cloudflare.com/client/v4/zones/0123456789abcdef0123456789abcdef/purge_cache'
         && $request->hasHeader('Authorization', 'Bearer cloudflare-token')
-        && $request['files'] === ['https://example.test/about']);
+        && $request->data() === ['files' => ['https://example.test/about']]);
+    Http::assertSent(fn (Request $request): bool => $request->data() === ['tags' => ['page-1']]);
+});
+
+it('fails a combined Cloudflare purge when either required operation fails', function (): void {
+    Http::fake([
+        'https://api.cloudflare.com/client/v4/zones/0123456789abcdef0123456789abcdef/purge_cache' => Http::sequence()
+            ->push(['success' => true])
+            ->push(['success' => false], 403),
+    ]);
+    config()->set('capell-html-cache.purge.cloudflare.zone_id', '0123456789abcdef0123456789abcdef');
+    config()->set('capell-html-cache.purge.token', 'cloudflare-token');
+
+    expect(resolve(CloudflareCachePurger::class)->purge(new EdgeCachePurgeData(
+        tags: ['page-1'],
+        urls: ['https://example.test/about'],
+    )))->toBeFalse();
+
+    Http::assertSentCount(2);
 });
 
 it('supports Cloudflare tag and complete zone purges', function (): void {

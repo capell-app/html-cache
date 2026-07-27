@@ -4,6 +4,7 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 
 ## Unreleased
 
+- Added fail-closed required edge-purge configuration, non-mutating deployment readiness verification, and complete Cloudflare URL-plus-tag invalidation.
 - Added a filesystem TTL backstop and a configurable per-host cap that prunes the oldest cached 404 files before accepting new entries.
 - Moved model, route, site, and surrogate-key invalidation from in-process after-response callbacks to durable after-commit queue jobs.
 - Replaced the synchronous database update on every cache hit with atomic cache counters and a delayed, batched telemetry flush job.

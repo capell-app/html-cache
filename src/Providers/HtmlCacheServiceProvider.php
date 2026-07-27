@@ -40,6 +40,7 @@ use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\StaticSiteCommand;
+use Capell\HtmlCache\Console\Commands\VerifyEdgeCachePurgeCommand;
 use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
@@ -480,6 +481,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 DiagnoseHtmlCacheCommand::class,
                 ProcessStaleHtmlCacheCommand::class,
                 StaticSiteCommand::class,
+                VerifyEdgeCachePurgeCommand::class,
             ]);
         }
 

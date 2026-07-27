@@ -93,6 +93,7 @@ return [
         | webhook endpoint whenever cached URLs are cleared locally.
         */
         'driver' => Env::get('CAPELL_HTML_CACHE_PURGE_DRIVER', 'null'),
+        'required' => Env::get('CAPELL_HTML_CACHE_PURGE_REQUIRED', false),
         'endpoint' => Env::get('CAPELL_HTML_CACHE_PURGE_ENDPOINT'),
         'token' => Env::get('CAPELL_HTML_CACHE_PURGE_TOKEN'),
         'method' => Env::get('CAPELL_HTML_CACHE_PURGE_METHOD', 'post'),

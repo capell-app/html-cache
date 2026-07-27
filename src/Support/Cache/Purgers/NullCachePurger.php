@@ -11,6 +11,9 @@ final class NullCachePurger implements CachePurger
 {
     public function purge(EdgeCachePurgeData $purge): bool
     {
-        return true;
+        return ! filter_var(
+            config('capell-html-cache.purge.required', false),
+            FILTER_VALIDATE_BOOLEAN,
+        );
     }
 }

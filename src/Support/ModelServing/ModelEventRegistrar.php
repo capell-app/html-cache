@@ -14,13 +14,13 @@ final class ModelEventRegistrar
     private const string REQUEST_FLAG = 'capell.html_cache.model_events_registered';
 
     /** @var array<class-string<Model>, true> */
-    private static array $registeredModelClasses = [];
+    private array $registeredModelClasses = [];
 
-    private static bool $registeredForProcess = false;
+    private bool $registeredForProcess = false;
 
-    public static function registerModels(): void
+    public function registerModels(): void
     {
-        $request = self::requestOrNull();
+        $request = $this->requestOrNull();
         if ($request instanceof Request) {
             if ($request->attributes->get(self::REQUEST_FLAG) === true) {
                 return;
@@ -28,40 +28,40 @@ final class ModelEventRegistrar
 
             $request->attributes->set(self::REQUEST_FLAG, true);
         } else {
-            if (self::$registeredForProcess) {
+            if ($this->registeredForProcess) {
                 return;
             }
 
-            self::$registeredForProcess = true;
+            $this->registeredForProcess = true;
         }
 
         foreach (CapellCore::getModels() as $modelClass) {
-            self::registerRetrievedHook($modelClass);
+            $this->registerRetrievedHook($modelClass);
         }
     }
 
     /**
      * @param  class-string  $modelClass
      */
-    private static function registerRetrievedHook(string $modelClass): void
+    private function registerRetrievedHook(string $modelClass): void
     {
         if (! is_subclass_of($modelClass, Model::class)) {
             return;
         }
 
         /** @var class-string<Model> $modelClass */
-        if (isset(self::$registeredModelClasses[$modelClass])) {
+        if (isset($this->registeredModelClasses[$modelClass])) {
             return;
         }
 
-        self::$registeredModelClasses[$modelClass] = true;
+        $this->registeredModelClasses[$modelClass] = true;
 
         $modelClass::retrieved(function (Model $model) use ($modelClass): void {
             resolve(RetrievedModelStore::class)->trackByClass($model, $modelClass);
         });
     }
 
-    private static function requestOrNull(): ?Request
+    private function requestOrNull(): ?Request
     {
         try {
             $request = resolve('request');

@@ -10,15 +10,8 @@ use Closure;
 
 final class StaticSiteExtensionRegistry
 {
-    private static ?self $instance = null;
-
     /** @var array<string, callable(Site, SiteDomain, Closure(string): void): void> */
     private array $handlers = [];
-
-    public static function instance(): self
-    {
-        return self::$instance ??= new self;
-    }
 
     /**
      * @param  callable(Site, SiteDomain, Closure(string): void): void  $handler

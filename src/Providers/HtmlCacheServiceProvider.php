@@ -20,6 +20,7 @@ use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Octane\Resettable;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
 use Capell\Frontend\Contracts\FrontendOutputCacheInvalidator;
@@ -68,6 +69,7 @@ use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
 use Capell\HtmlCache\Support\Error\HtmlCacheStaticErrorPageStore;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
+use Capell\HtmlCache\Support\ModelServing\ModelEventRegistrar;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
@@ -76,6 +78,7 @@ use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
@@ -85,6 +88,17 @@ use Spatie\LaravelPackageTools\Package;
 
 final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 {
+    /**
+     * Marks that {@see EnsureHtmlCachePermissionsAction} has already synced
+     * this package's permissions, so packageBooted() does not re-run the
+     * permission SELECT/firstOrCreate queries and forgetCachedPermissions()
+     * cache bust on every single request. Bounded rather than forever so a
+     * permission row deleted out-of-band is still self-healed periodically.
+     */
+    private const string PERMISSIONS_SYNCED_CACHE_KEY = 'capell-html-cache.permissions-synced';
+
+    private const int PERMISSIONS_SYNCED_CACHE_TTL_SECONDS = 3600;
+
     public static string $name = 'capell-html-cache';
 
     public static string $packageName = 'capell-app/html-cache';
@@ -122,7 +136,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         });
         $this->app->singleton(ActiveAccessGateAreaResolver::class);
         $this->app->singleton(ExtensionCacheSafetyResolver::class);
-        $this->app->singleton(StaticSiteExtensionRegistry::class, fn (): StaticSiteExtensionRegistry => StaticSiteExtensionRegistry::instance());
+        $this->app->singleton(StaticSiteExtensionRegistry::class);
+        $this->app->singleton(ModelEventRegistrar::class);
+        $this->app->singleton(HtmlCacheModelInvalidationObserver::class);
+        $this->app->tag([HtmlCacheModelInvalidationObserver::class], Resettable::TAG);
         $this->app->scoped(RetrievedModelStore::class, fn (): RetrievedModelStore => new RetrievedModelStore);
         $this->app->scoped(RenderedModelTracker::class, fn (): RenderedModelTracker => $this->app->make(RetrievedModelStore::class));
 
@@ -168,8 +185,11 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         AssertHtmlCacheInvalidationTopologyAction::run();
 
+        // registerPageCacheDisk() already ran during registeringPackage()
+        // (the Laravel register phase, which always completes before any
+        // provider's boot phase runs), so it is intentionally not repeated
+        // here.
         $this
-            ->registerPageCacheDisk()
             ->registerMaintenanceStorage()
             ->registerErrorPageStorage()
             ->registerAdminBridge()
@@ -468,10 +488,16 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function ensurePermissions(): self
     {
+        if (Cache::get(self::PERMISSIONS_SYNCED_CACHE_KEY) === true) {
+            return $this;
+        }
+
         $table = config('permission.table_names.permissions', 'permissions');
 
         if (is_string($table) && resolve(RuntimeSchemaState::class)->hasTable($table)) {
             EnsureHtmlCachePermissionsAction::run();
+
+            Cache::put(self::PERMISSIONS_SYNCED_CACHE_KEY, true, self::PERMISSIONS_SYNCED_CACHE_TTL_SECONDS);
         }
 
         return $this;

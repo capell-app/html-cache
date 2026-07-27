@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Data\Database\DatabaseIndexDefinition;
+use Capell\Core\Facades\CapellDatabase;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -33,15 +35,17 @@ return new class extends Migration
             $table->index('last_seen_at', 'cached_model_urls_last_seen_index');
         });
 
-        if (Schema::getConnection()->getDriverName() === 'mysql') {
-            DB::statement('CREATE INDEX cached_model_urls_site_language_path_index ON cached_model_urls (site_id, language_id, path(191))');
+        $connection = Schema::getConnection();
+        $index = CapellDatabase::for($connection)->schemaDialect()->prefixedIndex(
+            new DatabaseIndexDefinition(
+                table: 'cached_model_urls',
+                name: 'cached_model_urls_site_language_path_index',
+                columns: ['site_id', 'language_id', 'path'],
+                prefixLengths: ['path' => 191],
+            ),
+        );
 
-            return;
-        }
-
-        Schema::table('cached_model_urls', function (Blueprint $table): void {
-            $table->index(['site_id', 'language_id', 'path'], 'cached_model_urls_site_language_path_index');
-        });
+        DB::statement($index->sql, $index->bindings);
     }
 
     public function down(): void

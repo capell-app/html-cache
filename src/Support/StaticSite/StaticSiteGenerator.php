@@ -76,7 +76,7 @@ final class StaticSiteGenerator
     {
         $extraTotals = 0;
 
-        foreach (StaticSiteExtensionRegistry::instance()->all() as $handler) {
+        foreach (resolve(StaticSiteExtensionRegistry::class)->all() as $handler) {
             $handler($this->site, $siteDomain, function (string $url) use ($checkpoint, &$extraTotals): void {
                 $this->visitUrl($url);
                 $extraTotals++;

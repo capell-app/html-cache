@@ -9,16 +9,22 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\Translation;
+use Capell\Core\Octane\Resettable;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForModelStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlsForSiteStaleAction;
 use Illuminate\Database\Eloquent\Model;
 
-final class HtmlCacheModelInvalidationObserver
+final class HtmlCacheModelInvalidationObserver implements Resettable
 {
     /** @var array<class-string<Model>, true>|null */
-    private static ?array $capellModelClasses = null;
+    private ?array $capellModelClasses = null;
+
+    public function flushOctaneState(): void
+    {
+        $this->capellModelClasses = null;
+    }
 
     /**
      * @param  array<int, mixed>  $payload
@@ -156,11 +162,11 @@ final class HtmlCacheModelInvalidationObserver
      */
     private function capellModelClasses(): array
     {
-        if (self::$capellModelClasses !== null) {
-            return self::$capellModelClasses;
+        if ($this->capellModelClasses !== null) {
+            return $this->capellModelClasses;
         }
 
-        self::$capellModelClasses = [];
+        $this->capellModelClasses = [];
 
         foreach (CapellCore::getModels() as $modelClass) {
             if (! is_subclass_of($modelClass, Model::class)) {
@@ -168,10 +174,10 @@ final class HtmlCacheModelInvalidationObserver
             }
 
             /** @var class-string<Model> $modelClass */
-            self::$capellModelClasses[$modelClass] = true;
+            $this->capellModelClasses[$modelClass] = true;
         }
 
-        return self::$capellModelClasses;
+        return $this->capellModelClasses;
     }
 
     private function dispatchClearCachedUrlsForModel(Model $model): void

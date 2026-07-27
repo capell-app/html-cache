@@ -11,9 +11,13 @@ use Illuminate\Http\Request;
 
 final class EnsureModelEventsRegistered
 {
+    public function __construct(
+        private readonly ModelEventRegistrar $modelEventRegistrar,
+    ) {}
+
     public function handle(Request $request, Closure $next): mixed
     {
-        ModelEventRegistrar::registerModels();
+        $this->modelEventRegistrar->registerModels();
 
         try {
             return $next($request);

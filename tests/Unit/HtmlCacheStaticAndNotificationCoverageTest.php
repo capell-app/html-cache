@@ -13,6 +13,7 @@ use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Theme;
+use Capell\Core\Octane\Resettable;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
@@ -203,7 +204,7 @@ function htmlCacheResidualCoveragePage(SiteDomain $siteDomain): Page
 }
 
 it('tracks static site extension handlers and rejects sites without domains', function (): void {
-    $registry = StaticSiteExtensionRegistry::instance();
+    $registry = resolve(StaticSiteExtensionRegistry::class);
     $registry->clear();
 
     $registry->register('feed', function (Site $site, SiteDomain $siteDomain, Closure $visit): void {
@@ -432,7 +433,7 @@ it('runs html cache console commands against static site and file cache paths', 
 });
 
 it('marks internal static generation kernel requests as synthetic html cache renders', function (): void {
-    $registry = StaticSiteExtensionRegistry::instance();
+    $registry = resolve(StaticSiteExtensionRegistry::class);
     $registry->clear();
     $siteDomain = htmlCacheResidualCoverageSiteDomain('internal-static.test');
     $syntheticRender = null;
@@ -501,7 +502,7 @@ it('tracks retrieved models recursively and flushes them from middleware', funct
 
     app()->instance(RetrievedModelStore::class, new RetrievedModelStore);
 
-    $response = (new EnsureModelEventsRegistered)->handle(
+    $response = resolve(EnsureModelEventsRegistered::class)->handle(
         Request::create('https://retrieved.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET),
         fn (Request $request): Response => new Response('ok'),
     );
@@ -589,10 +590,47 @@ it('registers model retrieval hooks once per request', function (): void {
     CapellCore::registerModels([Page::class]);
     app()->instance(RetrievedModelStore::class, new RetrievedModelStore);
 
-    ModelEventRegistrar::registerModels();
-    ModelEventRegistrar::registerModels();
+    $registrar = resolve(ModelEventRegistrar::class);
+    $registrar->registerModels();
+    $registrar->registerModels();
 
     expect($request->attributes->get('capell.html_cache.model_events_registered'))->toBeTrue();
+});
+
+it('keeps long-lived html cache state in the container instead of process statics', function (): void {
+    foreach ([
+        StaticSiteExtensionRegistry::class,
+        ModelEventRegistrar::class,
+        HtmlCacheModelInvalidationObserver::class,
+    ] as $statefulClass) {
+        $staticProperties = array_filter(
+            (new ReflectionClass($statefulClass))->getProperties(),
+            static fn (ReflectionProperty $property): bool => $property->isStatic(),
+        );
+
+        expect($staticProperties)->toBe([]);
+    }
+
+    expect(resolve(StaticSiteExtensionRegistry::class))
+        ->toBe(resolve(StaticSiteExtensionRegistry::class))
+        ->and(resolve(ModelEventRegistrar::class))
+        ->toBe(resolve(ModelEventRegistrar::class))
+        ->and(resolve(HtmlCacheModelInvalidationObserver::class))
+        ->toBe(resolve(HtmlCacheModelInvalidationObserver::class));
+});
+
+it('flushes the invalidation model memo between Octane operations', function (): void {
+    $observer = resolve(HtmlCacheModelInvalidationObserver::class);
+    $modelClasses = new ReflectionProperty($observer, 'capellModelClasses');
+
+    (new ReflectionMethod($observer, 'capellModelClasses'))->invoke($observer);
+
+    expect($modelClasses->getValue($observer))->toBeArray()
+        ->and(collect(app()->tagged(Resettable::TAG))->contains($observer))->toBeTrue();
+
+    $observer->flushOctaneState();
+
+    expect($modelClasses->getValue($observer))->toBeNull();
 });
 
 it('invalidates cached urls through a single generic model observer', function (): void {

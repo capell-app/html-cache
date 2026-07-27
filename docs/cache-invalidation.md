@@ -71,7 +71,7 @@ Cloudflare does not cache HTML by default. Configure a Cloudflare Cache Rule tha
 The `capell.app` zone uses an active Cache Rule named `Capell anonymous public HTML`. It is deliberately narrower than "all requests":
 
 ```text
-(http.host eq "capell.app" and http.request.method in {"GET" "HEAD"} and not starts_with(http.request.uri.path, "/admin") and not starts_with(http.request.uri.path, "/api") and not starts_with(http.request.uri.path, "/livewire") and not starts_with(http.request.uri.path, "/filament") and not starts_with(http.request.uri.path, "/login") and not starts_with(http.request.uri.path, "/logout") and not starts_with(http.request.uri.path, "/register") and not starts_with(http.request.uri.path, "/account") and not starts_with(http.request.uri.path, "/checkout") and not starts_with(http.request.uri.path, "/billing") and not starts_with(http.request.uri.path, "/up") and not http.cookie contains "capell_session=")
+(http.host eq "capell.app" and http.request.method in {"GET" "HEAD"} and not starts_with(http.request.uri.path, "/admin") and not starts_with(http.request.uri.path, "/api") and not starts_with(http.request.uri.path, "/livewire") and not starts_with(http.request.uri.path, "/filament") and not starts_with(http.request.uri.path, "/login") and not starts_with(http.request.uri.path, "/logout") and not starts_with(http.request.uri.path, "/register") and not starts_with(http.request.uri.path, "/account") and not starts_with(http.request.uri.path, "/checkout") and not starts_with(http.request.uri.path, "/billing") and not starts_with(http.request.uri.path, "/up") and not http.cookie contains "capell-session=")
 ```
 
 Use these rule settings:

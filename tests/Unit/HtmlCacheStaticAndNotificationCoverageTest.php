@@ -770,7 +770,7 @@ it('covers static generation and page deletion actions directly', function (): v
 });
 
 it('binds static site generation to the durable html cache dispatcher', function (): void {
-    expect(resolve(StaticSiteGenerationDispatcher::class))
+    expect(app()->get(StaticSiteGenerationDispatcher::class))
         ->toBeInstanceOf(HtmlCacheStaticSiteGenerationDispatcher::class);
 });
 

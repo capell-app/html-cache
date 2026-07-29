@@ -37,11 +37,16 @@ final class FlushHtmlCacheHitBatchJob implements ShouldQueue
             return;
         }
 
+        /** @var literal-string $hitCountExpression */
+        $hitCountExpression = sprintf('hit_count + %d', $batch->hits);
+        /** @var literal-string $bytesServedExpression */
+        $bytesServedExpression = sprintf('bytes_served + %d', $batch->bytesServed);
+
         CachedModelUrl::query()
             ->where('url_hash', $this->urlHash)
             ->update([
-                'hit_count' => DB::raw('hit_count + ' . $batch->hits),
-                'bytes_served' => DB::raw('bytes_served + ' . $batch->bytesServed),
+                'hit_count' => DB::raw($hitCountExpression),
+                'bytes_served' => DB::raw($bytesServedExpression),
                 'last_hit_at' => now(),
             ]);
 

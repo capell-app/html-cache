@@ -144,7 +144,7 @@
                             <input
                                 type="search"
                                 wire:model.live.debounce.300ms="resourceSearch"
-                                @disabled (! filled($this->selectedModelType))
+                                @disabled(! filled($this->selectedModelType))
                                 placeholder="{{ __('capell-html-cache::admin.cache_map_resource_search_placeholder') }}"
                                 class="focus:border-primary-500 focus:ring-primary-500 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:disabled:bg-gray-900"
                             />
@@ -158,7 +158,7 @@
                             </span>
                             <select
                                 wire:model.live="selectedResourceKey"
-                                @disabled (! filled($this->selectedModelType))
+                                @disabled(! filled($this->selectedModelType))
                                 class="focus:border-primary-500 focus:ring-primary-500 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm disabled:bg-gray-50 disabled:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:disabled:bg-gray-900"
                             >
                                 <option value="">
@@ -184,9 +184,7 @@
                                     {{ __('capell-html-cache::admin.cache_map_urls_containing_model', ['model' => $this->modelOptions[$this->selectedModelType] ?? class_basename($this->selectedModelType)]) }}
                                 @endif
                             </h3>
-                            <p
-                                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
-                            >
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                 {{ trans_choice('capell-html-cache::admin.cache_map_urls_count', $this->detailUrlCount(), ['count' => $this->detailUrlCount()]) }}
                             </p>
                         </div>

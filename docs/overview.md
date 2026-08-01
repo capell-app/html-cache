@@ -14,12 +14,6 @@ HTML Cache has no settings screen; its runtime, bypass, cache-age, invalidation,
 
 For Cloudflare, follow the production rule, purge-token, and `CF-Cache-Status` checks in [HTML Cache Invalidation](cache-invalidation.md#cloudflare). The edge rule must respect Capell's origin `Cache-Control` headers; never force-cache private or authenticated responses.
 
-## Serving cached pages at the edge
-
-Put the web server in front of PHP for generated files: resolve the request to the package's `page_cache` path with `try_files`, serve the matching HTML directly, and fall back to Laravel only when no safe file exists. Apply the same bypass contract as the middleware for non-`GET` requests, query strings, navigation requests, and session cookies.
-
-The static response must emit the same public policy as the PHP response, for example `Cache-Control: max-age=300, public, s-maxage=1800, stale-while-revalidate=86400`. Configure the CDN to respect that origin header and add an explicit bypass rule for the configured session cookie. Content invalidation deletes the origin file and queues a URL or tag purge through the configured `CachePurger`, so keep the queue worker healthy and give the Cloudflare token zone-level Cache Purge permission.
-
 ## Where it shows up
 
 - Dashboard widgets show overall state, cached/uncached URL coverage, hit totals, and the stale-refresh queue when those widgets are enabled for the dashboard.

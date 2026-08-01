@@ -37,13 +37,13 @@ Screenshot contract: `docs/screenshots.json`.
 
 ![Cached model URLs resource index](docs/screenshots/html-cache-cached-model-urls.png)
 
-- HTML Cache maintenance cache page (admin, required).
-- Cached model URLs resource index (admin, required).
-- HTML Cache dashboard widgets (admin, required).
-- HTML Cache site health cache map (admin, required).
-- Page table cache indicator (admin, required).
-- Anonymous public cache hit (frontend, required).
-- Static maintenance page output (frontend, required).
+- HTML Cache maintenance cache page (admin, required evidence).
+- Cached model URLs resource index (admin, required evidence).
+- HTML Cache dashboard widgets (admin, required evidence).
+- HTML Cache site health cache map (admin, required evidence).
+- Page table cache indicator (admin, required evidence).
+- Anonymous public cache hit (frontend, required evidence).
+- Static maintenance page output (frontend, required evidence).
 
 ## Technical Shape
 
@@ -54,11 +54,11 @@ Screenshot contract: `docs/screenshots.json`.
 - Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsFilamentWidget`, `HtmlCacheOverviewFilamentWidget`, `HtmlCacheStaleQueueFilamentWidget`.
 - Livewire components: `SiteHealthCacheMap`.
 - Extension contracts: `CachePurger`, `PageCacheNotifiable`.
-- Actions: `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `BuildHtmlCacheStaleQueueRowsAction`, `and 22 more`.
-- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`.
+- Actions: `AssertHtmlCacheInvalidationTopologyAction`, `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `and 24 more`.
+- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `EdgeCachePurgeReadinessData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`.
 - Jobs: `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
-- Scheduled commands: `capell:html-cache:process-stale`.
-- Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
+- Scheduled commands: `capell:html-cache:process-stale (package registered)`.
+- Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`, `VerifyEdgeCachePurgeCommand`.
 - Manifest contributions: `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`, `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`, `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`, `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`, `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`.
 - Health checks: `Capell\HtmlCache\Health\HtmlCacheHealthCheck`.
 - Blade views: `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`, `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`.
@@ -83,16 +83,16 @@ Screenshot contract: `docs/screenshots.json`.
 - Database changes: package migrations are declared.
 - Config: `config/capell-html-cache.php`.
 - Settings: no package settings declared.
-- Queues or schedules: scheduled commands `capell:html-cache:process-stale`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
+- Queues or schedules: scheduled commands `capell:html-cache:process-stale (package registered)`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
 - Cache tags: `html-cache`.
-- Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`.
+- Commands: console command classes detected: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`, `VerifyEdgeCachePurgeCommand`.
 
 ## Common Pitfalls
 
 - Keep required Capell packages on compatible v4 releases: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`.
 - Run migrations before opening package resources or public routes.
 - Review package configuration before production-like verification: `config/capell-html-cache.php`.
-- Register the host scheduler so these declared commands run at their documented frequencies: `capell:html-cache:process-stale`.
+- Keep the host Laravel scheduler running so package-registered schedules can execute: `capell:html-cache:process-stale (package registered)`.
 - Keep public Blade and cached HTML free of authoring markers, model IDs, permissions, signed editor URLs, and lazy database queries.
 - Custom write integrations must preserve invalidation for `html-cache` cache tags.
 
@@ -109,7 +109,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 1. Install the package: `composer require capell-app/html-cache`.
 2. Run the required setup: `php artisan migrate`.
-3. Open the HTML Cache maintenance cache page and confirm the admin workflow loads.
+3. Open the package admin surface at `/screenshot-fixtures/html-cache/html-cache-maintenance-cache-page` and confirm HTML Cache is available.
 
 ## Next Steps
 

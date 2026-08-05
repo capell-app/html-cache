@@ -79,6 +79,20 @@ beforeEach(function (): void {
     Cache::clear();
 });
 
+it('creates host cache directories group-writable for CLI cache maintenance', function (): void {
+    Storage::fake('page_cache');
+
+    $request = Request::create('https://permissions.example.test/');
+    app()->instance('request', $request);
+
+    resolve(PageCache::class);
+
+    $cachePath = Storage::disk('page_cache')->path('https.permissions.example.test');
+
+    expect(File::isDirectory($cachePath))->toBeTrue()
+        ->and(fileperms($cachePath) & 0770)->toBe(0770);
+});
+
 it('expires stale filesystem cache entries before serving them', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.filesystem_ttl_seconds', 60);

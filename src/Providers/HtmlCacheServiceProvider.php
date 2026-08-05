@@ -159,8 +159,14 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             $cachePath = $store->path($domainPath)
                 ?? rtrim($store->root(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $domainPath;
 
-            if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath) && (! @mkdir($cachePath, 0755, true) && ! is_dir($cachePath))) {
-                throw new RuntimeException(sprintf('Unable to create HTML cache directory [%s].', $cachePath));
+            if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath)) {
+                if (! @mkdir($cachePath, 0775, true) && ! is_dir($cachePath)) {
+                    throw new RuntimeException(sprintf('Unable to create HTML cache directory [%s].', $cachePath));
+                }
+
+                if (! @chmod($cachePath, 0775)) {
+                    throw new RuntimeException(sprintf('Unable to make HTML cache directory writable by the deployment group [%s].', $cachePath));
+                }
             }
 
             $instance->setCachePath($cachePath);

@@ -6,6 +6,7 @@ use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Models\Language;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
@@ -22,10 +23,12 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Database\Eloquent\Relations\MorphPivot;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
@@ -41,6 +44,9 @@ function htmlCacheCreateDomainAndPage(string $domain = 'example.test'): array
             'scheme' => 'https',
             'domain' => $domain,
             'path' => null,
+            'site_id' => Site::factory()->state([
+                'uuid' => (string) Str::uuid(),
+            ]),
         ]);
 
         return [
@@ -115,7 +121,7 @@ it('ignores morph pivot relations when tracking rendered models', function (): v
 
 it('records rendered models against a cached url and removes stale model links', function (): void {
     [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
-    $translation = $page->translations()->where('language_id', $siteDomain->language_id)->first();
+    $translation = $page->translations()->first();
 
     expect($translation)->toBeInstanceOf(Translation::class);
     throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
@@ -137,6 +143,28 @@ it('records rendered models against a cached url and removes stale model links',
         ->and(CachedModelUrl::query()->where('url', $url)->first())
         ->cacheable_type->toBe($page->getMorphClass())
         ->cacheable_id->toBe($page->getKey());
+});
+
+it('records rendered models with bounded cached-url queries', function (): void {
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
+    $translation = $page->translations()->first();
+
+    expect($translation)->toBeInstanceOf(Translation::class);
+    throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
+
+    $queryCount = 0;
+    DB::listen(function (QueryExecuted $query) use (&$queryCount): void {
+        if (str_contains($query->sql, 'cached_model_urls')) {
+            $queryCount++;
+        }
+    });
+
+    RecordCachedModelUrlsAction::run(
+        'https://example.test/about',
+        htmlCacheModelMap($page, $translation),
+    );
+
+    expect($queryCount)->toBe(3);
 });
 
 it('configures cached model url registration retries and backoff', function (): void {

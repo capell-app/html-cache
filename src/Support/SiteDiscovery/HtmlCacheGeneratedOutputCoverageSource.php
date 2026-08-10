@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\SiteDiscovery;
 
+use Capell\DiscoveryFoundation\Data\PublicUrlRegistryEntryData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
-use Capell\SiteDiscovery\Data\PublicUrlRegistryEntryData;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 

@@ -8,6 +8,7 @@ use Capell\HtmlCache\Health\HtmlCacheHealthCheck;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -23,6 +24,15 @@ it('passes all diagnostics when the cache is fully wired', function (): void {
     expect($results)->toHaveCount(6)
         ->and($results->every(static fn (DoctorCheckResultData $result): bool => $result->passed))->toBeTrue()
         ->and(HtmlCacheHealthCheck::passed())->toBeTrue();
+});
+
+it('accepts a Windows absolute page cache root regardless of the host operating system', function (): void {
+    $disk = Mockery::mock(Filesystem::class);
+    $disk->shouldReceive('path')->once()->with('')->andReturn('C:\\inetpub\\capell\\storage\\page-cache');
+
+    Storage::shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
+
+    expect((new HtmlCacheHealthCheck)->pageCacheDiskSupportsLocalPaths())->toBeTrue();
 });
 
 it('warns when multiple web nodes use node local cache storage without an edge purge driver', function (): void {

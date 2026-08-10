@@ -7,6 +7,7 @@
         "php": "^8.4",
         "capell-app/admin": "^1.0",
         "capell-app/core": "^1.0.21",
+        "capell-app/discovery-foundation": "^1.0",
         "capell-app/frontend": "^1.0",
         "laravel/framework": "^12.41.1|^13.0",
         "lorisleiva/laravel-actions": "^2.8",
@@ -14,7 +15,7 @@
         "spatie/laravel-package-tools": "^1.14"
     },
     "suggest": {
-        "capell-app/site-discovery": "Enables public URL registry generated-output coverage reporting for cached HTML URLs."
+        "capell-app/site-discovery": "Enables sitemap generated-output coverage reporting for cached HTML URLs."
     },
     "autoload": {
         "psr-4": {

@@ -11,15 +11,11 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 3. **Cache coverage URLs** lists individual pages and whether each is **Cached** or **Uncached**, along with their **Hits**.
 4. The **Regeneration queue** panel shows any pages waiting to be refreshed, with their **Status** such as **Pending**, **Processing**, **Processed**, or **Failed**.
 
-![An administrator checks cache overview, coverage, and stale queue widgets.](screenshots/html-cache-dashboard-widgets.png)
-
 ### How to see cache state on the Pages list
 
 1. Go to **Pages** in the admin.
 2. Each row shows a small indicator for whether that page is currently saved in the cache.
 3. Use this to spot at a glance which pages are not yet cached, without leaving the page list.
-
-![An editor sees cache state indicators directly in the core Pages resource.](screenshots/html-cache-page-table-extension.png)
 
 ### How to find which URLs are cached and what they depend on
 
@@ -28,8 +24,6 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 3. The **Cache map** lists each cached **URL** with its **Site**, **Language**, when it was **Cached at**, and when it was **Last seen**.
 4. The **Dependencies** show which content a page relies on, so you know which pages to clear when that content changes.
 5. Use **Resource search** to find the URLs tied to a specific item by its title, name, slug, or ID.
-
-![An administrator reviews model-to-URL cache map rows after a public page has been warmed.](screenshots/html-cache-cached-model-urls.png)
 
 ### How to clear a cached page when a change is not showing
 
@@ -46,8 +40,6 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 3. To take a single site offline instead, use the per-site override controls and **Toggle site override** for that site.
 4. While maintenance is on, visitors see a static maintenance page instead of the normal site.
 
-![An administrator clears, warms, or regenerates cached HTML for a site.](screenshots/html-cache-maintenance-cache-page.png)
-
 ### How to prepare the maintenance page in advance
 
 1. Open **Monitoring > Maintenance cache**.
@@ -61,8 +53,6 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 2. Find the **HTML cache** section.
 3. It reports whether the cache storage is in place and whether the public output is safe, including the **Cached public HTML safety** check that confirms no authoring markers leaked into saved pages.
 4. A green result means saved pages are being served correctly and contain only public content.
-
-![An operator reviews cache-map diagnostics and public-output safety checks in Site Health.](screenshots/html-cache-site-health-cache-map.png)
 
 ## Troubleshooting
 

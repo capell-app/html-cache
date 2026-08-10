@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Health;
 
 use Capell\Core\Contracts\Extensions\ChecksExtensionHealth;
 use Capell\Core\Data\Diagnostics\DoctorCheckResultData;
+use Capell\Core\Support\Filesystem\AbsolutePath;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -233,7 +234,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         try {
             $root = Storage::disk(self::PAGE_CACHE_DISK)->path('');
 
-            return $root !== '' && str_starts_with($root, DIRECTORY_SEPARATOR);
+            return $root !== '' && AbsolutePath::is($root);
         } catch (Throwable) {
             return false;
         }

@@ -33,17 +33,15 @@ Evidence: [`src/Actions/RecordCachedModelUrlsAction.php`](src/Actions/RecordCach
 
 Screenshot contract: `docs/screenshots.json`.
 
-![HTML Cache maintenance cache page](docs/screenshots/html-cache-maintenance-cache-page.png)
+![HTML Cache extension preview image](docs/assets/marketplace/extension-card.jpg)
 
-![Cached model URLs resource index](docs/screenshots/html-cache-cached-model-urls.png)
-
-- HTML Cache maintenance cache page (admin, required evidence).
-- Cached model URLs resource index (admin, required evidence).
-- HTML Cache dashboard widgets (admin, required evidence).
-- HTML Cache site health cache map (admin, required evidence).
-- Page table cache indicator (admin, required evidence).
-- Anonymous public cache hit (frontend, required evidence).
-- Static maintenance page output (frontend, required evidence).
+- HTML Cache maintenance cache page (admin, supplementary evidence).
+- Cached model URLs resource index (admin, supplementary evidence).
+- HTML Cache dashboard widgets (admin, supplementary evidence).
+- HTML Cache site health cache map (admin, supplementary evidence).
+- Page table cache indicator (admin, supplementary evidence).
+- Anonymous public cache hit (frontend, supplementary evidence).
+- Static maintenance page output (frontend, supplementary evidence).
 
 ## Technical Shape
 
@@ -109,7 +107,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 1. Install the package: `composer require capell-app/html-cache`.
 2. Run the required setup: `php artisan migrate`.
-3. Open the package admin surface at `/screenshot-fixtures/html-cache/html-cache-maintenance-cache-page` and confirm HTML Cache is available.
+3. Open the package admin page or resource and verify HTML Cache is available.
 
 ## Next Steps
 

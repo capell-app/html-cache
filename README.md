@@ -33,15 +33,18 @@ Evidence: [`src/Actions/RecordCachedModelUrlsAction.php`](src/Actions/RecordCach
 
 Screenshot contract: `docs/screenshots.json`.
 
-![HTML Cache extension preview image](docs/assets/marketplace/extension-card.jpg)
+![HTML Cache maintenance cache page](docs/screenshots/html-cache-maintenance-cache-page.png)
 
-- HTML Cache maintenance cache page (admin, supplementary evidence).
+![Cached model URLs resource index](docs/screenshots/html-cache-cached-model-urls.png)
+
+- HTML Cache maintenance cache page (admin, required evidence).
 - Cached model URLs resource index (admin, supplementary evidence).
 - HTML Cache dashboard widgets (admin, supplementary evidence).
 - HTML Cache site health cache map (admin, supplementary evidence).
 - Page table cache indicator (admin, supplementary evidence).
 - Anonymous public cache hit (frontend, supplementary evidence).
 - Static maintenance page output (frontend, supplementary evidence).
+- HTML Cache maintenance cache page with admin sidebar menu open (admin, supplementary evidence).
 
 ## Technical Shape
 
@@ -73,7 +76,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 ## Install Impact
 
-- Required packages: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`.
+- Required packages: `capell-app/admin`, `capell-app/core`, `capell-app/discovery-foundation`, `capell-app/frontend`.
 - Admin navigation: declares `admin-page: HtmlCacheAdminPagesContribution`; each Filament page or resource controls its own navigation visibility.
 - Admin/editor extensions: `dashboard-widget: HtmlCacheDashboardFilamentWidgetsContribution`.
 - Permissions: `capell-html-cache.view`, `capell-html-cache.clear`, `capell-html-cache.maintenance.manage`.
@@ -87,7 +90,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 ## Common Pitfalls
 
-- Keep required Capell packages on compatible v4 releases: `capell-app/admin`, `capell-app/core`, `capell-app/frontend`.
+- Keep required Capell packages on compatible v4 releases: `capell-app/admin`, `capell-app/core`, `capell-app/discovery-foundation`, `capell-app/frontend`.
 - Run migrations before opening package resources or public routes.
 - Review package configuration before production-like verification: `config/capell-html-cache.php`.
 - Keep the host Laravel scheduler running so package-registered schedules can execute: `capell:html-cache:process-stale (package registered)`.
@@ -107,7 +110,7 @@ Screenshot contract: `docs/screenshots.json`.
 
 1. Install the package: `composer require capell-app/html-cache`.
 2. Run the required setup: `php artisan migrate`.
-3. Open the package admin page or resource and verify HTML Cache is available.
+3. Open the package admin surface at `/html-cache/maintenance-cache` and confirm HTML Cache is available.
 
 ## Next Steps
 
@@ -121,7 +124,7 @@ Screenshot contract: `docs/screenshots.json`.
 - [Capell content language plan](../../docs/CONTENT_LANGUAGE_PLAN.md)
 - [Capell documentation design system](../../docs/DESIGN_SYSTEM.md)
 - [Capell and package ERD notes](../../docs/erd/capell-and-package-erds.md)
-- Related packages: [Site Discovery](../site-discovery/README.md).
+- Related packages: [Discovery Foundation](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
 - Focused tests: `vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml`.
 
 <!-- prettier-ignore-end -->

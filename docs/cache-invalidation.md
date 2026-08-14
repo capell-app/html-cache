@@ -226,6 +226,8 @@ capell:static-site {--site=} {--internal} {--refresh}
 
 `capell:html-cache:process-stale` is scheduled automatically when `capell-html-cache.invalidation.mode` is `scheduled`. `--limit` overrides the configured batch size for one run.
 
+`capell:html-cache:clear` queues a full refresh; it does not regenerate HTML, so existing cached HTML continues to be served until the stale queue is processed. Use `capell:html-cache:clear --process` when an explicit CLI maintenance run should queue and process the refresh in one command. HTTP and deployment callers should omit `--process` and leave processing to the queue or scheduler.
+
 `capell:html-cache:diagnose --render` renders the URL through the current kernel and reports the actual response status, cache directives, `Vary`, cookies, and edge tag headers. Without `--render`, it performs the cheaper request/index eligibility check only.
 
 `--internal` renders through the current Laravel kernel. `--refresh` deletes affected cached files before rendering.

@@ -52,11 +52,22 @@ it('keeps cached files available while a full manual clear queues refreshes', fu
     ]);
 
     test()->artisan('capell:html-cache:clear')
-        ->expectsOutput('HTML cache marked stale (1 URL(s) queued for refresh).')
+        ->expectsOutput('Marked 1 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
+        ->expectsOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')
         ->assertSuccessful();
 
     expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
         ->and(StaleCachedUrl::query()->where('url', $url)->where('reason', 'manual_clear')->exists())->toBeTrue();
+});
+
+it('processes the stale queue only when explicitly requested', function (): void {
+    Storage::fake('page_cache');
+
+    test()->artisan('capell:html-cache:clear', ['--process' => true])
+        ->expectsOutput('Marked 0 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
+        ->expectsOutput('Processed 0 stale HTML cache URL(s).')
+        ->doesntExpectOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')
+        ->assertSuccessful();
 });
 
 it('marks indexed translation urls stale in scheduled mode', function (): void {

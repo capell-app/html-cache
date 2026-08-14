@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Console\Commands;
 
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
+use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Console\Command;
 use Throwable;
 
 final class ClearHtmlCacheCommand extends Command
 {
-    protected $description = 'Clear all or part of the Capell HTML cache.';
+    protected $description = 'Queue a full HTML cache refresh or clear a specific cache path.';
 
-    protected $signature = 'capell:html-cache:clear {slug? : URL slug of page or directory to delete} {--recursive}';
+    protected $signature = 'capell:html-cache:clear {slug? : URL slug of page or directory to delete} {--recursive} {--process : Process queued stale URLs immediately in this CLI process}';
 
     public function handle(PageCache $cache): int
     {
@@ -32,7 +33,17 @@ final class ClearHtmlCacheCommand extends Command
                 return Command::FAILURE;
             }
 
-            $this->info(sprintf('HTML cache marked stale (%d URL(s) queued for refresh).', $marked));
+            $this->info(sprintf(
+                'Marked %d URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.',
+                $marked,
+            ));
+
+            if ($this->option('process') === true) {
+                $processed = ProcessStaleHtmlCacheAction::run();
+                $this->info(sprintf('Processed %d stale HTML cache URL(s).', $processed));
+            } else {
+                $this->line('Run capell:html-cache:process-stale (or pass --process) to regenerate them.');
+            }
 
             return Command::SUCCESS;
         }

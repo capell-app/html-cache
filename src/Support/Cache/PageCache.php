@@ -97,7 +97,7 @@ final class PageCache
         [$path, $filename, $extension] = $cacheLocation;
         $content = (string) $response->getContent();
 
-        if ($extension === 'html' && $this->containsAuthoringSurface($laravelRequest, $content)) {
+        if ($extension === 'html' && $this->containsUnsafeSharedHtml($laravelRequest, $content)) {
             return;
         }
 
@@ -209,7 +209,7 @@ final class PageCache
             return false;
         }
 
-        if ($this->containsAuthoringSurface($request, (string) $response->getContent())) {
+        if ($this->containsUnsafeSharedHtml($request, (string) $response->getContent())) {
             return false;
         }
 
@@ -536,13 +536,21 @@ final class PageCache
         return $session->has('roadmap-status');
     }
 
-    private function containsAuthoringSurface(Request $request, string $content): bool
+    private function containsUnsafeSharedHtml(Request $request, string $content): bool
     {
-        if ($this->hasMatchingSafeInspection($request, $content)) {
-            return false;
-        }
+        try {
+            $inspector = resolve(PublicHtmlSafetyInspector::class);
 
-        return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
+            if (! $this->hasMatchingSafeInspection($request, $content)
+                && $inspector->containsAuthoringSurface($content)) {
+                return true;
+            }
+
+            return ! method_exists($inspector, 'containsBakedCsrfToken')
+                || $inspector->containsBakedCsrfToken($content);
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     private function hasMatchingSafeInspection(Request $request, string $content): bool

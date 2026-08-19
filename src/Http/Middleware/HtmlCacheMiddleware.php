@@ -139,7 +139,7 @@ final class HtmlCacheMiddleware
     {
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $next($request));
 
-        if ($this->containsAuthoringSurface($request, $response)) {
+        if ($this->containsUnsafeSharedHtml($request, $response)) {
             $response->headers->set('X-Frontend-Cache', 'BYPASS');
 
             return $this->privateNoStore($response);
@@ -178,7 +178,7 @@ final class HtmlCacheMiddleware
         return null;
     }
 
-    private function containsAuthoringSurface(Request $request, Response $response): bool
+    private function containsUnsafeSharedHtml(Request $request, Response $response): bool
     {
         if (mb_strpos((string) $response->headers->get('Content-Type'), 'text/html') === false) {
             return false;
@@ -186,11 +186,19 @@ final class HtmlCacheMiddleware
 
         $content = (string) $response->getContent();
 
-        if ($this->hasMatchingSafeInspection($request, $content)) {
-            return false;
-        }
+        try {
+            $inspector = resolve(PublicHtmlSafetyInspector::class);
 
-        return resolve(PublicHtmlSafetyInspector::class)->containsAuthoringSurface($content);
+            if (! $this->hasMatchingSafeInspection($request, $content)
+                && $inspector->containsAuthoringSurface($content)) {
+                return true;
+            }
+
+            return ! method_exists($inspector, 'containsBakedCsrfToken')
+                || $inspector->containsBakedCsrfToken($content);
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     private function hasMatchingSafeInspection(Request $request, string $content): bool

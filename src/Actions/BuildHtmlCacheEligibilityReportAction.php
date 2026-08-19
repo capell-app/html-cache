@@ -8,6 +8,7 @@ use Capell\Core\Contracts\Pageable;
 use Capell\Core\Enums\UrlTypeEnum;
 use Capell\Core\Models\PageUrl;
 use Capell\Frontend\Actions\AssertPublicRenderContractAction;
+use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -199,6 +200,12 @@ final class BuildHtmlCacheEligibilityReportAction
             $reasons[] = HtmlCacheEligibilityReason::UnsafePublicOutput;
         }
 
+        $bakedSessionTokenReason = $this->bakedSessionTokenReason($response);
+
+        if ($bakedSessionTokenReason instanceof HtmlCacheEligibilityReason) {
+            $reasons[] = $bakedSessionTokenReason;
+        }
+
         if ($response->getStatusCode() !== Response::HTTP_NOT_FOUND && ! $this->frontendContextShouldCache()) {
             $reasons[] = HtmlCacheEligibilityReason::FrontendContextNotCacheable;
         }
@@ -251,6 +258,44 @@ final class BuildHtmlCacheEligibilityReportAction
     private function frontendContextShouldCache(): bool
     {
         return true;
+    }
+
+    /**
+     * A baked CSRF token (`<input type="hidden" name="_token" ...>`) is bound
+     * to whoever's session rendered the response. It is legitimate in any
+     * single-visitor response — including a fragment sub-request — but must
+     * never reach the *shared* HTML cache: every later visitor would be
+     * served that one visitor's token and their own submission would fail
+     * (CAP-0216/CAP-0233). This is a cache-eligibility signal only, deliberately
+     * separate from {@see containsAuthoringSurface()}'s admin/authoring leak
+     * check.
+     *
+     * A released html-cache package can briefly coexist with an older
+     * capell-app/frontend package while Composer constraints are coordinated.
+     * That mismatch must fail closed: an unavailable or failing inspector
+     * makes the response ineligible for the shared cache rather than risking
+     * a cross-visitor token leak or a public-response fatal. The explicit
+     * reason code keeps the version/configuration fault diagnosable.
+     */
+    private function bakedSessionTokenReason(Response $response): ?HtmlCacheEligibilityReason
+    {
+        if (! str_contains((string) $response->headers->get('Content-Type'), 'text/html')) {
+            return null;
+        }
+
+        try {
+            $inspector = resolve(PublicHtmlSafetyInspector::class);
+
+            if (! method_exists($inspector, 'containsBakedCsrfToken')) {
+                return HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable;
+            }
+
+            return $inspector->containsBakedCsrfToken((string) $response->getContent())
+                ? HtmlCacheEligibilityReason::BakedSessionToken
+                : null;
+        } catch (Throwable) {
+            return HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable;
+        }
     }
 
     private function cacheState(Request $request, ?CachedModelUrl $cachedUrl, ?StaleCachedUrl $staleCachedUrl): string

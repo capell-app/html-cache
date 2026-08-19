@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\FormBuilder\Livewire\FormElementComponent;
 use Capell\Frontend\Actions\Performance\RecordExtensionRenderContributionAction;
+use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -105,6 +106,95 @@ it('rejects response directives and state that are unsafe for a shared cache', f
         return $response;
     }, HtmlCacheEligibilityReason::ResponseSetsCookie],
 ]);
+
+it('reports a baked CSRF token as ineligible for the shared cache', function (): void {
+    $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = response(
+        '<form method="post" action="/contact"><input type="hidden" name="_token" value="abc123"></form>',
+        200,
+        ['Content-Type' => 'text/html'],
+    );
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->eligible)->toBeFalse()
+        ->and($report->hasReason(HtmlCacheEligibilityReason::BakedSessionToken))->toBeTrue();
+});
+
+it('reports populated csrf meta and Livewire markers as ineligible for the shared cache', function (string $html): void {
+    $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, response($html, 200, ['Content-Type' => 'text/html']));
+
+    expect($report->eligible)->toBeFalse()
+        ->and($report->hasReason(HtmlCacheEligibilityReason::BakedSessionToken))->toBeTrue();
+})->with([
+    'csrf meta tag' => '<meta name="csrf-token" content="abc123">',
+    'Livewire data attribute' => '<script data-csrf="abc123"></script>',
+]);
+
+it('stays eligible for a deferred-fragment placeholder that carries no baked token', function (): void {
+    $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = response(
+        '<div id="layout-widget-abc" data-deferred-fragment data-deferred-fragment-url="/_fragments/opaque-reference" class="deferred-fragment"></div>',
+        200,
+        ['Content-Type' => 'text/html'],
+    );
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->hasReason(HtmlCacheEligibilityReason::BakedSessionToken))->toBeFalse();
+});
+
+it('stays eligible for the empty-value CSRF placeholder pattern used across capell-app marketing pages', function (): void {
+    // capell-app's own established fix for this exact bug class renders an
+    // EMPTY placeholder token, hydrated client-side from a dedicated,
+    // never-cached endpoint (newsletter-form.blade.php, shell.blade.php's
+    // <meta name="csrf-token" content="">). It ships on nearly every public
+    // marketing page, including the global footer. An earlier version of
+    // this check flagged it too — this pins the fix, since a regression
+    // here would take the entire marketing site's HTML cache to zero hit
+    // rate, not just fail to cache one page.
+    $request = Request::create('https://example.test/', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = response(
+        '<input type="hidden" name="_token" value="" data-csrf-token-field /><input type="hidden" name="return_path" value="/checkout"><meta name="csrf-token" content=""><script data-csrf=""></script>',
+        200,
+        ['Content-Type' => 'text/html'],
+    );
+
+    $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+
+    expect($report->hasReason(HtmlCacheEligibilityReason::BakedSessionToken))->toBeFalse();
+});
+
+it('fails closed when the installed frontend inspector cannot detect baked session tokens', function (): void {
+    app()->instance(PublicHtmlSafetyInspector::class, new class
+    {
+        public function containsAuthoringSurface(string $html): bool
+        {
+            return false;
+        }
+    });
+
+    try {
+        $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+        app()->instance('request', $request);
+
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, response('<main>Safe-looking content</main>', 200, ['Content-Type' => 'text/html']));
+
+        expect($report->eligible)->toBeFalse()
+            ->and($report->hasReason(HtmlCacheEligibilityReason::BakedSessionTokenInspectorUnavailable))->toBeTrue();
+    } finally {
+        app()->forgetInstance(PublicHtmlSafetyInspector::class);
+    }
+});
 
 it('never writes authenticated responses even when authenticated cache reads are enabled', function (): void {
     config()->set('capell-html-cache.cache_skip_authenticated', false);

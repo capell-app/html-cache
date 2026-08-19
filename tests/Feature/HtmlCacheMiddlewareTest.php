@@ -51,6 +51,11 @@ function htmlCacheMiddlewareFakeSafetyInspector(bool $containsAuthoringSurface):
 
             return $this->containsAuthoringSurface;
         }
+
+        public function containsBakedCsrfToken(string $content): bool
+        {
+            return false;
+        }
     };
 }
 
@@ -588,6 +593,27 @@ it('does not write cached html when the response contains authoring markers', fu
     );
 
     capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
+        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+});
+
+it('does not write or publicly cache HTML containing a baked CSRF token', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/contact', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('<form><input type="hidden" name="_token" value="abc123"></form>', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
+        ->and((string) $response->headers->get('Cache-Control'))->toContain('private')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
         ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
 });

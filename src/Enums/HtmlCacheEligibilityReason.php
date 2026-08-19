@@ -17,6 +17,8 @@ enum HtmlCacheEligibilityReason: string
     case CacheDisabled = 'cache_disabled';
     case CacheWriteDisabled = 'cache_write_disabled';
     case UnsafePublicOutput = 'unsafe_public_output';
+    case BakedSessionToken = 'baked_session_token';
+    case BakedSessionTokenInspectorUnavailable = 'baked_session_token_inspector_unavailable';
     case NonHtmlResponse = 'non_html_response';
     case UncacheableResponseStatus = 'uncacheable_response_status';
     case ResponseNoStore = 'response_no_store';

@@ -145,6 +145,31 @@ it('records rendered models against a cached url and removes stale model links',
         ->cacheable_id->toBe($page->getKey());
 });
 
+it('prunes stale cached model urls in one delete query', function (): void {
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
+    $translation = $page->translations()->first();
+
+    expect($translation)->toBeInstanceOf(Translation::class);
+    throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
+
+    $url = 'https://example.test/about';
+
+    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation, $siteDomain));
+
+    $deleteQueryCount = 0;
+    DB::listen(function (QueryExecuted $query) use (&$deleteQueryCount): void {
+        if (str_contains($query->sql, 'cached_model_urls')
+            && str_starts_with(strtolower(ltrim($query->sql)), 'delete')) {
+            $deleteQueryCount++;
+        }
+    });
+
+    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
+
+    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1)
+        ->and($deleteQueryCount)->toBe(1);
+});
+
 it('records rendered models with bounded cached-url queries', function (): void {
     [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $translation = $page->translations()->first();

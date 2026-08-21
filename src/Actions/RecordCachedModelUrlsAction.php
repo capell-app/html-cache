@@ -91,19 +91,21 @@ final class RecordCachedModelUrlsAction
                 );
             }
 
-            $seenKeys = array_map($this->recordKey(...), $records);
-
-            CachedModelUrl::query()
+            $seenKeys = array_fill_keys(array_map($this->recordKey(...), $records), true);
+            $staleIds = CachedModelUrl::query()
                 ->where('url_hash', $urlHash)
                 ->where('last_seen_at', '<=', $now)
-                ->get()
-                ->each(function (CachedModelUrl $cachedModelUrl) use ($seenKeys): void {
-                    $key = $cachedModelUrl->cacheable_type . ':' . $cachedModelUrl->cacheable_id;
+                ->get(['id', 'cacheable_type', 'cacheable_id'])
+                ->reject(fn (CachedModelUrl $cachedModelUrl): bool => isset($seenKeys[$this->cachedModelUrlKey($cachedModelUrl)]))
+                ->modelKeys();
 
-                    if (! in_array($key, $seenKeys, true)) {
-                        $cachedModelUrl->delete();
-                    }
-                });
+            if ($staleIds !== []) {
+                CachedModelUrl::query()
+                    ->where('url_hash', $urlHash)
+                    ->where('last_seen_at', '<=', $now)
+                    ->whereKey($staleIds)
+                    ->delete();
+            }
         }, attempts: 5);
     }
 

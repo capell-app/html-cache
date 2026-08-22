@@ -676,6 +676,34 @@ it('clears cached urls for a page and other urls that recorded the page as a dep
         ->and(CachedModelUrl::query()->whereIn('url', [$ownUrl, $dependentUrl])->exists())->toBeFalse();
 });
 
+it('clears a draft 404 cache file when the page is published', function (): void {
+    Storage::fake('page_cache');
+
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+    PageUrl::factory()->create([
+        'site_id' => $siteDomain->site_id,
+        'language_id' => $siteDomain->language_id,
+        'pageable_type' => $page->getMorphClass(),
+        'pageable_id' => $page->getKey(),
+        'url' => '/draft-page',
+    ]);
+    $errorCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/draft-page', $siteDomain, error: true);
+
+    Storage::disk('page_cache')->put($errorCachePath, 'cached draft 404');
+
+    expect(CachedModelUrl::query()->count())->toBe(0)
+        ->and(ClearCachedUrlsForModelAction::run($page))->toBeGreaterThan(0)
+        ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse();
+});
+
 it('clears all cached urls when a site domain changes', function (): void {
     Storage::fake('page_cache');
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Models\Page;
+use Capell\Core\Models\PageUrl;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Model;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -31,6 +33,19 @@ final class ClearCachedUrlsForModelAction
             ->pluck('url')
             ->unique()
             ->values();
+
+        if ($morphClass === (new Page)->getMorphClass()) {
+            $pageUrls = PageUrl::query()
+                ->where('pageable_type', $morphClass)
+                ->where('pageable_id', $key)
+                ->get()
+                ->map(fn (PageUrl $pageUrl): string => $pageUrl->fullUrl());
+
+            $urls = $urls
+                ->merge($pageUrls)
+                ->unique()
+                ->values();
+        }
 
         $cleared = 0;
 

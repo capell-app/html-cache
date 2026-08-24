@@ -32,7 +32,7 @@ final class QueueMaintenancePageGenerationAction
             ->values()
             ->all();
 
-        $run = Cache::lock('capell-html-cache:maintenance-generation:start', 10)->get(function () use ($siteIds): HtmlCacheGenerationRun {
+        $run = Cache::lock('capell-html-cache:maintenance-generation:start', 10)->get(function () use ($siteIds, $enableGlobal, $secret, $activateSiteId): HtmlCacheGenerationRun {
             throw_if(
                 HtmlCacheGenerationRun::query()->whereIn('status', [
                     HtmlCacheGenerationRun::STATUS_PENDING,
@@ -45,6 +45,9 @@ final class QueueMaintenancePageGenerationAction
             return HtmlCacheGenerationRun::query()->create([
                 'status' => HtmlCacheGenerationRun::STATUS_PENDING,
                 'total_sites' => count($siteIds),
+                'site_ids' => $siteIds,
+                'enable_global' => $enableGlobal && is_string($secret) && $secret !== '',
+                'activate_site_id' => $activateSiteId,
                 'completed_sites' => 0,
                 'failed_sites' => 0,
             ]);

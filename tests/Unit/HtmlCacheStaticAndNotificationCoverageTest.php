@@ -17,7 +17,6 @@ use Capell\Core\Octane\Resettable;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
-use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\GenerateStaticSitesAction;
@@ -962,14 +961,14 @@ it('builds maintenance admin actions for permitted users', function (): void {
     expect((new MaintenanceSiteHeaderActionExtender)->actions())->toHaveCount(3);
 });
 
-it('builds maintenance cache page header actions', function (): void {
+it('shows no maintenance cache page header action when there is no actor or accessible site', function (): void {
     $method = new ReflectionMethod(MaintenanceCachePage::class, 'getHeaderActions');
     $page = new MaintenanceCachePage;
 
-    expect($method->invoke($page))->toHaveCount(3);
+    expect($method->invoke($page))->toHaveCount(0);
 });
 
-it('toggles and generates site maintenance cache state', function (): void {
+it('prepares and toggles site maintenance cache state through the typed actions', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-toggle.test');
     $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $siteDomain->site_id])));
     app()->instance(ThemePreviewRendererInterface::class, new class implements ThemePreviewRendererInterface
@@ -986,17 +985,8 @@ it('toggles and generates site maintenance cache state', function (): void {
     });
 
     $page = new MaintenanceCachePage;
-    resolve(MaintenanceManifestStore::class)->setSiteActive((int) $siteDomain->site_id, false);
 
-    $page->toggleSite((int) $siteDomain->site_id);
-
-    expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.active'))->toBeTrue();
-
-    $page->toggleSite((int) $siteDomain->site_id);
-
-    expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.active'))->toBeFalse();
-
-    $page->generateSite((int) $siteDomain->site_id);
+    $page->prepareSite((int) $siteDomain->site_id);
 
     expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.domains'))->not->toBe([]);
 
@@ -1005,6 +995,14 @@ it('toggles and generates site maintenance cache state', function (): void {
     expect($run)->toBeInstanceOf(HtmlCacheGenerationRun::class)
         ->and($run?->status)->toBe(HtmlCacheGenerationRun::STATUS_COMPLETED)
         ->and($run?->completed_sites)->toBe(1);
+
+    $page->enableSiteOverride((int) $siteDomain->site_id);
+
+    expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.active'))->toBeTrue();
+
+    $page->disableSiteOverride((int) $siteDomain->site_id);
+
+    expect(data_get($page->manifest(), 'sites.' . $siteDomain->site_id . '.active'))->toBeFalse();
 });
 
 it('queues maintenance page generation with persisted progress', function (): void {
@@ -1029,7 +1027,18 @@ it('scopes maintenance cache page site operations to assigned sites', function (
     $assignedSiteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-assigned.test');
     $unassignedSiteDomain = htmlCacheResidualCoverageSiteDomain('maintenance-unassigned.test');
     $page = new MaintenanceCachePage;
-    resolve(MaintenanceManifestStore::class)->setSiteActive((int) $assignedSiteDomain->site_id, false);
+    app()->instance(ThemePreviewRendererInterface::class, new class implements ThemePreviewRendererInterface
+    {
+        public function render(
+            Theme $theme,
+            Site $site,
+            Page $page,
+            ?Language $language = null,
+            ?SiteDomain $siteDomain = null,
+        ): Response {
+            return new Response('<h1>Maintenance</h1>');
+        }
+    });
 
     $this->actingAs(htmlCacheMaintenanceUser(collect([(int) $assignedSiteDomain->site_id])));
 
@@ -1037,13 +1046,24 @@ it('scopes maintenance cache page site operations to assigned sites', function (
         ->toContain($assignedSiteDomain->site_id)
         ->not->toContain($unassignedSiteDomain->site_id);
 
-    $page->toggleSite((int) $assignedSiteDomain->site_id);
+    $page->prepareSite((int) $assignedSiteDomain->site_id);
+    $page->enableSiteOverride((int) $assignedSiteDomain->site_id);
 
-    expect(data_get($page->manifest(), 'sites.' . $assignedSiteDomain->site_id . '.active'))->toBeTrue()
-        ->and(fn (): null => $page->toggleSite((int) $unassignedSiteDomain->site_id))
-        ->toThrow(AuthorizationException::class)
-        ->and(fn (): null => $page->generateSite((int) $unassignedSiteDomain->site_id))
-        ->toThrow(AuthorizationException::class);
+    expect(data_get($page->manifest(), 'sites.' . $assignedSiteDomain->site_id . '.active'))->toBeTrue();
+
+    $unassignedSiteId = (int) $unassignedSiteDomain->site_id;
+
+    expect(function () use ($page, $unassignedSiteId): void {
+        $page->prepareSite($unassignedSiteId);
+    })->toThrow(AuthorizationException::class);
+
+    expect(function () use ($page, $unassignedSiteId): void {
+        $page->enableSiteOverride($unassignedSiteId);
+    })->toThrow(AuthorizationException::class);
+
+    expect(function () use ($page, $unassignedSiteId): void {
+        $page->disableSiteOverride($unassignedSiteId);
+    })->toThrow(AuthorizationException::class);
 });
 
 it('caches public html, json, xml, not found, and invalid request paths', function (): void {

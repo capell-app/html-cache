@@ -8,27 +8,27 @@ use BackedEnum;
 use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\Site;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
-use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
-use Capell\HtmlCache\Actions\QueueMaintenancePageGenerationAction;
-use Capell\HtmlCache\Data\EdgeCachePurgeData;
-use Capell\HtmlCache\Enums\HtmlCachePermission;
+use Capell\HtmlCache\Actions\BuildMaintenanceCacheOverviewAction;
+use Capell\HtmlCache\Actions\DisableGlobalMaintenanceAction;
+use Capell\HtmlCache\Actions\DisableSiteMaintenanceOverrideAction;
+use Capell\HtmlCache\Actions\EnableGlobalMaintenanceAction;
+use Capell\HtmlCache\Actions\EnableSiteMaintenanceOverrideAction;
+use Capell\HtmlCache\Actions\PrepareMaintenanceCacheAction;
+use Capell\HtmlCache\Actions\PrepareSiteMaintenanceCacheAction;
+use Capell\HtmlCache\Data\MaintenanceCacheOverviewData;
+use Capell\HtmlCache\Enums\MaintenanceGlobalAction;
+use Capell\HtmlCache\Support\Maintenance\MaintenanceCachePermissions;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Foundation\Http\MaintenanceModeBypassCookie;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Cookie;
-use Illuminate\Support\Str;
 use Override;
-use Spatie\Permission\Exceptions\PermissionDoesNotExist;
+use RuntimeException;
 
 class MaintenanceCachePage extends Page implements HasActions
 {
@@ -45,7 +45,7 @@ class MaintenanceCachePage extends Page implements HasActions
     #[Override]
     public static function canAccess(): bool
     {
-        return self::canManageMaintenance();
+        return MaintenanceCachePermissions::canManage(auth()->user());
     }
 
     #[Override]
@@ -81,40 +81,26 @@ class MaintenanceCachePage extends Page implements HasActions
         return resolve(MaintenanceManifestStore::class)->read();
     }
 
-    public function toggleSite(int $siteId): void
+    /**
+     * The single typed projection the page and its actions read from. Always
+     * recomputed from current manifest, site, and run state rather than
+     * cached across the request, so the rendered state can never lag behind
+     * what a write action just did.
+     */
+    public function overview(): MaintenanceCacheOverviewData
     {
-        $site = $this->authorizedSite($siteId);
-        $manifest = $this->manifest();
-        $current = data_get($manifest, 'sites.' . $siteId . '.active') === true;
+        return BuildMaintenanceCacheOverviewAction::run($this->sites());
+    }
 
-        if (! $current && data_get($manifest, 'sites.' . $siteId . '.domains', []) === []) {
-            QueueMaintenancePageGenerationAction::run(
-                new Collection([$site]),
-                activateSiteId: $siteId,
-            );
-
-            Notification::make()
-                ->success()
-                ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
-                ->send();
+    public function prepareSite(int $siteId): void
+    {
+        try {
+            PrepareSiteMaintenanceCacheAction::run(auth()->user(), $siteId);
+        } catch (RuntimeException $exception) {
+            Notification::make()->warning()->title($exception->getMessage())->send();
 
             return;
         }
-
-        resolve(MaintenanceManifestStore::class)->setSiteActive($siteId, ! $current);
-        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(tags: ['site-' . $siteId]));
-
-        Notification::make()
-            ->success()
-            ->title(__('capell-html-cache::admin.maintenance_site_updated'))
-            ->send();
-    }
-
-    public function generateSite(int $siteId): void
-    {
-        $site = $this->authorizedSite($siteId);
-
-        QueueMaintenancePageGenerationAction::run(new Collection([$site]));
 
         Notification::make()
             ->success()
@@ -122,136 +108,112 @@ class MaintenanceCachePage extends Page implements HasActions
             ->send();
     }
 
+    public function enableSiteOverride(int $siteId): void
+    {
+        try {
+            EnableSiteMaintenanceOverrideAction::run(auth()->user(), $siteId);
+        } catch (RuntimeException $exception) {
+            Notification::make()->warning()->title($exception->getMessage())->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->success()
+            ->title(__('capell-html-cache::admin.maintenance_site_updated'))
+            ->send();
+    }
+
+    public function disableSiteOverride(int $siteId): void
+    {
+        DisableSiteMaintenanceOverrideAction::run(auth()->user(), $siteId);
+
+        Notification::make()
+            ->success()
+            ->title(__('capell-html-cache::admin.maintenance_site_updated'))
+            ->send();
+    }
+
     /** @return array<int, Action> */
     #[Override]
     protected function getHeaderActions(): array
     {
-        return [
-            Action::make('generate-all')
-                ->label(__('capell-html-cache::admin.generate_all_maintenance_pages'))
-                ->icon('heroicon-o-arrow-path')
-                ->authorize(fn (): bool => self::canManageMaintenance())
-                ->action(function (): void {
-                    $this->generateAccessibleMaintenancePages();
-
-                    Notification::make()
-                        ->success()
-                        ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
-                        ->send();
-                }),
-            Action::make('enable-global-maintenance')
-                ->label(__('capell-html-cache::admin.enable_global_maintenance'))
-                ->icon('heroicon-o-lock-closed')
-                ->authorize(fn (): bool => $this->canManageGlobalMaintenance())
-                ->requiresConfirmation()
-                ->action(function (): void {
-                    $secret = Str::random(32);
-
-                    QueueMaintenancePageGenerationAction::run(
-                        $this->accessibleSites(enabledOnly: true),
-                        enableGlobal: true,
-                        secret: $secret,
-                    );
-                    Cookie::queue(MaintenanceModeBypassCookie::create($secret));
-
-                    Notification::make()
-                        ->success()
-                        ->title(__('capell-html-cache::admin.global_maintenance_queued'))
-                        ->send();
-                }),
-            Action::make('disable-global-maintenance')
-                ->label(__('capell-html-cache::admin.disable_global_maintenance'))
-                ->icon('heroicon-o-lock-open')
-                ->color('success')
-                ->authorize(fn (): bool => $this->canManageGlobalMaintenance())
-                ->action(function (): void {
-                    resolve(MaintenanceManifestStore::class)->setGlobalActive(false);
-                    PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
-                    Artisan::call('up');
-
-                    Notification::make()
-                        ->success()
-                        ->title(__('capell-html-cache::admin.global_maintenance_disabled'))
-                        ->send();
-                }),
-        ];
+        return match ($this->overview()->primaryAction()) {
+            MaintenanceGlobalAction::Prepare => [$this->prepareAction()],
+            MaintenanceGlobalAction::ReviewAndEnable => [$this->reviewAndEnableAction()],
+            MaintenanceGlobalAction::ExitMaintenance => [$this->exitMaintenanceAction()],
+            null => [],
+        };
     }
 
-    private static function canManageMaintenance(): bool
+    private function prepareAction(): Action
     {
-        $actor = auth()->user();
+        return Action::make('prepare')
+            ->label(MaintenanceGlobalAction::Prepare->label())
+            ->icon('heroicon-o-arrow-path')
+            ->authorize(fn (): bool => MaintenanceCachePermissions::canManage(auth()->user()))
+            ->action(function (): void {
+                try {
+                    PrepareMaintenanceCacheAction::run(auth()->user());
+                } catch (RuntimeException $exception) {
+                    Notification::make()->warning()->title($exception->getMessage())->send();
 
-        if (! $actor instanceof Authenticatable) {
-            return false;
-        }
+                    return;
+                }
 
-        if (SiteScope::isGlobalActor($actor)) {
-            return true;
-        }
-
-        if (! method_exists($actor, 'hasPermissionTo')) {
-            return false;
-        }
-
-        try {
-            return $actor->hasPermissionTo(HtmlCachePermission::ManageMaintenance->value) === true;
-        } catch (PermissionDoesNotExist) {
-            return false;
-        }
+                Notification::make()
+                    ->success()
+                    ->title(__('capell-html-cache::admin.maintenance_cache_queued'))
+                    ->send();
+            });
     }
 
-    private function canManageGlobalMaintenance(): bool
+    private function reviewAndEnableAction(): Action
     {
-        $actor = auth()->user();
+        return Action::make('review-and-enable')
+            ->label(MaintenanceGlobalAction::ReviewAndEnable->label())
+            ->icon('heroicon-o-lock-closed')
+            ->authorize(fn (): bool => MaintenanceCachePermissions::canManageGlobal(auth()->user()))
+            ->requiresConfirmation()
+            ->action(function (): void {
+                try {
+                    EnableGlobalMaintenanceAction::run(auth()->user());
+                } catch (RuntimeException $exception) {
+                    Notification::make()->warning()->title($exception->getMessage())->send();
 
-        return $actor instanceof Authenticatable
-            && SiteScope::isGlobalActor($actor)
-            && self::canManageMaintenance();
+                    return;
+                }
+
+                Notification::make()
+                    ->success()
+                    ->title(__('capell-html-cache::admin.global_maintenance_queued'))
+                    ->send();
+            });
+    }
+
+    private function exitMaintenanceAction(): Action
+    {
+        return Action::make('exit-maintenance')
+            ->label(MaintenanceGlobalAction::ExitMaintenance->label())
+            ->icon('heroicon-o-lock-open')
+            ->color('success')
+            ->authorize(fn (): bool => MaintenanceCachePermissions::canManageGlobal(auth()->user()))
+            ->requiresConfirmation()
+            ->action(function (): void {
+                DisableGlobalMaintenanceAction::run(auth()->user());
+
+                Notification::make()
+                    ->success()
+                    ->title(__('capell-html-cache::admin.global_maintenance_disabled'))
+                    ->send();
+            });
     }
 
     /**
      * @return Builder<Site>
      */
-    private function accessibleSitesQuery(bool $enabledOnly = false): Builder
+    private function accessibleSitesQuery(): Builder
     {
-        $query = Site::query();
-
-        if ($enabledOnly) {
-            $query->enabled();
-        }
-
-        return SiteScope::applyForCurrentActor($query, 'id', denyWhenMissingActor: true);
-    }
-
-    /**
-     * @throws AuthorizationException
-     */
-    private function authorizedSite(int $siteId): Site
-    {
-        $site = Site::query()->findOrFail($siteId);
-        $actor = auth()->user();
-
-        throw_if(! self::canManageMaintenance() || ! SiteScope::actorCanUseSite($actor, $site), AuthorizationException::class);
-
-        return $site;
-    }
-
-    /**
-     * @throws AuthorizationException
-     */
-    /** @return Collection<int, Site> */
-    private function accessibleSites(bool $enabledOnly = false): Collection
-    {
-        throw_unless(self::canManageMaintenance(), AuthorizationException::class);
-
-        return $this->accessibleSitesQuery(enabledOnly: $enabledOnly)
-            ->with(['language', 'siteDomains.language', 'theme', 'translations'])
-            ->ordered()
-            ->get();
-    }
-
-    private function generateAccessibleMaintenancePages(): void
-    {
-        QueueMaintenancePageGenerationAction::run($this->accessibleSites(enabledOnly: true));
+        return SiteScope::applyForCurrentActor(Site::query(), 'id', denyWhenMissingActor: true);
     }
 }

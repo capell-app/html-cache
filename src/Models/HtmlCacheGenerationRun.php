@@ -13,6 +13,9 @@ use Override;
  * @property string $id
  * @property string $status
  * @property int $total_sites
+ * @property list<int>|null $site_ids
+ * @property bool $enable_global
+ * @property int|null $activate_site_id
  * @property int $completed_sites
  * @property int $failed_sites
  * @property array<string, string|null>|null $errors
@@ -39,6 +42,9 @@ final class HtmlCacheGenerationRun extends Model
     protected $fillable = [
         'status',
         'total_sites',
+        'site_ids',
+        'enable_global',
+        'activate_site_id',
         'completed_sites',
         'failed_sites',
         'errors',
@@ -46,11 +52,22 @@ final class HtmlCacheGenerationRun extends Model
         'finished_at',
     ];
 
+    /**
+     * Whether this run currently targets the given site, either directly
+     * (per-site generation) or as part of the intended global rollout.
+     */
+    public function targetsSite(int $siteId): bool
+    {
+        return in_array($siteId, $this->site_ids ?? [], true);
+    }
+
     /** @return array<string, string> */
     #[Override]
     protected function casts(): array
     {
         return [
+            'site_ids' => 'array',
+            'enable_global' => 'boolean',
             'errors' => 'array',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',

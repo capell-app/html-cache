@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Models\Page;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Collection;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -26,18 +27,24 @@ final class ClearCachedUrlsForSurrogateKeysAction
      */
     public function handle(array $surrogateKeys): int
     {
+        $cleared = 0;
+
+        $pageMorphClass = (new Page)->getMorphClass();
+
+        foreach ($this->pageIds($surrogateKeys) as $pageId) {
+            $cleared += ClearCachedUrlsForModelAction::run($pageMorphClass, $pageId);
+        }
+
         $siteIds = $this->siteIds($surrogateKeys);
 
         if ($siteIds === []) {
-            return 0;
+            return $cleared;
         }
 
         /** @var Collection<int, CachedModelUrl> $cachedUrls */
         $cachedUrls = CachedModelUrl::query()
             ->whereIn('site_id', $siteIds)
             ->get();
-
-        $cleared = 0;
 
         foreach ($cachedUrls as $cachedUrl) {
             if (ClearCachedUrlAction::run($cachedUrl)) {
@@ -57,6 +64,24 @@ final class ClearCachedUrlsForSurrogateKeysAction
         return array_values(array_unique(array_filter(array_map(
             static function (string $surrogateKey): ?int {
                 if (preg_match('/^site-(\d+)$/', $surrogateKey, $matches) !== 1) {
+                    return null;
+                }
+
+                return (int) $matches[1];
+            },
+            $surrogateKeys,
+        ))));
+    }
+
+    /**
+     * @param  array<int, string>  $surrogateKeys
+     * @return list<int>
+     */
+    private function pageIds(array $surrogateKeys): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static function (string $surrogateKey): ?int {
+                if (preg_match('/^page-(\d+)$/', $surrogateKey, $matches) !== 1) {
                     return null;
                 }
 

@@ -50,13 +50,13 @@ Screenshot contract: `docs/screenshots.json`.
 
 - Service providers: `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`.
 - Config files: `packages/html-cache/config/capell-html-cache.php`.
-- Migrations: `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`, `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`.
+- Migrations: `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`, `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`, `packages/html-cache/database/migrations/2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`.
 - Models: `CachedModelUrl`, `HtmlCacheGenerationRun`, `StaleCachedUrl`.
 - Filament classes: `PageCachedIconColumn`, `HasPageCacheNotification`, `PageCachePageTableExtender`, `MaintenanceSiteHeaderActionExtender`, `MaintenanceCachePage`, `CachedModelUrlResource`, `ListCachedModelUrls`, `CachedModelUrlsTable`, `HtmlCacheDashboardSettingsContributor`, `CacheCoverageUrlsFilamentWidget`, `HtmlCacheOverviewFilamentWidget`, `HtmlCacheStaleQueueFilamentWidget`.
 - Livewire components: `SiteHealthCacheMap`.
 - Extension contracts: `CachePurger`, `PageCacheNotifiable`.
-- Actions: `AssertHtmlCacheInvalidationTopologyAction`, `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `BuildHtmlCacheDashboardStatsAction`, `and 24 more`.
-- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `EdgeCachePurgeReadinessData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`.
+- Actions: `AssertHtmlCacheInvalidationTopologyAction`, `BuildCacheMapOverviewAction`, `BuildCachedModelUrlDiagnosticsAction`, `BuildHtmlCacheEligibilityReportAction`, `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`, `BuildMaintenanceCacheOverviewAction`, `ClaimStaleCachedUrlAction`, `ClearAllHtmlCacheAction`, `ClearCachedPageUrlsAction`, `ClearCachedUrlAction`, `ClearCachedUrlsForModelAction`, `ClearCachedUrlsForSurrogateKeysAction`, `and 31 more`.
+- Data objects: `CacheMapModelSummaryData`, `CacheMapOverviewData`, `CacheMapResourceSummaryData`, `HtmlCacheDashboardStatsData`, `EdgeCachePurgeData`, `EdgeCachePurgeReadinessData`, `HtmlCacheClearResult`, `HtmlCacheEligibilityReportData`, `HtmlCacheHitBatchData`, `MaintenanceCacheDomainData`, `MaintenanceCacheOverviewData`, `MaintenanceSiteStatusData`.
 - Jobs: `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RegisterCachedModelUrlsJob`.
 - Scheduled commands: `capell:html-cache:process-stale (package registered)`.
 - Console command classes: `ClearHtmlCacheCommand`, `DiagnoseHtmlCacheCommand`, `ProcessStaleHtmlCacheCommand`, `StaticSiteCommand`, `VerifyEdgeCachePurgeCommand`.
@@ -70,7 +70,7 @@ Screenshot contract: `docs/screenshots.json`.
 - Required tables: `cached_model_urls`, `html_cache_generation_runs`, `stale_cached_urls`.
 - Models: `CachedModelUrl`, `HtmlCacheGenerationRun`, `StaleCachedUrl`.
 - Core record references in migrations: `sites via site_id`, `languages via language_id`, `site domains via site_domain_id`.
-- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`.
+- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`.
 - Migration impact: run host migrations through the package install flow before opening package surfaces.
 - Deletion/retention behaviour: migrations declare null-on-delete relationships; no timed pruning or retention schedule is declared in `capell.json`.
 

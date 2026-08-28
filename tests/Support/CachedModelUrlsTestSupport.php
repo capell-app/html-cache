@@ -8,6 +8,7 @@ use Capell\Core\Models\Layout;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\Theme;
 use Capell\Frontend\Contracts\FrontendContextReader;
+use Capell\Frontend\Data\FrontendRenderPayload;
 use Capell\Frontend\Facades\Frontend;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
@@ -82,6 +83,11 @@ function bindHtmlCacheFrontendContext(?Pageable $page = null): void
         public function getFrontendData(?string $key = null): mixed
         {
             return $key === null ? [] : null;
+        }
+
+        public function renderPayload(): FrontendRenderPayload
+        {
+            return FrontendRenderPayload::fromBag([]);
         }
     });
     Frontend::clearResolvedInstance(FrontendContextReader::class);

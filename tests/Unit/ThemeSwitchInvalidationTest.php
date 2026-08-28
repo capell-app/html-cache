@@ -14,6 +14,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Illuminate\Support\Str;
 
 uses(HtmlCacheTestCase::class);
 

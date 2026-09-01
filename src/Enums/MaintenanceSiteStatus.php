@@ -26,6 +26,12 @@ enum MaintenanceSiteStatus: string
 
     public function label(): string
     {
-        return __('capell-html-cache::admin.maintenance_site_status_' . $this->value);
+        return match ($this) {
+            self::Missing => __('capell-html-cache::admin.maintenance_site_status_missing'),
+            self::Preparing => __('capell-html-cache::admin.maintenance_site_status_preparing'),
+            self::Generated => __('capell-html-cache::admin.maintenance_site_status_generated'),
+            self::Active => __('capell-html-cache::admin.maintenance_site_status_active'),
+            self::CoveredByGlobal => __('capell-html-cache::admin.maintenance_site_status_covered_by_global'),
+        };
     }
 }

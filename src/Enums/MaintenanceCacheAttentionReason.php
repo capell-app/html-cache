@@ -24,6 +24,11 @@ enum MaintenanceCacheAttentionReason: string
 
     public function label(): string
     {
-        return __('capell-html-cache::admin.maintenance_attention_' . $this->value);
+        return match ($this) {
+            self::NoAccessibleSites => __('capell-html-cache::admin.maintenance_attention_no_accessible_sites'),
+            self::NoSiteDomainsConfigured => __('capell-html-cache::admin.maintenance_attention_no_site_domains_configured'),
+            self::GenerationFailed => __('capell-html-cache::admin.maintenance_attention_generation_failed'),
+            self::ArtisanStateDrift => __('capell-html-cache::admin.maintenance_attention_artisan_state_drift'),
+        };
     }
 }

@@ -51,7 +51,7 @@ it('keeps cached files available while a full manual clear queues refreshes', fu
         'last_seen_at' => now(),
     ]);
 
-    test()->artisan('capell:html-cache:clear')
+    capell_artisan('capell:html-cache:clear')
         ->expectsOutput('Marked 1 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
         ->expectsOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')
         ->assertSuccessful();
@@ -63,7 +63,7 @@ it('keeps cached files available while a full manual clear queues refreshes', fu
 it('processes the stale queue only when explicitly requested', function (): void {
     Storage::fake('page_cache');
 
-    test()->artisan('capell:html-cache:clear', ['--process' => true])
+    capell_artisan('capell:html-cache:clear', ['--process' => true])
         ->expectsOutput('Marked 0 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
         ->expectsOutput('Processed 0 stale HTML cache URL(s).')
         ->doesntExpectOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')

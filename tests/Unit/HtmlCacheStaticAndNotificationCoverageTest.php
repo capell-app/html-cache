@@ -63,6 +63,7 @@ use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -237,7 +238,7 @@ it('tracks static site extension handlers and rejects sites without domains', fu
     ]);
 
     expect(function () use ($orphanSite): void {
-        (new StaticSiteGenerator($orphanSite))->process();
+        new StaticSiteGenerator($orphanSite)->process();
     })
         ->toThrow(RuntimeException::class, 'No site domains found for static HTML generation.');
 
@@ -408,7 +409,7 @@ it('resolves cached page rows for page urls and pageable records', function (): 
 it('runs html cache console commands against static site and file cache paths', function (): void {
     $siteDomain = htmlCacheResidualCoverageSiteDomain('command.test');
     $cachePath = storage_path('framework/testing-page-cache');
-    $pageCache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $pageCache = new PageCache(new Filesystem)->setCachePath($cachePath);
 
     app()->instance(PageCache::class, $pageCache);
     config(['capell-html-cache.static_generation.internal_requests' => false]);
@@ -434,6 +435,7 @@ it('runs html cache console commands against static site and file cache paths', 
 it('marks internal static generation kernel requests as synthetic html cache renders', function (): void {
     $registry = resolve(StaticSiteExtensionRegistry::class);
     $registry->clear();
+
     $siteDomain = htmlCacheResidualCoverageSiteDomain('internal-static.test');
     $syntheticRender = null;
 
@@ -450,7 +452,7 @@ it('marks internal static generation kernel requests as synthetic html cache ren
     config(['capell-html-cache.static_generation.internal_requests' => true]);
 
     try {
-        (new StaticSiteGenerator($siteDomain->site))->process();
+        new StaticSiteGenerator($siteDomain->site)->process();
     } finally {
         $registry->clear();
     }
@@ -546,6 +548,7 @@ it('records synthetic render model urls synchronously without queueing registrat
     $siteDomain = htmlCacheResidualCoverageSiteDomain('synthetic-render.test');
     $page = htmlCacheResidualCoveragePage($siteDomain);
     $page->setRelation('site', $siteDomain->site);
+
     $request = Request::create('https://synthetic-render.test/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $request->attributes->set(HtmlCacheMiddleware::SYNTHETIC_RENDER_ATTRIBUTE, true);
 
@@ -603,7 +606,7 @@ it('keeps long-lived html cache state in the container instead of process static
         HtmlCacheModelInvalidationObserver::class,
     ] as $statefulClass) {
         $staticProperties = array_filter(
-            (new ReflectionClass($statefulClass))->getProperties(),
+            new ReflectionClass($statefulClass)->getProperties(),
             static fn (ReflectionProperty $property): bool => $property->isStatic(),
         );
 
@@ -622,7 +625,7 @@ it('flushes the invalidation model memo between Octane operations', function ():
     $observer = resolve(HtmlCacheModelInvalidationObserver::class);
     $modelClasses = new ReflectionProperty($observer, 'capellModelClasses');
 
-    (new ReflectionMethod($observer, 'capellModelClasses'))->invoke($observer);
+    new ReflectionMethod($observer, 'capellModelClasses')->invoke($observer);
 
     expect($modelClasses->getValue($observer))->toBeArray()
         ->and(collect(app()->tagged(Resettable::TAG))->contains($observer))->toBeTrue();
@@ -864,7 +867,7 @@ it('reports html cache files and directories that could not be deleted', functio
     $manager = Mockery::mock(FilesystemManager::class);
     $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
 
-    $result = (new HtmlCacheStore($manager))->deleteAll();
+    $result = new HtmlCacheStore($manager)->deleteAll();
 
     expect($result->successful())->toBeFalse()
         ->and($result->failedDirectories)->toBe(['http.example.test'])
@@ -882,7 +885,7 @@ it('returns a clear console failure when the html cache root cannot be inspected
 
     app()->instance(HtmlCacheStore::class, new HtmlCacheStore($manager));
 
-    test()->artisan('capell:html-cache:clear')
+    capell_artisan('capell:html-cache:clear')
         ->expectsOutputToContain('Unable to clear the HTML cache. Check filesystem permissions')
         ->assertFailed();
 });
@@ -911,7 +914,7 @@ it('wraps html cache store listing failures with useful runtime exceptions', fun
     $unresolvedManager = Mockery::mock(FilesystemManager::class);
     $unresolvedManager->shouldReceive('disk')->with('page_cache')->andReturn($unresolvedDisk);
 
-    expect(fn (): array => (new HtmlCacheStore($unresolvedManager))->directories())
+    expect(fn (): array => new HtmlCacheStore($unresolvedManager)->directories())
         ->toThrow(RuntimeException::class, 'page_cache disk root (unresolved)');
 });
 
@@ -1086,7 +1089,7 @@ it('caches public html, json, xml, not found, and invalid request paths', functi
     });
     config(['capell-html-cache.enabled' => true]);
 
-    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $cache = new PageCache(new Filesystem)->setCachePath($cachePath);
     $request = Request::create('/docs/page', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $html = ' <html><body>Safe</body></html> ';
     $request->attributes->set(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_PASSED_ATTRIBUTE, true);
@@ -1126,7 +1129,7 @@ it('skips page cache reads and writes for oversized hostile request paths', func
         }
     });
 
-    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $cache = new PageCache(new Filesystem)->setCachePath($cachePath);
     $request = Request::create('/' . str_repeat('a', 5000), Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $response = new Response('<html><body>Not found</body></html>', Response::HTTP_NOT_FOUND, ['Content-Type' => 'text/html']);
 
@@ -1158,11 +1161,11 @@ it('treats a cache file deleted during a concurrent read as a cache miss', funct
 
         public function lastModified($path): int
         {
-            return time();
+            return Date::now()->getTimestamp();
         }
     };
 
-    $cache = (new PageCache($filesystem))->setCachePath(storage_path('framework/testing-page-cache-race'));
+    $cache = new PageCache($filesystem)->setCachePath(storage_path('framework/testing-page-cache-race'));
 
     expect($cache->getCachePage(Request::create('/race')))->toBeFalse();
 });
@@ -1179,7 +1182,7 @@ it('skips page cache reads and writes for encoded hostile request paths', functi
         }
     });
 
-    $cache = (new PageCache(new Filesystem))->setCachePath($cachePath);
+    $cache = new PageCache(new Filesystem)->setCachePath($cachePath);
     $request = Request::create($path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $response = new Response('<html><body>Unsafe</body></html>', Response::HTTP_OK, ['Content-Type' => 'text/html']);
 

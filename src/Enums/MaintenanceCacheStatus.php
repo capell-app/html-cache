@@ -19,6 +19,12 @@ enum MaintenanceCacheStatus: string
 
     public function label(): string
     {
-        return __('capell-html-cache::admin.maintenance_status_' . $this->value);
+        return match ($this) {
+            self::Off => __('capell-html-cache::admin.maintenance_status_off'),
+            self::Preparing => __('capell-html-cache::admin.maintenance_status_preparing'),
+            self::Ready => __('capell-html-cache::admin.maintenance_status_ready'),
+            self::Active => __('capell-html-cache::admin.maintenance_status_active'),
+            self::Attention => __('capell-html-cache::admin.maintenance_status_attention'),
+        };
     }
 }

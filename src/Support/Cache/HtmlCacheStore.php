@@ -8,6 +8,7 @@ use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Facades\File;
+use League\Flysystem\PathTraversalDetected;
 use RuntimeException;
 use Throwable;
 
@@ -22,7 +23,11 @@ final class HtmlCacheStore
 
     public function exists(string $file): bool
     {
-        return $this->disk->exists($file);
+        try {
+            return $this->disk->exists($file);
+        } catch (PathTraversalDetected) {
+            return false;
+        }
     }
 
     public function lastModified(string $file): ?int
@@ -63,6 +68,10 @@ final class HtmlCacheStore
     public function directories(?string $path = null): array
     {
         try {
+            if (! $this->directoryExists($path)) {
+                return [];
+            }
+
             return ($path !== null && $path !== '')
                 ? $this->disk->directories($path)
                 : $this->disk->directories();
@@ -85,6 +94,10 @@ final class HtmlCacheStore
     public function files(?string $path = null): array
     {
         try {
+            if (! $this->directoryExists($path)) {
+                return [];
+            }
+
             return ($path !== null && $path !== '')
                 ? $this->disk->files($path)
                 : $this->disk->files();
@@ -153,6 +166,15 @@ final class HtmlCacheStore
             return $this->root();
         } catch (Throwable) {
             return 'page_cache disk root (unresolved)';
+        }
+    }
+
+    private function directoryExists(?string $path): bool
+    {
+        try {
+            return File::isDirectory($this->disk->path($path ?? ''));
+        } catch (PathTraversalDetected) {
+            return false;
         }
     }
 }

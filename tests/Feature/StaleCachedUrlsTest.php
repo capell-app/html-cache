@@ -12,6 +12,7 @@ use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Facades\Cache;
@@ -337,7 +338,7 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
     ]);
 
     expect(ProcessStaleHtmlCacheAction::run(1))->toBe(1)
-        ->and(file_exists(Storage::disk('page_cache')->path('../outside.html')))->toBeFalse()
+        ->and(resolve(HtmlCacheStore::class)->path('../outside.html'))->toBeNull()
         ->and(Storage::disk('page_cache')->allFiles())->toBe([])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('cache path was invalid');

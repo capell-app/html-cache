@@ -852,13 +852,36 @@ it('returns null for missing html cache storage metadata and sanitizes deletes',
 
     expect($store->lastModified('missing.html'))->toBeNull()
         ->and($store->path('missing.html'))->toBeNull()
+        ->and($store->exists('../outside.html'))->toBeFalse()
+        ->and($store->path('../outside.html'))->toBeNull()
         ->and($store->files('folder'))->toBe(['folder/keep.html'])
         ->and($store->delete('../folder/keep.html'))->toBeTrue()
         ->and($store->exists('folder/keep.html'))->toBeFalse();
 });
 
+it('treats a missing html cache root as empty', function (): void {
+    $root = storage_path('framework/testing/html-cache-missing-root-' . bin2hex(random_bytes(8)));
+    $disk = Storage::build([
+        'driver' => 'local',
+        'root' => $root,
+        'throw' => true,
+    ]);
+    $manager = Mockery::mock(FilesystemManager::class);
+    $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
+
+    try {
+        $store = new HtmlCacheStore($manager);
+
+        expect($store->directories())->toBe([])
+            ->and($store->files())->toBe([]);
+    } finally {
+        File::deleteDirectory($root);
+    }
+});
+
 it('reports html cache files and directories that could not be deleted', function (): void {
     $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('path')->andReturn('/tmp');
     $disk->shouldReceive('directories')->once()->withNoArgs()->andReturn(['http.example.test']);
     $disk->shouldReceive('deleteDirectory')->once()->with('http.example.test')->andReturnFalse();
     $disk->shouldReceive('files')->once()->withNoArgs()->andReturn(['orphan.html']);
@@ -878,7 +901,7 @@ it('returns a clear console failure when the html cache root cannot be inspected
     $disk = Mockery::mock(FilesystemContract::class);
     $disk->shouldReceive('exists')->zeroOrMoreTimes()->andReturnFalse();
     $disk->shouldReceive('directories')->once()->andThrow(new RuntimeException('Permission denied'));
-    $disk->shouldReceive('path')->andReturn('/tmp/page-cache');
+    $disk->shouldReceive('path')->andReturn('/tmp');
 
     $manager = Mockery::mock(FilesystemManager::class);
     $manager->shouldReceive('disk')->once()->with('page_cache')->andReturn($disk);
@@ -892,6 +915,7 @@ it('returns a clear console failure when the html cache root cannot be inspected
 
 it('wraps html cache store listing failures with useful runtime exceptions', function (): void {
     $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('path')->andReturn('/tmp');
     $disk->shouldReceive('directories')->andThrow(new RuntimeException('disk missing'));
     $disk->shouldReceive('files')->andThrow(new RuntimeException('disk missing'));
     $disk->shouldReceive('allDirectories')->andThrow(new RuntimeException('nested missing'));

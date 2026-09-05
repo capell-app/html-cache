@@ -265,8 +265,8 @@ final class BuildHtmlCacheEligibilityReportAction
      * to whoever's session rendered the response. It is legitimate in any
      * single-visitor response — including a fragment sub-request — but must
      * never reach the *shared* HTML cache: every later visitor would be
-     * served that one visitor's token and their own submission would fail
-     * (CAP-0216/CAP-0233). This is a cache-eligibility signal only, deliberately
+     * served that one visitor's token and their own submission would fail.
+     * This is a cache-eligibility signal only, deliberately
      * separate from {@see containsAuthoringSurface()}'s admin/authoring leak
      * check.
      *

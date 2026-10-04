@@ -126,19 +126,24 @@
             "targetType": "admin-page",
             "target": "MaintenanceCachePage",
             "required": false,
-            "notes": "Deferred authentic route target. Requires an authenticated admin with the maintenance-manage permission, one seeded site/domain, and migrated HTML Cache tables. Capture this same real Maintenance Cache page with the fully collapsible sidebar opened.",
+            "notes": "Capture the real installed Maintenance Cache page with the admin sidebar opened.",
             "useCase": "An administrator clears, warms, or regenerates cached HTML for a site.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-admin-sidebar-menu-open.png",
             "scenario": "admin-index",
-            "url": "/screenshot-fixtures/html-cache/html-cache-maintenance-cache-page",
-            "waitFor": ".html-cache",
+            "url": "/admin/html-cache/maintenance-cache",
+            "waitFor": "article[wire\\:key^=\"maintenance-site-\"]",
             "colorSchemes": ["light"],
             "beforeWait": [
                 {
                     "type": "click",
                     "selector": ".fi-topbar-open-collapse-sidebar-btn"
+                },
+                {
+                    "type": "waitFor",
+                    "selector": ".fi-sidebar.fi-sidebar-open"
                 }
             ]
         }
-    ]
+    ],
+    "fixtureCommands": ["capell:screenshot-admin-fixture --package=html-cache"]
 }

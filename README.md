@@ -10,12 +10,6 @@ Full-page static HTML cache for Capell with dependency-indexed invalidation, sch
 
 Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.
 
-Cache invalidation preserves dependency tracking until every existing page artefact has been removed. Missing files are harmless; inaccessible directories and failed deletions raise an error so the same URL can be retried. Safety diagnostics report an incomplete inspection when a directory cannot be enumerated.
-
-`capell:html-cache:process-stale` and `capell:html-cache:clear --process` report attempted, refreshed, failed, deferred and not-applicable counts, and return a nonzero exit code when any attempted refresh fails. Failed refreshes retain their old HTML and retry state. `ProcessStaleHtmlCacheAction::run()` returns these counts in `StaleHtmlCacheProcessResultData`; callers should check `successful()` before reporting completion. External static generation requires a confirmed HTTP 200 response for every required URL, including URLs supplied by extensions.
-
-Evidence: [`capell.json`](capell.json), [`src/Http/Middleware/HtmlCacheMiddleware.php`](src/Http/Middleware/HtmlCacheMiddleware.php), [`src/Models/CachedModelUrl.php`](src/Models/CachedModelUrl.php), [`src/Models/StaleCachedUrl.php`](src/Models/StaleCachedUrl.php), [`docs/overview.admin.md`](docs/overview.admin.md), [`docs/screenshots.json`](docs/screenshots.json), [`src/Filament/Pages/MaintenanceCachePage.php`](src/Filament/Pages/MaintenanceCachePage.php), [`tests/Feature/HtmlCacheMiddlewareTest.php`](tests/Feature/HtmlCacheMiddlewareTest.php).
-
 Status details:
 
 - Status: Available
@@ -31,8 +25,6 @@ Status details:
 
 **For teams:** Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.
 
-Evidence: [`src/Actions/RecordCachedModelUrlsAction.php`](src/Actions/RecordCachedModelUrlsAction.php), [`src/Actions/MarkCachedUrlsForModelStaleAction.php`](src/Actions/MarkCachedUrlsForModelStaleAction.php), [`src/Actions/RefreshCachedUrlAtomicallyAction.php`](src/Actions/RefreshCachedUrlAtomicallyAction.php), [`tests/Feature/StaleCachedUrlsTest.php`](tests/Feature/StaleCachedUrlsTest.php), [`docs/admin-guide.md`](docs/admin-guide.md), [`docs/cache-invalidation.md`](docs/cache-invalidation.md), [`src/Health/HtmlCacheHealthCheck.php`](src/Health/HtmlCacheHealthCheck.php), [`src/Actions/BuildHtmlCacheEligibilityReportAction.php`](src/Actions/BuildHtmlCacheEligibilityReportAction.php), [`src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php`](src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php), [`tests/Feature/ExtensionCacheSafetyTest.php`](tests/Feature/ExtensionCacheSafetyTest.php).
-
 ## Screens And Workflow
 
 Screenshot contract: `docs/screenshots.json`.
@@ -47,7 +39,7 @@ Screenshot contract: `docs/screenshots.json`.
 - HTML Cache site health cache map (admin, supplementary evidence).
 - Page table cache indicator (admin, supplementary evidence).
 - Anonymous public cache hit (frontend, supplementary evidence).
-- Static maintenance page output (frontend, supplementary evidence).
+- Public maintenance page (frontend, supplementary evidence).
 - HTML Cache maintenance cache page with admin sidebar menu open (admin, supplementary evidence).
 
 ## Technical Shape
@@ -104,6 +96,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `BuildCacheMapOverviewAction`
 - `BuildCachedModelUrlDiagnosticsAction`
 - `BuildHtmlCacheEligibilityReportAction`
+- `BuildHtmlCacheOriginDecisionAction`
 - `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`
 - `BuildMaintenanceCacheOverviewAction`
 - `ClaimStaleCachedUrlAction`
@@ -115,12 +108,14 @@ Screenshot contract: `docs/screenshots.json`.
 - `BuildHtmlCacheDashboardStatsAction`
 - `BuildHtmlCacheStaleQueueRowsAction`
 - `BuildHtmlCacheUrlRowsAction`
+- `DeleteCachedUrlArtefactsAction`
 - `DeletePageCacheAction`
 - `DisableGlobalMaintenanceAction`
 - `DisableSiteMaintenanceOverrideAction`
 - `EnableGlobalMaintenanceAction`
 - `EnableSiteMaintenanceOverrideAction`
 - `EnsureHtmlCachePermissionsAction`
+- `ForgetCachedUrlAction`
 - `GenerateStaticSiteAction`
 - `GenerateStaticSitesAction`
 - `InspectEdgeCachePurgeReadinessAction`
@@ -144,6 +139,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `ResolveCachedUrlsForModelAction`
 - `ResolveCachedUrlsForSurrogateKeysAction`
 - `ResolveEdgeCacheTagsAction`
+- `RetireCachedUrlAction`
 - `ScheduleOriginStaleCachedUrlRefreshAction`
 - `SelectStaleHtmlCacheCandidatesAction`
 - `WriteRefreshedHtmlCacheFileAction`
@@ -159,9 +155,11 @@ Screenshot contract: `docs/screenshots.json`.
 - `HtmlCacheClearResult`
 - `HtmlCacheEligibilityReportData`
 - `HtmlCacheHitBatchData`
+- `HtmlCacheOriginDecisionData`
 - `MaintenanceCacheDomainData`
 - `MaintenanceCacheOverviewData`
 - `MaintenanceSiteStatusData`
+- `StaleHtmlCacheProcessResultData`
 
 ### Jobs
 
@@ -257,7 +255,7 @@ Screenshot contract: `docs/screenshots.json`.
 ## Quick Start
 
 1. Install the package: `composer require capell-app/html-cache`.
-2. Open the package admin surface at `/html-cache/maintenance-cache` and confirm HTML Cache is available.
+2. Open the package admin surface at `/admin/html-cache/maintenance-cache` and confirm HTML Cache is available.
 
 ## Next Steps
 
@@ -273,6 +271,5 @@ Screenshot contract: `docs/screenshots.json`.
 - [Capell documentation design system](../../docs/DESIGN_SYSTEM.md)
 - [Capell and package ERD notes](../../docs/erd/capell-and-package-erds.md)
 - Related packages: [Discovery Foundation](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
-- Focused tests: `vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml`.
 
 <!-- prettier-ignore-end -->

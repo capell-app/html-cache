@@ -66,7 +66,20 @@ final class HtmlCachePathResolver
         $this->assertSafeSegment('scheme', $scheme);
         $this->assertSafeSegment('domain', $domain);
 
-        return sprintf('%s.%s', $scheme, $domain);
+        $root = sprintf('%s.%s', $scheme, $domain);
+        $port = $this->nonStandardPortForRequest($request);
+
+        return $port === null ? $root : sprintf('~port-%d/%s', $port, $root);
+    }
+
+    public function nonStandardPortForRequest(Request $request): ?int
+    {
+        $effectivePort = $request->getPort();
+        $port = (int) $effectivePort;
+
+        // Both standard ports retain nginx's legacy roots, including proxy scheme
+        // mismatches and string or absent SERVER_PORT values.
+        return $effectivePort === null || $port === 80 || $port === 443 ? null : $port;
     }
 
     public function directoryForPath(string $path): string
@@ -83,7 +96,7 @@ final class HtmlCachePathResolver
 
     public function directoryForSiteDomain(SiteDomain $siteDomain): string
     {
-        return rtrim($this->rootForRequest(Request::create('/'), $siteDomain) . '/' . $this->directoryForPath($siteDomain->path ?? ''), '/');
+        return rtrim($this->rootForRequest(Request::create($this->originForSiteDomain($siteDomain)), $siteDomain) . '/' . $this->directoryForPath($siteDomain->path ?? ''), '/');
     }
 
     public function pathForUrl(string $url, SiteDomain $siteDomain, bool $error = false): string
@@ -93,7 +106,7 @@ final class HtmlCachePathResolver
         $this->assertSafePath('site domain path', $siteDomain->path ?? '/');
         $this->assertSafePath('URL', $url);
 
-        $absoluteUrl = sprintf('%s://%s%s/%s', $siteDomain->scheme, $siteDomain->domain, rtrim($siteDomain->path ?? '', '/'), ltrim($url, '/'));
+        $absoluteUrl = sprintf('%s%s/%s', $this->originForSiteDomain($siteDomain), rtrim($siteDomain->path ?? '', '/'), ltrim($url, '/'));
 
         return $this->pathForRequestUrl($absoluteUrl, $siteDomain, $error);
     }
@@ -111,6 +124,7 @@ final class HtmlCachePathResolver
         } elseif ($domainPath === '') {
             $base .= '/pc__index__pc';
         }
+
         $base .= StatelessPaginationRequest::cacheKeySuffix($request);
 
         return [$base . '.html', $base . PageCache::ERROR_EXTENSION];
@@ -121,6 +135,14 @@ final class HtmlCachePathResolver
         $path = parse_url($url, PHP_URL_PATH);
 
         return is_string($path) && $path !== '' ? $path : '/';
+    }
+
+    private function originForSiteDomain(SiteDomain $siteDomain): string
+    {
+        $this->assertSafeSegment('scheme', $siteDomain->scheme);
+        $this->assertSafeSegment('domain', $siteDomain->domain);
+
+        return sprintf('%s://%s%s', $siteDomain->scheme, $siteDomain->domain, $siteDomain->port === null ? '' : ':' . $siteDomain->port);
     }
 
     /** @return list<string>|null */
@@ -134,6 +156,7 @@ final class HtmlCachePathResolver
             if (! is_string($segment)) {
                 return null;
             }
+
             $decodedSegment = $this->fullyDecodedSegment($segment);
             $relativePathLength += strlen($segment) + 1;
 
@@ -144,6 +167,7 @@ final class HtmlCachePathResolver
                 || preg_match('/[\x00-\x1F\x7F\/\\\\]/', $decodedSegment) === 1) {
                 return null;
             }
+
             $safeSegments[] = $segment;
         }
 

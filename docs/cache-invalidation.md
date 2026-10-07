@@ -23,9 +23,57 @@ Route/structure model creates and deletes still trigger broad invalidation becau
 
 Domain non-resolution is treated as an obsolete-domain policy, including preview-excluded domains and temporarily disabled sites. If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete. While caching and cache writes are enabled, it deletes the old cache files and removes matching `cached_model_urls` rows; otherwise it leaves the artefacts intact and the refresh retryable.
 
+## Cache Root Layout
+
+An absent port, port 80 and port 443 retain the existing layout byte for byte,
+regardless of perceived scheme or whether the port is an integer or string:
+`http.example.test` and `https.example.test`. Homepage files remain `pc__index__pc.html`; `/form` remains
+`form.html`, with `form.404.html` for a cached 404. This is a compatibility contract:
+nginx reads these files directly using a configured scheme/host root, for example
+`set $capell_page_cache_root /page-cache/https.capell.app`, followed by
+`try_files $capell_page_cache_root/pc__index__pc.html` or
+`$capell_page_cache_root$uri.html` before falling back to PHP.
+
+Only other ports add a separate top-level component, for example
+`~port-8080/http.example.test/form.html` or `~port-8443/https.example.test/form.html`.
+A standard scheme/host root can never match this component. Request ports come from the effective origin, including
+forwarded headers only when the proxy is trusted. Domain-relative paths use the
+configured site-domain origin, including its port. Eligibility diagnostics select
+the inspected origin only for non-standard ports; standard-port diagnostics retain
+their historical ambient request root, including cross-scheme inspections. Historical
+domain overrides still identify their owning scheme/host; the URL supplies the
+serving port.
+
+Stale and static warmers retain a Host port only for non-standard ports. Both 80
+and 443 retain the historical bare Host header, even across schemes, and therefore
+retain the scheme's effective request port and site-selection behaviour. For
+non-standard ports, refresh publication derives the current request key
+even when an old stale row stores a root from before port isolation, and does not
+overwrite standard-port HTML. Standard ports publish to the stored path unchanged,
+including historical keys and domain aliases. Port-only domain saves retain the
+existing site-surrogate invalidation; they do not add a full-clear job. Domain invalidation does not automatically warm pages:
+the next cacheable request rebuilds a cleared entry. Exact purges stay inside the
+resolved origin root. URL hashes and stale keys already retain ports; withdrawal counters deliberately fence every port and query
+variant of a host/path, and the publication generation remains shared by the disk.
+
+Broad model and page-surrogate clears discover sibling port roots on disk as well
+as indexed URLs, so a queued dependency-registration job cannot leave another
+port's copy readable. Site-surrogate clearing also removes matching non-standard
+domain directories, including mounted site paths, when pages have no model index.
+It fences in-flight publication even before an origin directory exists. Unindexed
+standard-port directories retain their existing policy; exact URL clears still
+preserve neighbouring ports. Native URL deletion strips the complete domain root
+before checking descendants: a port root has two components, not one.
+
+Publication and generic filesystem operations verify the resolved target or its
+deepest existing ancestor against the resolved cache root before creating
+directories, writing or deleting. Pre-existing symlinks cannot redirect those
+operations outside the disk; tracked URL deletion additionally refuses symlinked
+descendants within its owning domain.
+
 ## Stored Keys And Exact Clearing
 
-Stored keys are unchanged from `origin/main`. Allow-listed query parameters and the `X-Fragment` marker still share one `~<16-hex>` hash; requests without either use the canonical filename without a hash. Existing full-response and combined-fragment files remain readable after upgrade. Publication does not add a separate `~f` fragment suffix.
+Relative stored keys are unchanged. Allow-listed query parameters and the `X-Fragment` marker still share one `~<16-hex>` hash; requests without either use the canonical filename without a hash. Existing standard-port full-response and combined-fragment files remain readable after upgrade. Non-standard ports use the isolated roots above. Publication does not add a separate `~f` fragment suffix.
 
 URL clearing and retirement reconcile current keys with historical row and index paths, removing HTML, 404 files and fragment sidecars within the owning site/domain directory. Stored paths cannot cross the cache root or follow symlinks. When historical ownership cannot be resolved, explicit clears delete the selected tracking rows and purge the edge URL, skip filesystem deletion, and return false; observer and job callers do not throw or guess a filename. Artefacts attributable to a URL through its request key, `cached_model_urls`, or recorded `stale_cached_urls` paths are cleared exactly. Recorded neighbours, including other query variants, retain their files byte-for-byte and their index rows. Independently keyed `~f` fragment artefacts, where present, are also attributable to their query variant.
 
@@ -316,10 +364,6 @@ RecordCachedModelUrlsAction::run($url, [
 Hit telemetry is operational metadata, not a durable event log. Pending counters and the scheduled-flush marker expire after `hit_recording.buffer_ttl_seconds`; if queue workers remain unavailable longer than that window, some hit and byte totals can be lost. This does not affect cached HTML correctness. Monitor queue workers and set the TTL longer than the longest outage for which telemetry must be retained.
 
 ## Console
-
-```bash
-vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml
-```
 
 The package command is:
 

@@ -12,22 +12,11 @@ Start at the [package README](../README.md) when deciding whether to install thi
 | [Cache Invalidation](cache-invalidation.md) | Focused package workflow, setup, troubleshooting, or implementation details.       |
 | [Overview](overview.md)                     | Package boundary, runtime surfaces, install notes, and first troubleshooting path. |
 
-## Package Verification
+## Checking cache behaviour
 
-From this package directory, the portable aliases are:
-
-```bash
-composer test
-composer lint
-composer analyse
-```
-
-From the monorepo root, use the local overlay for routine development:
-
-```bash
-vendor/bin/pest packages/html-cache/tests --configuration=phpunit.xml
-COMPOSER=composer.local.json composer preflight
-```
+Use the [Admin Guide](admin-guide.md) to inspect cache health and the
+[Cache Invalidation guide](cache-invalidation.md) to understand refresh behaviour
+and troubleshoot stale pages in your installed application.
 
 ## Read Next
 

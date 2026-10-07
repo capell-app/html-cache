@@ -6,6 +6,8 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\HtmlCacheFilesystem;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Illuminate\Http\Request;
@@ -45,20 +47,25 @@ final class WriteRefreshedHtmlCacheFileAction
         }
 
         $safeCachePath = $this->safeCachePath($cachePath);
-        $disk = Storage::disk('page_cache');
-        $path = $disk->path($safeCachePath);
-        $root = rtrim(str_replace('\\', '/', $disk->path('')), '/');
-        $normalizedPath = str_replace('\\', '/', $path);
+        $paths = resolve(HtmlCachePathResolver::class);
 
-        if ($normalizedPath !== $root && ! str_starts_with($normalizedPath, $root . '/')) {
-            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; stale row cache path was outside the cache disk.', $staleCachedUrl->url));
+        // Only isolated origins migrate historical paths. Standard ports retain
+        // the stored publication path, including domain aliases and old keys.
+        if ($paths->nonStandardPortForRequest($request) !== null) {
+            $safeCachePath = $paths->pathForRequestUrl($request, error: $response->getStatusCode() === Response::HTTP_NOT_FOUND);
         }
 
+        $disk = Storage::disk('page_cache');
+        $path = $disk->path($safeCachePath);
+        HtmlCacheFilesystem::assertContainedPath($path, $disk->path(''));
+
         return $publication->publish($token, function () use ($staleCachedUrl, $path, $content, $response, $disk, $safeCachePath): bool {
+            HtmlCacheFilesystem::assertContainedPath($path, $disk->path(''));
             File::ensureDirectoryExists(dirname($path), 0775, true);
             $replaced = $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
 
             if ($replaced && $response->getStatusCode() !== Response::HTTP_NOT_FOUND) {
+                HtmlCacheFilesystem::assertContainedPath($disk->path($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION), $disk->path(''));
                 $disk->delete($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION);
             }
 

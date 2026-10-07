@@ -40,6 +40,7 @@ use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
+use Capell\HtmlCache\Tests\Fixtures\InvalidationMatrixOuterHeaders;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -50,18 +51,6 @@ use Illuminate\Support\Facades\Storage;
 require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
-
-final class InvalidationMatrixOuterHeaders
-{
-    public function handle(Request $request, Closure $next): Response
-    {
-        $response = $next($request);
-        $response->headers->set('Cache-Control', 'private, no-store');
-        $response->headers->set('Content-Type', 'application/json');
-
-        return $response;
-    }
-}
 
 function invalidationMatrixSeed(string $url, SiteDomain $domain): CachedModelUrl
 {

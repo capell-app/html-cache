@@ -21,6 +21,8 @@ final class HtmlCacheStore
 
     private ?string $pageDirectory = null;
 
+    private ?string $resolvedRoot = null;
+
     public function __construct(FilesystemManager $storage)
     {
         $this->disk = $storage->disk('page_cache');
@@ -53,13 +55,16 @@ final class HtmlCacheStore
 
     public function path(string $file): ?string
     {
-        return $this->exists($file) ? $this->disk->path($file) : null;
+        return $this->exists($file) ? $this->diskPath($file) : null;
     }
 
     public function delete(string $file): bool
     {
+        $file = str_replace(['../', '..\\'], '', $file);
+        HtmlCacheFilesystem::assertContainedPath($this->diskPath($file), $this->root());
+
         return resolve(HtmlCachePublicationGuard::class)->invalidate(
-            fn (): bool => $this->disk->delete(str_replace(['../', '..\\'], '', $file)),
+            fn (): bool => $this->disk->delete($file),
         );
     }
 
@@ -86,10 +91,12 @@ final class HtmlCacheStore
                 if (! $this->isSafePagePath($base, $domainDirectory)) {
                     continue;
                 }
+
                 $stem = preg_replace('/\.html$/', '', $base);
                 if (! is_string($stem)) {
                     continue;
                 }
+
                 $pattern = '/^' . preg_quote($stem, '/') . '(?:~f[a-f0-9]{16})?(?:\.404)?\.(?:html|json|xml)(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
                 foreach ($this->pageFilesInDomain(dirname($base), $domainDirectory) as $file) {
                     if (preg_match($pattern, $file) === 1) {
@@ -97,20 +104,24 @@ final class HtmlCacheStore
                     }
                 }
             }
+
             $recordedStems = [];
             foreach ($recordedFiles as $file) {
                 if ($this->isSafePagePath($file, $domainDirectory)) {
                     $recordedStems[preg_replace('/(?:\.404)?\.(?:html|json|xml)$/', '', $file) ?? $file] = true;
                 }
             }
+
             foreach (array_unique($unattributableLegacyBases) as $base) {
                 if (! $this->isSafePagePath($base, $domainDirectory)) {
                     continue;
                 }
+
                 $stem = preg_replace('/\.html$/', '', $base);
                 if (! is_string($stem)) {
                     continue;
                 }
+
                 // Conservative eviction exception: legacy fragments and untracked
                 // full query responses share opaque ~<16-hex> names. Evict only
                 // unattributable artefacts on this page path in this domain;
@@ -123,16 +134,19 @@ final class HtmlCacheStore
                     }
                 }
             }
+
             $kept = [];
             foreach ($preserve as $file) {
                 $kept[$file] = true;
                 $kept[$file . PageCache::FRAGMENT_METADATA_EXTENSION] = true;
             }
+
             $deleted = false;
             foreach (array_unique($files) as $file) {
                 if (isset($kept[$file])) {
                     continue;
                 }
+
                 $deleted = $this->deletePageFiles($file, $domainDirectory) || $deleted;
             }
 
@@ -152,21 +166,29 @@ final class HtmlCacheStore
         if (is_link($absolutePath)) {
             return false;
         }
-        $segments = explode('/', $file);
-        if ($this->pageDirectory !== null) {
-            array_shift($segments);
+
+        if ($this->pageDirectory !== null && str_starts_with($absolutePath, rtrim($this->root(), '/') . '/')) {
+            try {
+                HtmlCacheFilesystem::assertContainedPath($absolutePath, $this->root());
+            } catch (RuntimeException) {
+                return false;
+            }
         }
+
+        $segments = explode('/', $this->pageDirectory === null ? $file : substr($file, strlen($domainDirectory) + 1));
         foreach ($segments as $segment) {
             $decoded = $segment;
             for ($attempt = 0; $attempt < 3; $attempt++) {
                 $decoded = rawurldecode($decoded);
             }
+
             // Encoded separators in historical filenames are literal bytes on disk;
             // Flysystem normalises actual separators but does not URL-decode paths.
             if ($segment === '' || $decoded === '.' || str_contains($decoded, '..')
                 || preg_match('/[\x00-\x1F\x7F]/', $decoded) === 1) {
                 return false;
             }
+
             $absolutePath .= '/' . $segment;
             // Flysystem's lexical normalisation does not protect against symlinked ancestors.
             if (is_link($absolutePath)) {
@@ -179,13 +201,16 @@ final class HtmlCacheStore
 
     public function put(string $file, string $contents): void
     {
-        $this->disk->put(str_replace(['../', '..\\'], '', $file), $contents);
+        $file = str_replace(['../', '..\\'], '', $file);
+        HtmlCacheFilesystem::assertContainedPath($this->diskPath($file), $this->root());
+        $this->disk->put($file, $contents);
     }
 
     public function replace(string $file, string $contents): void
     {
         $safeFile = str_replace(['../', '..\\'], '', $file);
-        $path = $this->disk->path($safeFile);
+        $path = $this->diskPath($safeFile);
+        HtmlCacheFilesystem::assertContainedPath($path, $this->root());
 
         File::ensureDirectoryExists(dirname($path), 0775, true);
         File::replace($path, $contents);
@@ -193,7 +218,35 @@ final class HtmlCacheStore
 
     public function root(): string
     {
-        return $this->disk->path('');
+        // The configured disk may be an alias. Trust that root once, then inspect
+        // every descendant beneath its real location with the usual link guards.
+        return $this->resolvedRoot ??= HtmlCacheFilesystem::resolvedPath($this->disk->path(''));
+    }
+
+    /** @return list<string> */
+    public function portDirectories(string $domainDirectory): array
+    {
+        $domainDirectory = preg_replace('/^~port-\d+\//', '', $domainDirectory) ?? $domainDirectory;
+        if (! HtmlCacheFilesystem::directoryExists($this->root())) {
+            return [];
+        }
+
+        $directories = [];
+        foreach (File::directories($this->root()) as $portDirectory) {
+            $prefix = basename($portDirectory);
+            if (preg_match('/^~port-([1-9]\d*)$/', $prefix, $matches) !== 1
+                || (int) $matches[1] > 65535 || in_array((int) $matches[1], [80, 443], true)) {
+                continue;
+            }
+
+            $directory = $prefix . '/' . $domainDirectory;
+            if ($this->isSafePagePath($directory . '/scope.html', $directory)
+                && HtmlCacheFilesystem::directoryExists($this->diskPath($directory))) {
+                $directories[] = $directory;
+            }
+        }
+
+        return $directories;
     }
 
     /** @return array<int, string> */
@@ -258,6 +311,8 @@ final class HtmlCacheStore
 
     public function deleteDirectory(string $directory): bool
     {
+        HtmlCacheFilesystem::assertContainedPath($this->diskPath($directory), $this->root());
+
         return resolve(HtmlCachePublicationGuard::class)->invalidate(fn (): bool => $this->disk->deleteDirectory($directory));
     }
 
@@ -271,6 +326,7 @@ final class HtmlCacheStore
         if ($domainDirectory !== null && ! $this->isSafePagePath($file, $domainDirectory)) {
             return false;
         }
+
         $safeFile = str_replace(['../', '..\\'], '', $file);
         $files = [$safeFile];
 
@@ -284,13 +340,19 @@ final class HtmlCacheStore
             if ($domainDirectory !== null && ! $this->isSafePagePath($artifact, $domainDirectory)) {
                 continue;
             }
+
             $nativePath = $domainDirectory === null ? null : $this->pagePath($artifact, $domainDirectory);
-            HtmlCacheFilesystem::directoryExists(dirname($nativePath ?? $this->disk->path($artifact)));
+            if ($domainDirectory === null) {
+                HtmlCacheFilesystem::assertContainedPath($this->diskPath($artifact), $this->root());
+            }
+
+            HtmlCacheFilesystem::directoryExists(dirname($nativePath ?? $this->diskPath($artifact)));
 
             if ($nativePath !== null && $this->pageFilesystem instanceof NativeFilesystem) {
                 if (! $this->pageFilesystem->exists($nativePath)) {
                     continue;
                 }
+
                 $removed = $this->pageFilesystem->delete($nativePath);
             } elseif ($this->disk->exists($artifact)) {
                 $removed = $this->disk->delete($artifact);
@@ -311,7 +373,7 @@ final class HtmlCacheStore
     /** @return list<string> */
     private function pageFilesInDomain(string $directory, string $domainDirectory): array
     {
-        $absoluteDirectory = $this->pagePath($directory, $domainDirectory) ?? $this->disk->path($directory);
+        $absoluteDirectory = $this->pagePath($directory, $domainDirectory) ?? $this->diskPath($directory);
         if (! $this->isSafePagePath($directory . '/scope.html', $domainDirectory)
             || ! HtmlCacheFilesystem::directoryExists($absoluteDirectory)) {
             return [];
@@ -344,6 +406,7 @@ final class HtmlCacheStore
 
         foreach ($this->directories() as $directory) {
             try {
+                HtmlCacheFilesystem::assertContainedPath($this->diskPath($directory), $this->root());
                 if ($this->disk->deleteDirectory($directory)) {
                     $deletedDirectories[] = $directory;
                 } else {
@@ -356,6 +419,7 @@ final class HtmlCacheStore
 
         foreach ($this->files() as $file) {
             try {
+                HtmlCacheFilesystem::assertContainedPath($this->diskPath($file), $this->root());
                 if ($this->disk->delete($file)) {
                     $deletedFiles[] = $file;
                 } else {
@@ -385,6 +449,13 @@ final class HtmlCacheStore
 
     private function directoryExists(?string $path): bool
     {
-        return HtmlCacheFilesystem::directoryExists($this->disk->path($path ?? ''));
+        return HtmlCacheFilesystem::directoryExists($this->diskPath($path ?? ''));
+    }
+
+    private function diskPath(string $file): string
+    {
+        $configuredRoot = rtrim($this->disk->path(''), '/');
+
+        return $this->root() . substr($this->disk->path($file), strlen($configuredRoot));
     }
 }

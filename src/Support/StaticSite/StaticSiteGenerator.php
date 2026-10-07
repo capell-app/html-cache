@@ -169,6 +169,7 @@ final class StaticSiteGenerator
         if (! $pathResolver->hasSafeKey($pageUrl->url)) {
             return;
         }
+
         DeleteCachedUrlArtefactsAction::run(
             Request::create($pageUrl->full_url),
             $siteDomain,
@@ -194,7 +195,7 @@ final class StaticSiteGenerator
 
         $uri = $query === null ? $path : $path . '?' . $query;
         $port = $components['port'] ?? ($scheme === 'http' ? 80 : 443);
-        $hostHeader = $port === 80 || $port === 443 ? $host : sprintf('%s:%d', $host, $port);
+        $hostHeader = in_array($port, [80, 443], true) ? $host : sprintf('%s:%d', $host, $port);
 
         $request = Request::create($uri, \Symfony\Component\HttpFoundation\Request::METHOD_GET, server: [
             'HTTP_HOST' => $hostHeader,

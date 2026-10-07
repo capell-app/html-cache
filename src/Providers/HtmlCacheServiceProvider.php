@@ -60,6 +60,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthWidget;
 use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
+use Capell\HtmlCache\Support\Cache\HtmlCacheFilesystem;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
@@ -164,6 +165,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             $domainPath = resolve(HtmlCachePathResolver::class)->rootForRequest($request);
             $cachePath = $store->path($domainPath)
                 ?? rtrim($store->root(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $domainPath;
+            HtmlCacheFilesystem::assertContainedPath($cachePath, $store->root());
 
             if (config('capell-html-cache.enabled', false) && ! is_dir($cachePath)) {
                 if (! @mkdir($cachePath, 0775, true) && ! is_dir($cachePath)) {
@@ -175,7 +177,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 }
             }
 
-            $instance->setCachePath($cachePath);
+            $instance->setCachePath($cachePath, $store->root());
             $instance->setContainer($app);
 
             return $instance;

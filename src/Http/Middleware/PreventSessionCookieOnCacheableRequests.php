@@ -16,7 +16,7 @@ final class PreventSessionCookieOnCacheableRequests
         $response = $next($request);
 
         if (
-            $request->isMethod('GET')
+            ($request->isMethod('GET') || $request->isMethod('HEAD'))
             && in_array($response->getStatusCode(), [200, 404], true)
             && $this->isPubliclyCacheableResponse($response)
         ) {

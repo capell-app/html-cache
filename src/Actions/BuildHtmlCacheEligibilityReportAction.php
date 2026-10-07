@@ -17,6 +17,7 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\PublicResponseCachePolicy;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
@@ -74,7 +75,7 @@ final class BuildHtmlCacheEligibilityReportAction
     {
         $reasons = [];
 
-        if (! $request->isMethod('GET')) {
+        if (! $request->isMethod('GET') && ! $request->isMethod('HEAD')) {
             $reasons[] = HtmlCacheEligibilityReason::NonGetRequest;
         }
 
@@ -306,7 +307,16 @@ final class BuildHtmlCacheEligibilityReportAction
 
     private function cacheState(Request $request, ?CachedModelUrl $cachedUrl, ?StaleCachedUrl $staleCachedUrl): string
     {
+        $previousRequest = null;
+        $isolatedOrigin = resolve(HtmlCachePathResolver::class)->nonStandardPortForRequest($request) !== null;
+
         try {
+            // Standard-port diagnostics retain their historical ambient read root.
+            if ($isolatedOrigin) {
+                $previousRequest = resolve('request');
+                app()->instance('request', $request);
+            }
+
             $pageCache = resolve(PageCache::class);
 
             if ($pageCache->getCachePage($request) !== false || $pageCache->getCacheErrorPage($request) !== false) {
@@ -314,6 +324,10 @@ final class BuildHtmlCacheEligibilityReportAction
             }
         } catch (Throwable) {
             return 'unknown';
+        } finally {
+            if ($previousRequest !== null) {
+                app()->instance('request', $previousRequest);
+            }
         }
 
         if ($staleCachedUrl instanceof StaleCachedUrl && ! $staleCachedUrl->isTerminal()) {

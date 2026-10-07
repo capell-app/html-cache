@@ -69,7 +69,7 @@ final class ResolveCachedUrlsForSurrogateKeysAction
      * @param  array<int, string>  $surrogateKeys
      * @return list<int>
      */
-    private function siteIds(array $surrogateKeys): array
+    public function siteIds(array $surrogateKeys): array
     {
         return array_values(array_unique(array_filter(array_map(
             static function (string $surrogateKey): ?int {

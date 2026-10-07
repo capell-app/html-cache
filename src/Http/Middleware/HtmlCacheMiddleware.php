@@ -74,6 +74,17 @@ final class HtmlCacheMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
+        $response = $this->handleRequest($request, $next);
+
+        if ($request->isMethod('HEAD')) {
+            $response->setContent('');
+        }
+
+        return $response;
+    }
+
+    private function handleRequest(Request $request, Closure $next): Response
+    {
         $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, new HtmlCacheOriginDecisionData);
         $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, false);
         $request->attributes->set(self::INCOMING_SESSION_COOKIE_ATTRIBUTE, $this->hasSessionCookie($request));
@@ -131,8 +142,7 @@ final class HtmlCacheMiddleware
 
             if (is_string($cachedPage)) {
                 $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
-                RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
-                ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
+                $this->recordCacheHit($request, strlen((string) $response->getContent()));
 
                 return $response;
             }
@@ -140,14 +150,13 @@ final class HtmlCacheMiddleware
             $cachedErrorPage = $pageCache->getCacheErrorPage($request);
 
             if (is_string($cachedErrorPage)) {
-                RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
-                ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
+                $this->recordCacheHit($request, strlen($cachedErrorPage));
 
                 return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, 404, PageCache::ERROR_EXTENSION);
             }
         }
 
-        if (! $forceCacheReadBypass && $this->shouldCoalesce($request)) {
+        if (! $forceCacheReadBypass && ! $request->isMethod('HEAD') && $this->shouldCoalesce($request)) {
             $lock = Cache::lock(
                 'capell-html-cache:render:' . hash('sha256', $request->fullUrl()),
                 $this->positiveConfigInteger('capell-html-cache.request_coalescing.lock_seconds', 15),
@@ -260,25 +269,26 @@ final class HtmlCacheMiddleware
             return $this->privateNoStore($response, $request);
         }
 
-        $cached = $this->cacheResponse($pageCache, $request, $response);
-        if ($cached) {
+        $cacheable = $this->cacheResponse($pageCache, $request, $response);
+        if ($cacheable && ! $request->isMethod('HEAD')) {
             $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, new HtmlCacheOriginDecisionData(cacheWriteSucceeded: true));
         }
-        $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, $cached);
+
+        $request->attributes->set(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE, $cacheable && ! $request->isMethod('HEAD'));
         $response->headers->set('X-Frontend-Cache', 'MISS');
 
         if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
             return $this->privateNoStore($response, $request);
         }
 
-        if ($cached) {
+        if ($cacheable) {
             $this->stripConfiguredCookies($response);
         }
 
         return $this->applyCacheHeaders(
             $request,
             $response,
-            forcePublic: $cached && ! $this->hasFragmentCacheData($request),
+            forcePublic: $cacheable && ! $this->hasFragmentCacheData($request),
         );
     }
 
@@ -288,8 +298,7 @@ final class HtmlCacheMiddleware
 
         if (is_string($cachedPage)) {
             $response = $this->cachedPageResponse($pageCache, $request, $cachedPage, Response::HTTP_OK);
-            RecordHtmlCacheHitAction::run($request, strlen((string) $response->getContent()));
-            ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
+            $this->recordCacheHit($request, strlen((string) $response->getContent()));
 
             return $response;
         }
@@ -297,13 +306,22 @@ final class HtmlCacheMiddleware
         $cachedErrorPage = $pageCache->getCacheErrorPage($request);
 
         if (is_string($cachedErrorPage)) {
-            RecordHtmlCacheHitAction::run($request, strlen($cachedErrorPage));
-            ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
+            $this->recordCacheHit($request, strlen($cachedErrorPage));
 
             return $this->cachedPageResponse($pageCache, $request, $cachedErrorPage, Response::HTTP_NOT_FOUND, PageCache::ERROR_EXTENSION);
         }
 
         return null;
+    }
+
+    private function recordCacheHit(Request $request, int $bytesServed): void
+    {
+        if ($request->isMethod('HEAD')) {
+            return;
+        }
+
+        RecordHtmlCacheHitAction::run($request, $bytesServed);
+        ScheduleOriginStaleCachedUrlRefreshAction::run($request->fullUrl());
     }
 
     private function containsUnsafeSharedHtml(Request $request, Response $response): bool
@@ -348,6 +366,10 @@ final class HtmlCacheMiddleware
 
     private function retireOriginResponse(Request $request, Response $response): void
     {
+        if ($request->isMethod('HEAD')) {
+            return;
+        }
+
         $request->attributes->set(self::ORIGIN_DECISION_ATTRIBUTE, BuildHtmlCacheOriginDecisionAction::run($request, $response));
         RetireCachedUrlAction::run($request, $response);
     }
@@ -407,7 +429,7 @@ final class HtmlCacheMiddleware
 
     private function shouldBypassCacheRead(Request $request): bool
     {
-        if (! $request->isMethod('GET')) {
+        if (! $request->isMethod('GET') && ! $request->isMethod('HEAD')) {
             return true;
         }
 
@@ -492,6 +514,10 @@ final class HtmlCacheMiddleware
             if (! $this->hasFragmentCacheData($request)) {
                 return false;
             }
+        }
+
+        if ($request->isMethod('HEAD')) {
+            return true;
         }
 
         try {
@@ -590,6 +616,15 @@ final class HtmlCacheMiddleware
 
     private function cachedPageResponse(PageCache $pageCache, Request $request, string $content, int $statusCode, string $extension = '.html'): Response
     {
+        if ($request->isMethod('HEAD')) {
+            return $this->cacheHitResponse(
+                $request,
+                '',
+                $statusCode,
+                fragmented: $pageCache->hasCacheFragmentData($request, $extension),
+            );
+        }
+
         $fragmentCache = $pageCache->getCacheFragmentData($request, $extension);
 
         if (! $fragmentCache instanceof RenderHookFragmentCacheData) {
@@ -673,7 +708,7 @@ final class HtmlCacheMiddleware
         }
 
         if (! $forcePublic && (
-            ! $request->isMethod('GET')
+            (! $request->isMethod('GET') && ! $request->isMethod('HEAD'))
             || $this->sessionCookieRequiresPrivateResponse($request)
             || $request->headers->has('Authorization')
         )) {
@@ -797,7 +832,7 @@ final class HtmlCacheMiddleware
 
     private function stripCookiesForCacheableAnonymousRequest(Request $request, Response $response): Response
     {
-        if (! $request->isMethod('GET') || $this->sessionCookieRequiresPrivateResponse($request) || $request->headers->has('Authorization')) {
+        if ((! $request->isMethod('GET') && ! $request->isMethod('HEAD')) || $this->sessionCookieRequiresPrivateResponse($request) || $request->headers->has('Authorization')) {
             return $response;
         }
 

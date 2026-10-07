@@ -44,6 +44,7 @@ final class RefreshCachedUrlAtomicallyAction
         if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
             throw new RuntimeException('Unsupported query parameters have no HTML cache path.');
         }
+
         $request->attributes->set(HtmlCacheMiddleware::SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE, $suppressInlineEdgePurge);
         $resolved = LoadSiteDomainFromUrlAction::run($staleCachedUrl->url);
         $siteDomain = is_array($resolved) ? $resolved[0] : null;
@@ -52,6 +53,7 @@ final class RefreshCachedUrlAtomicallyAction
             if (config('capell-html-cache.enabled', true) !== true || config('capell-html-cache.write_enabled', true) !== true) {
                 throw new RuntimeException('Unable to retire obsolete HTML cache while cache writes are disabled.');
             }
+
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
             $this->deleteConfirmedObsoleteCache($staleCachedUrl, $suppressInlineEdgePurge);
 
@@ -173,7 +175,7 @@ final class RefreshCachedUrlAtomicallyAction
 
         $uri = $query === null ? $path : $path . '?' . $query;
         $port = $components['port'] ?? ($scheme === 'http' ? 80 : 443);
-        $hostHeader = $port === 80 || $port === 443 ? $host : sprintf('%s:%d', $host, $port);
+        $hostHeader = in_array($port, [80, 443], true) ? $host : sprintf('%s:%d', $host, $port);
 
         $request = Request::create($uri, SymfonyRequest::METHOD_GET, server: [
             'HTTP_HOST' => $hostHeader,
@@ -210,9 +212,11 @@ final class RefreshCachedUrlAtomicallyAction
             if ($originDecision->rejectionReason instanceof HtmlCacheEligibilityReason) {
                 return $originDecision->rejectionReason;
             }
+
             if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
                 throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; the publication guard rejected the render twice because the cache generation advanced during each render; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
+
             throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; origin rendering or cache publication was rejected without a terminal cache policy change; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
         }
 

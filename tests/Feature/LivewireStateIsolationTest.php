@@ -4,22 +4,14 @@ declare(strict_types=1);
 
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Support\Cache\PublicResponseCachePolicy;
+use Capell\HtmlCache\Tests\Fixtures\HtmlCacheIsolationComponent;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Route;
-use Livewire\Component;
 use Livewire\Features\SupportDisablingBackButtonCache\SupportDisablingBackButtonCache;
 use Livewire\Livewire;
 
 uses(HtmlCacheTestCase::class);
-
-final class HtmlCacheIsolationComponent extends Component
-{
-    public function render(): string
-    {
-        return '<div>Livewire isolation render</div>';
-    }
-}
 
 it('renders a Livewire component outside the HTTP kernel', function (): void {
     Livewire::component('html-cache-isolation', HtmlCacheIsolationComponent::class);

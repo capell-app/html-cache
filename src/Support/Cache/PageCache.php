@@ -38,6 +38,8 @@ final class PageCache
 
     private ?string $cachePath = null;
 
+    private ?string $filesystemRoot = null;
+
     public function __construct(
         private readonly Filesystem $files,
     ) {}
@@ -49,9 +51,10 @@ final class PageCache
         return $this;
     }
 
-    public function setCachePath(string $path): self
+    public function setCachePath(string $path, ?string $filesystemRoot = null): self
     {
         $this->cachePath = rtrim($path, '\/');
+        $this->filesystemRoot = $filesystemRoot;
 
         return $this;
     }
@@ -77,6 +80,10 @@ final class PageCache
 
         /** @var Response $laravelResponse */
         $laravelResponse = $response;
+
+        if ($laravelRequest->isMethod('HEAD')) {
+            return false;
+        }
 
         if (! in_array($laravelResponse->getStatusCode(), [
             SymfonyResponse::HTTP_OK,
@@ -118,6 +125,7 @@ final class PageCache
         }
 
         $published = $publication->publish($token, function () use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
+            $this->assertContainedPath($path);
             if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
                 $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
 
@@ -135,6 +143,7 @@ final class PageCache
                 }
 
                 $fragmentMetadataPath = $errorPath . self::FRAGMENT_METADATA_EXTENSION;
+                $this->assertContainedPath($fragmentMetadataPath);
 
                 if ($fragmentCache instanceof RenderHookFragmentCacheData) {
                     $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
@@ -168,6 +177,7 @@ final class PageCache
             }
 
             $fragmentMetadataPath = $targetPath . self::FRAGMENT_METADATA_EXTENSION;
+            $this->assertContainedPath($fragmentMetadataPath);
 
             if ($fragmentCache instanceof RenderHookFragmentCacheData) {
                 $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
@@ -199,7 +209,7 @@ final class PageCache
             return false;
         }
 
-        return $this->readCacheFile($path);
+        return $this->readCacheFile($path, $this->allowsCacheMutation($request));
     }
 
     public function getCacheErrorPage(Request $request): bool|string
@@ -210,7 +220,21 @@ final class PageCache
             return false;
         }
 
-        return $this->readCacheFile($path);
+        return $this->readCacheFile($path, $this->allowsCacheMutation($request));
+    }
+
+    public function hasCacheFragmentData(Request $request, string $extension = '.html'): bool
+    {
+        $path = $this->getFileFromRequest($request, $extension);
+
+        if ($path === null) {
+            return false;
+        }
+
+        $metadataPath = $path . self::FRAGMENT_METADATA_EXTENSION;
+        $this->assertContainedPath($metadataPath);
+
+        return $this->files->exists($path) && $this->files->exists($metadataPath);
     }
 
     public function getCacheFragmentData(Request $request, string $extension = '.html'): ?RenderHookFragmentCacheData
@@ -221,11 +245,15 @@ final class PageCache
             return null;
         }
 
-        $shell = $this->readCacheFile($path);
+        $allowMutation = $this->allowsCacheMutation($request);
+        $shell = $this->readCacheFile($path, $allowMutation);
         $metadataPath = $path . self::FRAGMENT_METADATA_EXTENSION;
+        $this->assertContainedPath($metadataPath);
 
         if (! is_string($shell)) {
-            $this->files->delete($metadataPath);
+            if ($allowMutation) {
+                $this->files->delete($metadataPath);
+            }
 
             return null;
         }
@@ -238,7 +266,9 @@ final class PageCache
             return RenderHookFragmentCacheData::fromMetadata($shell, $this->decodeFragmentMetadata($metadataPath));
         } catch (Throwable $throwable) {
             report($throwable);
-            $this->files->delete($metadataPath);
+            if ($allowMutation) {
+                $this->files->delete($metadataPath);
+            }
 
             return null;
         }
@@ -276,7 +306,7 @@ final class PageCache
             return HtmlCacheEligibilityReason::InertiaRequest;
         }
 
-        if (! $request->isMethod('GET')) {
+        if (! $request->isMethod('GET') && ! $request->isMethod('HEAD')) {
             return HtmlCacheEligibilityReason::NonGetRequest;
         }
 
@@ -328,6 +358,7 @@ final class PageCache
         $directory = $this->getCachePath($path === null ? null : resolve(HtmlCachePathResolver::class)->directoryForPath($path));
 
         return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($directory): bool {
+            $this->assertContainedPath($directory);
 
             if (! HtmlCacheFilesystem::directoryExists($directory)) {
                 return false;
@@ -365,8 +396,9 @@ final class PageCache
         return $metadata;
     }
 
-    private function readCacheFile(string $path): bool|string
+    private function readCacheFile(string $path, bool $allowMutation): bool|string
     {
+        $this->assertContainedPath($path);
         if (! $this->files->exists($path)) {
             return false;
         }
@@ -378,9 +410,14 @@ final class PageCache
         $timeToLive = is_numeric($configuredTimeToLive) ? max(0, (int) $configuredTimeToLive) : 3600;
 
         if ($timeToLive > 0 && $this->files->lastModified($path) <= now()->subSeconds($timeToLive)->timestamp) {
+            if (! $allowMutation) {
+                return false;
+            }
+
             $this->files->delete($path);
 
             if (str_ends_with($path, '.html')) {
+                $this->assertContainedPath($path . self::FRAGMENT_METADATA_EXTENSION);
                 $this->files->delete($path . self::FRAGMENT_METADATA_EXTENSION);
             }
 
@@ -398,6 +435,11 @@ final class PageCache
 
             throw $throwable;
         }
+    }
+
+    private function allowsCacheMutation(Request $request): bool
+    {
+        return ! $request->isMethod('HEAD');
     }
 
     private function reserveErrorPageSlot(string $targetPath): bool
@@ -441,6 +483,7 @@ final class PageCache
         $deleted = 0;
 
         foreach (array_slice($errorPages, 0, $deleteCount) as $errorPage) {
+            $this->assertContainedPath($errorPage->getPathname());
             if ($this->files->delete($errorPage->getPathname())) {
                 $deleted++;
             }
@@ -484,9 +527,11 @@ final class PageCache
 
         usort($variants, static fn (SplFileInfo $first, SplFileInfo $second): int => $first->getMTime() <=> $second->getMTime());
 
+        $this->assertContainedPath($variants[0]->getPathname());
         $deleted = $this->files->delete($variants[0]->getPathname());
 
         if ($deleted && $extension === 'html') {
+            $this->assertContainedPath($variants[0]->getPathname() . self::FRAGMENT_METADATA_EXTENSION);
             $this->files->delete($variants[0]->getPathname() . self::FRAGMENT_METADATA_EXTENSION);
         }
 
@@ -648,6 +693,7 @@ final class PageCache
 
     private function writeCacheFile(Request $request, string $path, string $content): bool
     {
+        $this->assertContainedPath($path);
         $staleCachedUrlId = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE);
         $claimToken = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
 
@@ -708,5 +754,10 @@ final class PageCache
     private function temporaryPathForAtomicReplace(string $path): string
     {
         return dirname($path) . DIRECTORY_SEPARATOR . basename($path) . '.tmp.' . Str::uuid()->toString();
+    }
+
+    private function assertContainedPath(string $path): void
+    {
+        HtmlCacheFilesystem::assertContainedPath($path, $this->filesystemRoot ?? $this->getCachePath());
     }
 }

@@ -49,10 +49,10 @@ it('removes session, csrf, and debugbar cookies from a response', function (): v
     expect($remainingCookieNames)->toBe(['keep_me']);
 });
 
-it('strips the configured cookies through the prevent-session-cookie middleware path', function (): void {
+it('strips the configured cookies through the prevent-session-cookie middleware path', function (string $method): void {
     config()->set('session.cookie', 'capell_session');
 
-    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request = Request::create('https://example.test/about', $method);
 
     $response = resolve(PreventSessionCookieOnCacheableRequests::class)->handle(
         $request,
@@ -75,7 +75,10 @@ it('strips the configured cookies through the prevent-session-cookie middleware 
     );
 
     expect($remainingCookieNames)->toBe(['keep_me']);
-});
+})->with([
+    'GET' => Symfony\Component\HttpFoundation\Request::METHOD_GET,
+    'HEAD' => Symfony\Component\HttpFoundation\Request::METHOD_HEAD,
+]);
 
 it('strips the configured cookies through the html-cache middleware path', function (): void {
     Storage::fake('page_cache');

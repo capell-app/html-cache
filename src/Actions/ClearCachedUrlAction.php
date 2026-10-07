@@ -13,6 +13,7 @@ use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
@@ -22,7 +23,7 @@ use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false)
+ * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false)
  */
 final class ClearCachedUrlAction
 {
@@ -30,7 +31,7 @@ final class ClearCachedUrlAction
     use AsJob;
     use AsObject;
 
-    public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false): bool
+    public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false): bool
     {
         $domainProvided = $siteDomain instanceof SiteDomain;
         if ($url instanceof CachedModelUrl) {
@@ -38,6 +39,7 @@ final class ClearCachedUrlAction
                 && ($siteDomain->site_id !== $url->site_id || $siteDomain->id !== $url->site_domain_id)) {
                 throw new InvalidArgumentException('The supplied site domain does not match the cached URL ownership.');
             }
+
             $selectedCachedModelUrl = $url;
             $urlString = $url->url;
         } else {
@@ -71,14 +73,15 @@ final class ClearCachedUrlAction
         $cachedModelUrls = $this->cachedModelUrls($urlString, $siteId, $siteDomainId);
 
         // An unresolved string can still clear legacy tracking, but cannot attribute files.
-        if ($selectedCachedModelUrl === null && ! $siteDomain instanceof SiteDomain) {
+        if (! $selectedCachedModelUrl instanceof CachedModelUrl && ! $siteDomain instanceof SiteDomain) {
             $cachedModelUrls = CachedModelUrl::query()
                 ->with(['language', 'siteDomain'])
                 ->where('url_hash', CachedModelUrl::hashUrl($urlString))
                 ->whereNull('site_domain_id')
                 ->get();
         }
-        if (! $domainProvided && $selectedCachedModelUrl === null && $cachedModelUrls->isEmpty() && $siteDomain instanceof SiteDomain) {
+
+        if (! $domainProvided && ! $selectedCachedModelUrl instanceof CachedModelUrl && $cachedModelUrls->isEmpty() && $siteDomain instanceof SiteDomain) {
             $cachedModelUrls = CachedModelUrl::query()
                 ->with(['language', 'siteDomain'])
                 ->where('url_hash', CachedModelUrl::hashUrl($urlString))
@@ -86,6 +89,7 @@ final class ClearCachedUrlAction
                 ->whereNull('site_domain_id')
                 ->get();
         }
+
         $unresolvedHistoricalOwner = $cachedModelUrls->contains(static fn (CachedModelUrl $row): bool => ! $row->siteDomain instanceof SiteDomain && ($row->site_id !== null || $row->site_domain_id !== null));
         if (! $domainProvided && ($unresolvedHistoricalOwner || ! $siteDomain instanceof SiteDomain)) {
             $this->purgeEdgeCache($cachedModelUrls, $urlString);
@@ -98,6 +102,31 @@ final class ClearCachedUrlAction
             ? null
             : $siteDomain;
         DeleteCachedUrlArtefactsAction::run($request, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true);
+
+        if ($allPorts) {
+            $paths = resolve(HtmlCachePathResolver::class);
+            $root = $paths->rootForRequest($request, $fileSiteDomain);
+            $copies = [];
+            if ($paths->nonStandardPortForRequest($request) !== null) {
+                $copies[] = Request::create($request->getScheme() . '://' . $request->getHost() . $request->getRequestUri());
+            }
+
+            // Publication precedes asynchronous dependency recording. Discover
+            // copies on disk, then attribute them through domains and the index.
+            foreach (resolve(HtmlCacheStore::class)->portDirectories($root) as $directory) {
+                if (preg_match('/^~port-(\d+)\//', $directory, $matches) === 1 && (int) $matches[1] !== $request->getPort()) {
+                    $copies[] = Request::create($request->getScheme() . '://' . $request->getHost() . ':' . $matches[1] . $request->getRequestUri());
+                }
+            }
+
+            foreach ($copies as $copy) {
+                if (! CanClearHtmlCachePortCopyAction::run($copy, $fileSiteDomain)) {
+                    continue;
+                }
+
+                DeleteCachedUrlArtefactsAction::run($copy, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true);
+            }
+        }
 
         $this->purgeEdgeCache($cachedModelUrls, $urlString);
         $cachedModelUrls->each->delete();

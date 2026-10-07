@@ -36,7 +36,7 @@ final class ClearCachedUrlsForModelAction
                 ->where('url_hash', CachedModelUrl::hashUrl($url))
                 ->first();
 
-            if (ClearCachedUrlAction::run($cachedUrl ?? $url, refresh: $refresh)) {
+            if (ClearCachedUrlAction::run($cachedUrl ?? $url, refresh: $refresh, allPorts: true)) {
                 $cleared++;
             }
         }

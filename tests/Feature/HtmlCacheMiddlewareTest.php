@@ -9,6 +9,7 @@ use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\RenderHookExtensionInterface;
 use Capell\Frontend\Data\RenderHookContext;
 use Capell\Frontend\Data\RenderHookContributionData;
+use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\Frontend\Enums\RenderHookLocation;
 use Capell\Frontend\Support\Render\RenderHookFragmentRegistry;
 use Capell\Frontend\Support\Render\RenderHookRegistry;
@@ -23,11 +24,14 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -37,7 +41,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Cookie;
 
-require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -89,6 +93,259 @@ beforeEach(function (): void {
     config()->set('capell-html-cache.cache_ttl', '3600');
     config()->set('capell-html-cache.filesystem_ttl_seconds', 3600);
     Cache::clear();
+});
+
+it('does not populate the page cache from a cold HEAD and keeps the subsequent GET body complete', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $url = 'https://example.test/head-cold';
+    $headRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_HEAD);
+    app()->instance('request', $headRequest);
+
+    $headResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $headRequest,
+        fn (): Response => response('<main>head origin</main>', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect($headResponse->getContent())->toBe('')
+        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+
+    $getRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $getRequest);
+
+    $getResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $getRequest,
+        fn (): Response => response('<main>complete GET body</main>', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect($getResponse->getContent())->toBe('<main>complete GET body</main>')
+        ->and(Storage::disk('page_cache')->get('https.example.test/head-cold.html'))->toBe('<main>complete GET body</main>')
+        ->and($headResponse->headers->get('Cache-Control'))->toBe($getResponse->headers->get('Cache-Control'))
+        ->and($headResponse->headers->get('Vary'))->toBe($getResponse->headers->get('Vary'));
+});
+
+it('serves warm public cache headers for HEAD without mutating the entry or recording a hit', function (): void {
+    Storage::fake('page_cache');
+    Queue::fake();
+    Bus::fake();
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $url = 'https://example.test/head-warm';
+    $getRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $getRequest);
+    $getResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $getRequest,
+        fn (): Response => response('<main>warm body</main>', 200, ['Content-Type' => 'text/html']),
+    );
+    $cachedFilesBeforeHead = collect(Storage::disk('page_cache')->allFiles())
+        ->mapWithKeys(static fn (string $file): array => [$file => Storage::disk('page_cache')->get($file)])
+        ->all();
+
+    $headRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_HEAD);
+    app()->instance('request', $headRequest);
+    $headResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $headRequest,
+        fn (): Response => throw new RuntimeException('warm HEAD reached the origin'),
+    );
+
+    $cachedFilesAfterHead = collect(Storage::disk('page_cache')->allFiles())
+        ->mapWithKeys(static fn (string $file): array => [$file => Storage::disk('page_cache')->get($file)])
+        ->all();
+    $hitBatch = resolve(HtmlCacheHitBuffer::class)->snapshot(CachedModelUrl::hashUrl($url));
+
+    expect($headResponse->getContent())->toBe('')
+        ->and($headResponse->headers->get('X-Frontend-Cache'))->toBe('HIT')
+        ->and($headResponse->headers->get('Cache-Control'))->toBe($getResponse->headers->get('Cache-Control'))
+        ->and($headResponse->headers->get('Vary'))->toBe($getResponse->headers->get('Vary'))
+        ->and($headResponse->headers->get('Surrogate-Key'))->toBe($getResponse->headers->get('Surrogate-Key'))
+        ->and($headResponse->headers->get('Cache-Tag'))->toBe($getResponse->headers->get('Cache-Tag'))
+        ->and($headResponse->headers->getCookies())->toBe([])
+        ->and($cachedFilesAfterHead)->toBe($cachedFilesBeforeHead)
+        ->and($hitBatch->hasHits())->toBeFalse()
+        ->and($hitBatch->bytesServed)->toBe(0);
+
+    Queue::assertNotPushed(FlushHtmlCacheHitBatchJob::class);
+    Bus::assertNotDispatched(RefreshOriginStaleCachedUrlJob::class);
+});
+
+it('does not mutate a warm fragment cache entry when serving HEAD', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $url = 'https://example.test/head-fragment';
+    $fragmentShell = '<main>fragment shell</main>';
+    $fragmentPath = 'https.example.test/head-fragment.html';
+    $fragmentMetadataPath = $fragmentPath . PageCache::FRAGMENT_METADATA_EXTENSION;
+    Storage::disk('page_cache')->put($fragmentPath, $fragmentShell);
+    Storage::disk('page_cache')->put(
+        $fragmentMetadataPath,
+        json_encode(new RenderHookFragmentCacheData($fragmentShell, [])->metadata(), JSON_THROW_ON_ERROR),
+    );
+    $cachedFilesBeforeHead = collect(Storage::disk('page_cache')->allFiles())
+        ->mapWithKeys(static fn (string $file): array => [$file => Storage::disk('page_cache')->get($file)])
+        ->all();
+
+    $headRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_HEAD);
+    app()->instance('request', $headRequest);
+    $headResponse = resolve(HtmlCacheMiddleware::class)->handle(
+        $headRequest,
+        fn (): Response => throw new RuntimeException('fragment HEAD reached the origin'),
+    );
+
+    $cachedFilesAfterHead = collect(Storage::disk('page_cache')->allFiles())
+        ->mapWithKeys(static fn (string $file): array => [$file => Storage::disk('page_cache')->get($file)])
+        ->all();
+
+    expect($headResponse->getContent())->toBe('')
+        ->and((string) $headResponse->headers->get('Cache-Control'))->toContain('private')
+        ->and((string) $headResponse->headers->get('Cache-Control'))->toContain('no-store')
+        ->and($cachedFilesAfterHead)->toBe($cachedFilesBeforeHead);
+});
+
+it('preserves expired page and error cache artefacts for HEAD on bypass and miss paths', function (string $branch, int $status, string $cacheSuffix): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.filesystem_ttl_seconds', 60);
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $path = '/expired-head-' . $branch . '-' . $cacheSuffix;
+    $url = 'https://example.test' . $path;
+    $cachePath = 'https.example.test' . $path . ($status === 404 ? '.404.html' : '.html');
+    $metadataPath = $cachePath . PageCache::FRAGMENT_METADATA_EXTENSION;
+    $cachedContent = 'expired ' . $cacheSuffix . ' content';
+    $cachedMetadata = '{"fragment":"original"}';
+
+    Storage::disk('page_cache')->put($cachePath, $cachedContent);
+    Storage::disk('page_cache')->put($metadataPath, $cachedMetadata);
+    touch(Storage::disk('page_cache')->path($cachePath), now()->subSeconds(61)->getTimestamp());
+
+    $request = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_HEAD);
+    if ($branch === 'bypass') {
+        $request->headers->set('X-Livewire', 'true');
+    }
+
+    app()->instance('request', $request);
+
+    resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        static fn (): Response => response(
+            'fresh ' . $cacheSuffix . ' content',
+            $status,
+            ['Content-Type' => 'text/html'],
+        ),
+    );
+
+    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe($cachedContent)
+        ->and(Storage::disk('page_cache')->exists($metadataPath))->toBeTrue()
+        ->and(Storage::disk('page_cache')->get($metadataPath))->toBe($cachedMetadata);
+})->with([
+    'page on bypass' => ['bypass', 200, 'page'],
+    'page on miss' => ['miss', 200, 'page'],
+    'error page on bypass' => ['bypass', 404, 'error'],
+    'error page on miss' => ['miss', 404, 'error'],
+]);
+
+it('keeps GET expiry cleanup for page and error cache artefacts', function (int $status, string $cacheSuffix): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.filesystem_ttl_seconds', 60);
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+
+    $path = '/expired-get-' . $cacheSuffix;
+    $request = Request::create('https://example.test' . $path, Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    $cachePath = 'https.example.test' . $path . ($status === 404 ? '.404.html' : '.html');
+    $metadataPath = $cachePath . PageCache::FRAGMENT_METADATA_EXTENSION;
+
+    Storage::disk('page_cache')->put($cachePath, 'expired ' . $cacheSuffix . ' content');
+    Storage::disk('page_cache')->put($metadataPath, '{"fragment":"original"}');
+    touch(Storage::disk('page_cache')->path($cachePath), now()->subSeconds(61)->getTimestamp());
+
+    $cached = $status === 404
+        ? resolve(PageCache::class)->getCacheErrorPage($request)
+        : resolve(PageCache::class)->getCachePage($request);
+
+    expect($cached)->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->exists($metadataPath))->toBeFalse();
+})->with([
+    'page' => [200, 'page'],
+    'error page' => [404, 'error'],
+]);
+
+it('keeps HEAD private and uncached for every existing private GET state', function (): void {
+    $privateCases = [
+        'signed-in user' => static function (Request $request): void {
+            $user = User::factory()->create();
+            $request->setUserResolver(static fn (): User => $user);
+        },
+        'response cookie' => static function (Request $request): void {},
+        'flashed session' => static function (Request $request): void {
+            $request->setLaravelSession(resolve(Session::class));
+            session()->flash('status', 'private');
+        },
+        'excluded route' => static function (Request $request): void {
+            config()->set('capell-html-cache.bypass.paths', ['/private/*']);
+        },
+        'without_html_cache' => static function (Request $request): void {},
+    ];
+
+    foreach ($privateCases as $case => $configureRequest) {
+        config()->set('capell-html-cache.bypass.paths', []);
+        $path = match ($case) {
+            'excluded route' => '/private/' . str_replace(' ', '-', $case),
+            'without_html_cache' => '/private/' . str_replace(' ', '-', $case) . '?without_html_cache=1',
+            default => '/private/' . str_replace(' ', '-', $case),
+        };
+
+        foreach ([
+            'GET' => Symfony\Component\HttpFoundation\Request::METHOD_GET,
+            'HEAD' => Symfony\Component\HttpFoundation\Request::METHOD_HEAD,
+        ] as $method) {
+            $request = Request::create('https://example.test' . $path, $method);
+            app()->instance('request', $request);
+            $configureRequest($request);
+
+            $response = resolve(HtmlCacheMiddleware::class)->handle(
+                $request,
+                function () use ($case): Response {
+                    $response = response('<main>' . $case . '</main>', 200, ['Content-Type' => 'text/html']);
+
+                    if ($case === 'response cookie') {
+                        $response->headers->setCookie(new Cookie('personalisation', 'one'));
+                    }
+
+                    return $response;
+                },
+            );
+
+            expect($response->headers->get('Cache-Control'))
+                ->toContain('private')
+                ->toContain('no-store')
+                ->and($response->getContent())
+                ->toBe($method === 'HEAD' ? '' : '<main>' . $case . '</main>');
+        }
+    }
 });
 
 it('creates host cache directories group-writable for CLI cache maintenance', function (): void {
@@ -154,6 +411,7 @@ it('reconstructs the same cached shell for two request-specific fragment states'
     $url = 'https://example.test/fragment';
     $firstRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $firstRequest->headers->set('X-Test-Region', 'uk');
+
     app()->instance('request', $firstRequest);
 
     $firstResponse = resolve(HtmlCacheMiddleware::class)->handle(
@@ -180,6 +438,7 @@ it('reconstructs the same cached shell for two request-specific fragment states'
 
     $secondRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $secondRequest->headers->set('X-Test-Region', 'outside');
+
     app()->instance('request', $secondRequest);
 
     $secondResponse = resolve(HtmlCacheMiddleware::class)->handle(
@@ -792,7 +1051,7 @@ it('rejects cache eligibility for unsafe request and response states', function 
     $livewireRequest->headers->set('x-livewire', 'true');
 
     $sessionRequest = Request::create('https://example.test/about');
-    $sessionRequest->setLaravelSession(session()->driver());
+    $sessionRequest->setLaravelSession(resolve(Session::class));
 
     session()->put('_old_input', ['email' => 'ben@example.test']);
 
@@ -981,6 +1240,7 @@ it('reconstructs marked fragments in cached 404 html', function (): void {
     $url = 'https://example.test/missing-fragment';
     $firstRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $firstRequest->headers->set('X-Test-Region', 'uk');
+
     app()->instance('request', $firstRequest);
 
     $firstResponse = resolve(HtmlCacheMiddleware::class)->handle(
@@ -999,6 +1259,7 @@ it('reconstructs marked fragments in cached 404 html', function (): void {
 
     $secondRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     $secondRequest->headers->set('X-Test-Region', 'outside');
+
     app()->instance('request', $secondRequest);
 
     $secondResponse = resolve(HtmlCacheMiddleware::class)->handle(
@@ -1165,7 +1426,7 @@ it('serves stale cached html until the queued origin refresh runs', function ():
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
         ->and(Storage::disk('page_cache')->get($cachePath))->toBe('old cached html');
     Queue::assertPushed(RefreshOriginStaleCachedUrlJob::class, 1);
-    (new RefreshOriginStaleCachedUrlJob($url))->handle();
+    new RefreshOriginStaleCachedUrlJob($url)->handle();
 
     capell_expect($response->getContent())->toBe('old cached html')
         ->and($staleCachedUrl->refresh()->last_error)->toBeNull()

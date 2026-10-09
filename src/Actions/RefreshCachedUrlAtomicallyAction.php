@@ -8,6 +8,7 @@ use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
@@ -20,8 +21,10 @@ use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
+use Closure;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -65,10 +68,14 @@ final class RefreshCachedUrlAtomicallyAction
         try {
             $response = $this->renderOrigin($request);
 
-            if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {
+            if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true
+                && ! $this->isDeclinedNotFoundWrite($request, $response)) {
                 // The generation advanced while this render ran, so the page is unproven
                 // rather than wrong. Render once more under a fresh token inside the same
-                // claim before counting the row as a failure.
+                // claim before counting the row as a failure. A declined 404 write is not a
+                // generation problem and is retired below instead of rendered again; any
+                // other declined write (a failed 200 write may be transient) still gets this
+                // second render.
                 $request = $this->requestForStaleCachedUrl($staleCachedUrl);
                 $request->attributes->set(HtmlCacheMiddleware::SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE, $suppressInlineEdgePurge);
                 $response = $this->renderOrigin($request);
@@ -79,6 +86,8 @@ final class RefreshCachedUrlAtomicallyAction
             }
 
             $this->assertStaleCachedUrlClaimIsCurrent($staleCachedUrl);
+            $this->retireRejectedNotFound($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
+
             $retirementReason = RetireCachedUrlAction::run($request, $response, $staleCachedUrl, $suppressInlineEdgePurge)
                 ?? $this->retireUnguardedOriginResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
             $rejectionReason = $retirementReason ?? $this->writeCacheFromRefreshResponse($request, $response, $staleCachedUrl, $suppressInlineEdgePurge);
@@ -110,6 +119,12 @@ final class RefreshCachedUrlAtomicallyAction
         }
     }
 
+    private function isDeclinedNotFoundWrite(Request $request, Response $response): bool
+    {
+        return $response->getStatusCode() === Response::HTTP_NOT_FOUND
+            && $request->attributes->get(PageCache::WRITE_DECLINED_ATTRIBUTE) === true;
+    }
+
     private function renderOrigin(Request $request): Response
     {
         resolve(HtmlCachePublicationGuard::class)->capture($request);
@@ -120,6 +135,78 @@ final class RefreshCachedUrlAtomicallyAction
         $kernel->terminate($request, $response);
 
         return $response;
+    }
+
+    /**
+     * A 404 refresh whose cache write was declined although the response was eligible
+     * cannot be repeated into success: the error page cap refuses the slot, the write
+     * fails, or the middleware declines before publishing and records no reason. 404
+     * statuses never carry a deterministic retirement reason, so the generic path would
+     * fail the row, and the queued job, on every retry while the stale bytes kept
+     * serving. Evict the stale artefacts so the next request renders live and finish
+     * the row as not applicable so it stays visible.
+     *
+     * Anything that may still change on a retry stays retryable: a moved publication
+     * generation (rejected without a declined write), a reclaimed row, a failed
+     * fragment, disabled writes, and any response with a recorded ineligibility,
+     * rejection or retirement reason (a non-accepted status says nothing about the
+     * URL's lasting policy).
+     */
+    private function retireRejectedNotFound(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): void
+    {
+        $decision = HtmlCacheOriginDecisionData::forRequest($request);
+        $report = $request->attributes->get(HtmlCacheMiddleware::ELIGIBILITY_REPORT_ATTRIBUTE);
+        $generationMoved = $request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true
+            && $request->attributes->get(PageCache::WRITE_DECLINED_ATTRIBUTE) !== true;
+
+        if ($response->getStatusCode() !== Response::HTTP_NOT_FOUND
+            || ! $decision instanceof HtmlCacheOriginDecisionData
+            || ! $report instanceof HtmlCacheEligibilityReportData
+            || ! $report->eligible
+            || $decision->cacheWriteSucceeded
+            || $decision->retirementReason instanceof HtmlCacheEligibilityReason
+            || $decision->rejectionReason instanceof HtmlCacheEligibilityReason
+            || config('capell-html-cache.enabled', true) !== true
+            || config('capell-html-cache.write_enabled', true) !== true
+            || $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_RENDER_FAILED_ATTRIBUTE) === true
+            || $generationMoved) {
+            return;
+        }
+
+        $claimToken = $staleCachedUrl->claim_token;
+        // Runs inside the publication lock, like the publish path: take the row lock and
+        // re-check the claim before any file is removed, so a newer owner's page survives.
+        $underClaim = static fn (Closure $delete): bool => DB::transaction(static function () use ($staleCachedUrl, $claimToken, $delete): bool {
+            $current = StaleCachedUrl::query()
+                ->whereKey($staleCachedUrl->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if (! $current instanceof StaleCachedUrl
+                || $current->status !== StaleCachedUrl::STATUS_PROCESSING
+                || ! is_string($claimToken)
+                || $current->claim_token !== $claimToken) {
+                throw new RuntimeException(sprintf('Unable to retire the cached 404 for "%s"; stale row claim is no longer current.', $staleCachedUrl->url));
+            }
+
+            return $delete();
+        });
+
+        resolve(RetireCachedUrlAction::class)->evict(
+            $staleCachedUrl->url,
+            $staleCachedUrl->cache_path,
+            $staleCachedUrl->error_cache_path,
+            $staleCachedUrl->site_id,
+            $staleCachedUrl->site_domain_id,
+            $suppressInlineEdgePurge,
+            $request,
+            $underClaim,
+        );
+
+        throw new StaleCachedUrlNotApplicableException(
+            HtmlCacheEligibilityReason::UncacheableResponseStatus,
+            sprintf('Retired the cached 404 for "%s"; its refreshed response was not accepted for caching and no policy change was recorded, so the next request renders live.', $staleCachedUrl->url),
+        );
     }
 
     /**
@@ -211,6 +298,10 @@ final class RefreshCachedUrlAtomicallyAction
         if ($originDecision instanceof HtmlCacheOriginDecisionData && ! $originDecision->cacheWriteSucceeded) {
             if ($originDecision->rejectionReason instanceof HtmlCacheEligibilityReason) {
                 return $originDecision->rejectionReason;
+            }
+
+            if ($request->attributes->get(PageCache::WRITE_DECLINED_ATTRIBUTE) === true) {
+                throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; the cache write was refused or failed while the publication generation was unchanged; response status was %d.', $staleCachedUrl->url, $response->getStatusCode()));
             }
 
             if ($request->attributes->get(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE) === true) {

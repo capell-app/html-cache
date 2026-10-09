@@ -14,6 +14,7 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
+use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -73,7 +74,10 @@ final class RetireCachedUrlAction
         return $reason;
     }
 
-    public function evict(string $url, ?string $cachePath, ?string $errorCachePath, ?int $siteId, ?int $siteDomainId, bool $suppressInlineEdgePurge = false, ?Request $request = null): void
+    /**
+     * @param  Closure(Closure(): bool): bool|null  $guard  see HtmlCacheStore::deletePagesInDomain(); throw from it to abort before tracking is cleared
+     */
+    public function evict(string $url, ?string $cachePath, ?string $errorCachePath, ?int $siteId, ?int $siteDomainId, bool $suppressInlineEdgePurge = false, ?Request $request = null, ?Closure $guard = null): void
     {
         if (! resolve(HtmlCachePathResolver::class)->hasSafeKey($url)) {
             return;
@@ -101,6 +105,7 @@ final class RetireCachedUrlAction
             $storedPaths,
             includeVariants: $request === null || ! $request->headers->has(StatelessPaginationRequest::FRAGMENT_HEADER),
             rotateWhenUnchanged: false,
+            guard: $guard,
         );
         // Static generator consumers can run before optional tracking migrations are installed.
         if (Schema::hasTable((new CachedModelUrl)->getTable())) {

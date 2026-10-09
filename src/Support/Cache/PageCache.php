@@ -34,6 +34,15 @@ final class PageCache
 
     public const string FRAGMENT_METADATA_EXTENSION = '.fragments.json';
 
+    /**
+     * Set, alongside the publication-guard rejection, only when the guard's generation matched
+     * and the write itself was refused (the 404 error page cap or the paginated variant cap
+     * refused its slot) or threw (I/O error, fragment metadata failure), for any status.
+     * A moved generation or a lost stale claim never sets it. Whether repeating the render
+     * can still help depends on the status: see RefreshCachedUrlAtomicallyAction.
+     */
+    public const string WRITE_DECLINED_ATTRIBUTE = 'capell.html_cache.write_declined';
+
     private ?Container $container = null;
 
     private ?string $cachePath = null;
@@ -124,12 +133,14 @@ final class PageCache
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
-        $published = $publication->publish($token, function () use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
+        $write = function () use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
             $this->assertContainedPath($path);
             if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
                 $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
 
                 if (! $this->reserveErrorPageSlot($errorPath)) {
+                    $laravelRequest->attributes->set(self::WRITE_DECLINED_ATTRIBUTE, true);
+
                     return false;
                 }
 
@@ -165,6 +176,8 @@ final class PageCache
             $targetPath = $this->join([$path, $filename . '.' . $extension]);
 
             if (! $this->reserveVariantSlot($targetPath, StatelessPaginationRequest::cacheKeySuffix($laravelRequest))) {
+                $laravelRequest->attributes->set(self::WRITE_DECLINED_ATTRIBUTE, true);
+
                 return false;
             }
 
@@ -192,6 +205,16 @@ final class PageCache
             $this->files->delete($fragmentMetadataPath);
 
             return true;
+        };
+        $published = $publication->publish($token, function () use ($write, $laravelRequest): bool {
+            try {
+                return $write();
+            } catch (Throwable $throwable) {
+                // The guard reports and swallows this; remember it was the write, not the generation.
+                $laravelRequest->attributes->set(self::WRITE_DECLINED_ATTRIBUTE, true);
+
+                throw $throwable;
+            }
         });
 
         if (! $published) {

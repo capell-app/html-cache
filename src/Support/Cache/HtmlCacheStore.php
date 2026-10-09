@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\Cache;
 
 use Capell\HtmlCache\Data\HtmlCacheClearResult;
+use Closure;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\Filesystem as NativeFilesystem;
 use Illuminate\Filesystem\FilesystemManager;
@@ -81,10 +82,11 @@ final class HtmlCacheStore
      * @param  list<string>  $preserve  pages just published under this lock scope, kept with their sidecars
      * @param  bool  $rotateWhenUnchanged  false for retirements that only observe origin policy; see HtmlCachePublicationGuard::withdraw()
      * @param  string|null  $fenceUrlKey  when not rotating, the URL whose in-flight renders a no-op withdrawal rejects
+     * @param  Closure(Closure(): bool): bool|null  $guard  runs the deletion inside the publication lock so the caller can add its own precondition (a claim lock) in the same order as the publish path; it must call the closure it is given to delete
      */
-    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = [], bool $rotateWhenUnchanged = true, ?string $fenceUrlKey = null): bool
+    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = [], bool $rotateWhenUnchanged = true, ?string $fenceUrlKey = null, ?Closure $guard = null): bool
     {
-        $guard = resolve(HtmlCachePublicationGuard::class);
+        $publication = resolve(HtmlCachePublicationGuard::class);
         $delete = function () use ($files, $variantBases, $domainDirectory, $unattributableLegacyBases, $recordedFiles, $preserve): bool {
             // Independently keyed fragments retain exact query ownership.
             foreach (array_unique($variantBases) as $base) {
@@ -153,7 +155,9 @@ final class HtmlCacheStore
             return $deleted;
         };
 
-        return $rotateWhenUnchanged ? $guard->invalidate($delete) : $guard->withdraw($fenceUrlKey, $delete);
+        $operation = $guard instanceof Closure ? static fn (): bool => $guard($delete) : $delete;
+
+        return $rotateWhenUnchanged ? $publication->invalidate($operation) : $publication->withdraw($fenceUrlKey, $operation);
     }
 
     public function isSafePagePath(string $file, string $domainDirectory): bool

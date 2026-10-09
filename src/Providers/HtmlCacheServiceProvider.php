@@ -10,6 +10,7 @@ use Capell\Admin\Contracts\Cache\StaticSiteGenerationDispatcher;
 use Capell\Admin\Contracts\DashboardSettingsContributor;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthReportExtender;
 use Capell\Admin\Contracts\Diagnostics\SiteHealthWidget;
+use Capell\Admin\Contracts\EditorImpact\EditorImpactConsequencePlanner;
 use Capell\Admin\Contracts\Extenders\PageTableExtender;
 use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Enums\DashboardEnum;
@@ -35,6 +36,7 @@ use Capell\HtmlCache\Actions\ClearCachedUrlsForSurrogateKeysAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
+use Capell\HtmlCache\Actions\PlanEditorHtmlCacheConsequencesAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
@@ -107,6 +109,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     public static string $packageName = 'capell-app/html-cache';
 
+    #[Override]
     public function configurePackage(Package $package): void
     {
         $package
@@ -123,6 +126,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     #[Override]
     public function registeringPackage(): void
     {
+        if (interface_exists(EditorImpactConsequencePlanner::class)) {
+            $this->app->tag([PlanEditorHtmlCacheConsequencesAction::class], EditorImpactConsequencePlanner::TAG);
+        }
+
         parent::registeringPackage();
 
         $this->registerPageCacheDisk();
@@ -188,6 +195,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerFrontendMiddleware();
     }
 
+    #[Override]
     public function packageBooted(): void
     {
         $this

@@ -132,6 +132,13 @@ return [
         'shared_paths' => [],
         'private_paths' => [],
     ],
+    'internal_bypass' => [
+        'header' => null,
+        'secret' => null,
+        'query_parameter' => 'without_html_cache',
+        'allow_query_in_production' => false,
+    ],
+    'internal_shell' => ['header' => null],
     'bypass' => [
         /*
         |--------------------------------------------------------------------------
@@ -146,6 +153,8 @@ return [
         'paths' => [],
         'cookies' => [],
         'headers' => [],
+        'ignored_query_parameters' => [],
+        'ignored_query_parameter_except_paths' => [],
     ],
     'access_gate' => [
         'active_area_cache_seconds' => (int) Env::get('CAPELL_HTML_CACHE_ACCESS_GATE_AREA_CACHE_SECONDS', 5),

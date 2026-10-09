@@ -46,6 +46,8 @@ use Throwable;
 
 final class HtmlCacheMiddleware
 {
+    public const string INTERNAL_BYPASS_ATTRIBUTE = 'capell.html_cache.authenticated_internal_bypass';
+
     public const string BYPASS_CACHE_READ_ATTRIBUTE = 'capell.html_cache.bypass_cache_read';
 
     public const string CACHE_WRITE_SUCCEEDED_ATTRIBUTE = 'capell.html_cache.cache_write_succeeded';
@@ -74,7 +76,10 @@ final class HtmlCacheMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
-        $response = $this->handleRequest($request, $next);
+        $response = resolve(AuthorizeInternalHtmlCacheBypass::class)->handle(
+            $request,
+            fn (Request $request): Response => $this->handleRequest($request, $next),
+        );
 
         if ($request->isMethod('HEAD')) {
             $response->setContent('');
@@ -433,7 +438,7 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        if ($request->query->has('without_html_cache')) {
+        if (! app()->environment('production') && $request->query->has('without_html_cache')) {
             return true;
         }
 

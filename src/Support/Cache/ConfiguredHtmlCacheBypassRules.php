@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -11,7 +12,7 @@ final class ConfiguredHtmlCacheBypassRules
 {
     public function shouldBypass(Request $request): bool
     {
-        if ($this->pathMatches($request)) {
+        if ($request->attributes->get(HtmlCacheMiddleware::INTERNAL_BYPASS_ATTRIBUTE) === true || $this->pathMatches($request)) {
             return true;
         }
 

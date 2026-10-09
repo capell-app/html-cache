@@ -143,6 +143,91 @@
                     "selector": ".fi-sidebar.fi-sidebar-open"
                 }
             ]
+        },
+        {
+            "id": "cloudflare-capell-app-cache-rule",
+            "title": "Cloudflare anonymous public HTML cache rule.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "external-admin-url",
+            "target": "https://dash.cloudflare.com/",
+            "url": "https://dash.cloudflare.com/",
+            "user": false,
+            "colorSchemes": ["light"],
+            "required": false,
+            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
+            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
+            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
+            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-rule.jpg",
+            "fullPage": true,
+            "waitFor": "text=Edit Cache Rule",
+            "interactions": [
+                {
+                    "type": "click",
+                    "selector": "text=Cache Rules"
+                },
+                {
+                    "type": "click",
+                    "selector": "text=Capell anonymous public HTML"
+                }
+            ]
+        },
+        {
+            "id": "cloudflare-capell-app-cache-rules-active",
+            "title": "Cloudflare cache rule activation.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "external-admin-url",
+            "target": "https://dash.cloudflare.com/",
+            "url": "https://dash.cloudflare.com/",
+            "user": false,
+            "colorSchemes": ["light"],
+            "required": false,
+            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
+            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
+            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
+            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-rules-active.jpg",
+            "fullPage": true,
+            "waitFor": "text=Cache Rules",
+            "interactions": [
+                {
+                    "type": "click",
+                    "selector": "text=Cache Rules"
+                }
+            ]
+        },
+        {
+            "id": "cloudflare-capell-app-cache-ttl",
+            "title": "Cloudflare Edge TTL and Browser TTL settings.",
+            "package": "html-cache",
+            "surface": "admin",
+            "targetType": "external-admin-url",
+            "target": "https://dash.cloudflare.com/",
+            "url": "https://dash.cloudflare.com/",
+            "user": false,
+            "colorSchemes": ["light"],
+            "required": false,
+            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
+            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
+            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
+            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-ttl.jpg",
+            "fullPage": false,
+            "waitFor": "text=Edge TTL",
+            "interactions": [
+                {
+                    "type": "click",
+                    "selector": "text=Cache Rules"
+                },
+                {
+                    "type": "click",
+                    "selector": "text=Capell anonymous public HTML"
+                },
+                {
+                    "type": "scrollIntoView",
+                    "selector": "text=Edge TTL",
+                    "block": "start"
+                }
+            ]
         }
     ],
     "fixtureCommands": ["capell:screenshot-admin-fixture --package=html-cache"]

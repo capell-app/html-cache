@@ -46,7 +46,7 @@ final class WriteRefreshedHtmlCacheFileAction
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
-        $safeCachePath = $this->safeCachePath($cachePath);
+        $safeCachePath = HtmlCacheFilesystem::normalizeRelativePath($cachePath);
         $paths = resolve(HtmlCachePathResolver::class);
 
         // Only isolated origins migrate historical paths. Standard ports retain
@@ -71,21 +71,6 @@ final class WriteRefreshedHtmlCacheFileAction
 
             return $replaced;
         });
-    }
-
-    private function safeCachePath(string $cachePath): string
-    {
-        $normalized = str_replace('\\', '/', $cachePath);
-
-        throw_if($normalized === '' || str_starts_with($normalized, '/') || preg_match('/^[A-Za-z]:\//', $normalized) === 1 || str_contains($normalized, "\0"), RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
-
-        $segments = array_values(array_filter(explode('/', $normalized), static fn (string $segment): bool => $segment !== ''));
-
-        foreach ($segments as $segment) {
-            throw_if($segment === '..', RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
-        }
-
-        return implode('/', $segments);
     }
 
     private function replaceCacheFileForCurrentStaleClaim(StaleCachedUrl $staleCachedUrl, string $path, string $content): bool

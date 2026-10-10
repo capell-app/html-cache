@@ -8,6 +8,24 @@ use RuntimeException;
 
 final class HtmlCacheFilesystem
 {
+    public static function normalizeRelativePath(string $cachePath): string
+    {
+        $normalized = str_replace('\\', '/', $cachePath);
+
+        throw_if($normalized === '' || str_starts_with($normalized, '/') || preg_match('/^[A-Za-z]:/', $normalized) === 1 || str_contains($normalized, "\0"), RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
+
+        $segments = array_values(array_filter(explode('/', $normalized), static fn (string $segment): bool => $segment !== ''));
+
+        foreach ($segments as $segment) {
+            throw_if($segment === '..', RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
+        }
+
+        $normalized = implode('/', $segments);
+        throw_if($normalized === '' || array_diff($segments, ['.']) === [], RuntimeException::class, 'Unable to refresh stale HTML cache; stale row cache path was invalid.');
+
+        return $normalized;
+    }
+
     public static function assertContainedPath(string $path, string $root): void
     {
         clearstatcache(true);

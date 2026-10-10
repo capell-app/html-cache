@@ -169,7 +169,7 @@ it('publishes an old stale row to the current port root without overwriting stan
     $stale = StaleCachedUrl::query()->where('url', $url)->sole();
     $stale->update(['cache_path' => 'http.example.test/form.html', 'error_cache_path' => 'http.example.test/form.404.html']);
     Storage::disk('page_cache')->put('http.example.test/form' . $extension, 'standard-port snapshot');
-    Route::get('/form', static fn (): Response => response('fresh port snapshot', $status, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']));
+    Route::get('/form', static fn (): Response => response('fresh port snapshot', $status, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']))->middleware(HtmlCacheMiddleware::class);
     expect(ClaimStaleCachedUrlAction::run($stale))->toBeTrue();
     RefreshCachedUrlAtomicallyAction::run($stale->refresh());
 

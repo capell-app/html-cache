@@ -15,17 +15,17 @@ use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
-use Capell\HtmlCache\Support\Cache\CacheableResponseCookieStripper;
+use Capell\HtmlCache\Support\Cache\HtmlCacheFilesystem;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
-use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Closure;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
@@ -47,6 +47,8 @@ final class RefreshCachedUrlAtomicallyAction
         if ($request->query->count() > 0 && ! StatelessPaginationRequest::isCacheableVariant($request)) {
             throw new RuntimeException('Unsupported query parameters have no HTML cache path.');
         }
+
+        $this->assertStoredCachePathsAreSafe($staleCachedUrl);
 
         $request->attributes->set(HtmlCacheMiddleware::SUPPRESS_INLINE_EDGE_PURGE_ATTRIBUTE, $suppressInlineEdgePurge);
         $resolved = LoadSiteDomainFromUrlAction::run($staleCachedUrl->url);
@@ -116,6 +118,21 @@ final class RefreshCachedUrlAtomicallyAction
             $this->deleteAlternateStatusFile($staleCachedUrl, $response);
         } finally {
             app()->instance('request', $previousRequest);
+        }
+    }
+
+    private function assertStoredCachePathsAreSafe(StaleCachedUrl $staleCachedUrl): void
+    {
+        $disk = Storage::disk('page_cache');
+
+        foreach ([$staleCachedUrl->cache_path, $staleCachedUrl->error_cache_path] as $cachePath) {
+            // Missing historical paths retain the publication and retirement paths' own requirements.
+            if (! is_string($cachePath) || $cachePath === '') {
+                continue;
+            }
+
+            $relativePath = HtmlCacheFilesystem::normalizeRelativePath($cachePath);
+            HtmlCacheFilesystem::assertContainedPath($disk->path($relativePath), $disk->path(''));
         }
     }
 
@@ -280,8 +297,6 @@ final class RefreshCachedUrlAtomicallyAction
 
     private function writeCacheFromRefreshResponse(Request $request, Response $response, StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): ?HtmlCacheEligibilityReason
     {
-        $response = CacheableResponseCookieStripper::strip($response);
-
         if (config('capell-html-cache.write_enabled', true) !== true) {
             return HtmlCacheEligibilityReason::CacheWriteDisabled;
         }
@@ -295,7 +310,16 @@ final class RefreshCachedUrlAtomicallyAction
         }
 
         $originDecision = HtmlCacheOriginDecisionData::forRequest($request);
-        if ($originDecision instanceof HtmlCacheOriginDecisionData && ! $originDecision->cacheWriteSucceeded) {
+        if (! $originDecision instanceof HtmlCacheOriginDecisionData) {
+            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; the route did not run the HTML cache middleware.', $staleCachedUrl->url));
+        }
+
+        if (! $originDecision->cacheWriteSucceeded) {
+            // Disabled middleware preserves artefacts and records no eligibility report.
+            if (config('capell-html-cache.enabled', true) !== true) {
+                return HtmlCacheEligibilityReason::CacheDisabled;
+            }
+
             if ($originDecision->rejectionReason instanceof HtmlCacheEligibilityReason) {
                 return $originDecision->rejectionReason;
             }
@@ -313,43 +337,15 @@ final class RefreshCachedUrlAtomicallyAction
 
         $pageCache = resolve(PageCache::class);
 
-        if ($originDecision?->cacheWriteSucceeded === true) {
-            throw_unless(
-                ! $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData
-                || $pageCache->getCacheFragmentData(
-                    $request,
-                    $response->getStatusCode() === Response::HTTP_NOT_FOUND ? PageCache::ERROR_EXTENSION : '.html',
-                ) instanceof RenderHookFragmentCacheData,
-                RuntimeException::class,
-                sprintf('Unable to refresh stale HTML cache for "%s"; fragmented cache metadata was not published.', $staleCachedUrl->url),
-            );
-
-            if (! $suppressInlineEdgePurge) {
-                PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));
-            }
-
-            return null;
-        }
-
-        $packageReason = resolve(ExtensionCacheSafetyResolver::class)->blockingReasonCodes()[0] ?? null;
-
-        if ($packageReason instanceof HtmlCacheEligibilityReason) {
-            return $packageReason;
-        }
-
-        if ($response->isRedirection()) {
-            return HtmlCacheEligibilityReason::RedirectUrl;
-        }
-
-        $pageCacheReason = $pageCache->rejectionReason($request, $response);
-
-        if ($pageCacheReason instanceof HtmlCacheEligibilityReason) {
-            return $pageCacheReason;
-        }
-
-        if (! WriteRefreshedHtmlCacheFileAction::run($response, $staleCachedUrl, $request)) {
-            throw new RuntimeException(sprintf('Unable to refresh stale HTML cache for "%s"; content was invalidated during rendering.', $staleCachedUrl->url));
-        }
+        throw_unless(
+            ! $request->attributes->get(HtmlCacheMiddleware::FRAGMENT_CACHE_DATA_ATTRIBUTE) instanceof RenderHookFragmentCacheData
+            || $pageCache->getCacheFragmentData(
+                $request,
+                $response->getStatusCode() === Response::HTTP_NOT_FOUND ? PageCache::ERROR_EXTENSION : '.html',
+            ) instanceof RenderHookFragmentCacheData,
+            RuntimeException::class,
+            sprintf('Unable to refresh stale HTML cache for "%s"; fragmented cache metadata was not published.', $staleCachedUrl->url),
+        );
 
         if (! $suppressInlineEdgePurge) {
             PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$staleCachedUrl->url]));

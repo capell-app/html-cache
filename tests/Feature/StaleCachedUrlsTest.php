@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -429,7 +430,7 @@ it('keeps the previous cached html when stale refresh fails', function (): void 
         ->and($staleCachedUrl->last_error)->toContain('response status was 500');
 });
 
-it('rejects stale refresh cache paths outside the page cache disk root', function (): void {
+it('rejects stale refresh cache paths outside the page cache disk root', function (string $field, string $unsafePath): void {
     Storage::fake('page_cache');
 
     $siteDomain = SiteDomain::factory()->create([
@@ -444,10 +445,12 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
     $url = 'https://example.test/about';
 
     bindHtmlCacheFrontendContext($page);
-    $kernel = Mockery::mock(Kernel::class);
-    $kernel->shouldReceive('handle')->once()->andReturn(response('fresh cached page', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']));
-    $kernel->shouldReceive('terminate')->once();
-    app()->instance(Kernel::class, $kernel);
+    $renders = 0;
+    staleCacheOriginRoute('/about', function () use (&$renders): Response {
+        $renders++;
+
+        return response('fresh cached page', 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']);
+    });
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
         'url' => $url,
@@ -457,18 +460,86 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
         'site_id' => $siteDomain->site_id,
         'site_domain_id' => $siteDomain->getKey(),
         'language_id' => $siteDomain->language_id,
-        'cache_path' => '../outside.html',
+        'cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain),
         'error_cache_path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain, error: true),
         'reason' => 'test',
         'status' => StaleCachedUrl::STATUS_PENDING,
     ]);
 
+    $staleCachedUrl->update([$field => $unsafePath]);
+
     expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
+        ->and($renders)->toBe(0)
         ->and(resolve(HtmlCacheStore::class)->path('../outside.html'))->toBeNull()
         ->and(Storage::disk('page_cache')->allFiles())->toBe([])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('cache path was invalid');
-});
+})->with(['cache_path', 'error_cache_path'])->with([
+    'traversal' => '../outside.html',
+    'backslash traversal' => '..\\outside.html',
+    'absolute' => '/outside.html',
+    'drive absolute' => 'C:/outside.html',
+    'drive relative' => 'C:outside.html',
+    'NUL' => "outside\0.html",
+    'current directory only' => '.',
+]);
+
+it('rejects stale refresh stored symlink paths before origin rendering', function (string $field, string $alias): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    bindHtmlCacheFrontendContext(Page::factory()->recycle($domain->site)->withTranslations()->create());
+    $row = staleCacheRowForCoverage($domain, '/about', StaleCachedUrl::STATUS_PENDING);
+    $disk = Storage::disk('page_cache');
+    $outside = sys_get_temp_dir() . '/html-cache-stale-path-' . bin2hex(random_bytes(8));
+    File::ensureDirectoryExists($outside);
+    File::put($outside . '/page.html', 'outside bytes');
+    $link = $disk->path('unsafe-link');
+    $target = match ($alias) {
+        'directory' => $outside,
+        'file' => $outside . '/page.html',
+        'dangling' => $outside . '/missing.html',
+        default => throw new LogicException('Unknown symlink alias'),
+    };
+    expect(symlink($target, $link))->toBeTrue();
+    $row->update([$field => $alias === 'directory' ? 'unsafe-link/page.html' : 'unsafe-link']);
+    $renders = 0;
+    staleCacheOriginRoute('/about', function () use (&$renders): Response {
+        $renders++;
+
+        return response('fresh cached page', 200, ['Content-Type' => 'text/html']);
+    });
+
+    try {
+        $result = ProcessStaleHtmlCacheAction::run(1);
+        expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 1, 'notApplicable' => 0])
+            ->and($renders)->toBe(0)
+            ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+            ->and($row->last_error)->toContain($alias === 'dangling' ? 'Unable to resolve the HTML cache path' : 'outside the cache root')
+            ->and($disk->exists(resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $domain)))->toBeFalse()
+            ->and(File::get($outside . '/page.html'))->toBe('outside bytes');
+    } finally {
+        unlink($link);
+        File::deleteDirectory($outside);
+    }
+})->with(['cache_path', 'error_cache_path'])->with(['directory', 'file', 'dangling']);
+
+it('preserves the retirement failure for historical rows with omitted stored paths', function (?string $missingPath): void {
+    Storage::fake('page_cache');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    bindHtmlCacheFrontendContext(Page::factory()->recycle($domain->site)->withTranslations()->create());
+    $row = staleCacheRowForCoverage($domain, '/feed', StaleCachedUrl::STATUS_PENDING);
+    $path = $row->cache_path;
+    assert(is_string($path));
+    Storage::disk('page_cache')->put($path, 'old cached page');
+    $row->update(['cache_path' => $missingPath, 'error_cache_path' => $missingPath]);
+    Route::get('/feed', static fn (): Response => response('<feed/>', 200, ['Content-Type' => 'application/xml', 'Cache-Control' => 'max-age=3600, public']));
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 0, 'failed' => 1, 'notApplicable' => 0])
+        ->and(Storage::disk('page_cache')->get($path))->toBe('old cached page')
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
+        ->and($row->last_error)->toContain('Unable to resolve historical cache paths', 'cache tracking has been retained');
+})->with([null, '']);
 
 it('blocks unsafe public html during stale refresh and keeps the old cache file', function (): void {
     Storage::fake('page_cache');
@@ -530,10 +601,13 @@ it('records the exact rejected check when response headers look publicly cacheab
             $request->session()->put('status', 'private visitor status');
         }
 
-        return response($condition === 'token' ? '<input name="_token" value="private-token">' : '<main>Pricing</main>', 200, [
+        $origin = response($condition === 'token' ? '<input name="_token" value="private-token">' : '<main>Pricing</main>', 200, [
             'Content-Type' => 'text/html; charset=utf-8',
             'Cache-Control' => 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400',
         ]);
+        expect($origin->headers->get('Cache-Control'))->toBe('max-age=300, public, s-maxage=1800, stale-while-revalidate=86400');
+
+        return resolve(HtmlCacheMiddleware::class)->handle($request, static fn (): Response => $origin);
     });
     $kernel->shouldReceive('terminate')->once();
     app()->instance(Kernel::class, $kernel);
@@ -556,7 +630,7 @@ it('records the exact rejected check when response headers look publicly cacheab
 
     expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page')
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
-        ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: ' . $expectedReason, 'Vary: [].', 'Cookies: 0.', 'max-age=300, public, s-maxage=1800, stale-while-revalidate=86400')
+        ->and($staleCachedUrl->last_error)->toContain('not cacheable', 'Reason: ' . $expectedReason, 'Vary: [].', 'Cookies: 0.')
         ->not->toContain('private visitor status', 'private-token');
 })->with([
     'writes disabled' => ['writes_disabled', 'cache_write_disabled'],
@@ -1943,7 +2017,9 @@ it('keeps failing an html page rendered outside the cache middleware', function 
 
     expect($result->notApplicable)->toBe(0)
         ->and($result->failed)->toBe(1)
-        ->and($row->refresh()->status)->not->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
+        ->and($row->refresh()->status)->not->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
+        ->and($row->last_error)->toContain('HTML cache middleware')
+        ->and(Storage::disk('page_cache')->get($cachePath))->toBe('stale artefact');
 });
 
 it('retries the render once when the publication guard rejects it mid-render', function (): void {

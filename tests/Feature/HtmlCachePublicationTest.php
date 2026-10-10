@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 
 uses(HtmlCacheTestCase::class);
 
@@ -124,7 +125,7 @@ it('does not retry a failed publication-token capture after rendering', function
         ->and(Storage::disk('page_cache')->allFiles())->toBeEmpty();
 });
 
-it('retains the pre-render token through the stale refresh fallback writer', function (): void {
+it('retains the pre-render token through both guarded stale refresh renders', function (): void {
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $url = 'https://example.test/withdrawn';
     $path = resolve(HtmlCachePathResolver::class)->pathForUrl('/withdrawn', $domain);
@@ -142,15 +143,18 @@ it('retains the pre-render token through the stale refresh fallback writer', fun
         'status' => StaleCachedUrl::STATUS_PROCESSING,
         'claim_token' => Str::uuid()->toString(),
     ]);
-    Route::get('/withdrawn', function () use ($url) {
+    $renders = 0;
+    Route::get('/withdrawn', function () use ($url, &$renders): Response {
+        $renders++;
         ClearCachedUrlAction::run($url);
 
         return response('Obsolete rendered content', 200, ['Content-Type' => 'text/html']);
-    });
+    })->middleware(HtmlCacheMiddleware::class);
 
     expect(fn () => RefreshCachedUrlAtomicallyAction::run($stale, true))
-        ->toThrow(RuntimeException::class, 'invalidated during rendering');
-    expect(Storage::disk('page_cache')->exists($path))->toBeFalse()
+        ->toThrow(RuntimeException::class, 'the publication guard rejected the render twice');
+    expect($renders)->toBe(2)
+        ->and(Storage::disk('page_cache')->exists($path))->toBeFalse()
         ->and(Storage::disk('page_cache')->exists($path . PageCache::FRAGMENT_METADATA_EXTENSION))->toBeFalse();
 });
 

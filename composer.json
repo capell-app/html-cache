@@ -5,7 +5,7 @@
     "license": "proprietary",
     "require": {
         "php": "^8.4",
-        "capell-app/admin": "^1.0.10",
+        "capell-app/admin": "^1.0.56",
         "capell-app/core": "^1.0.62",
         "capell-app/discovery-foundation": "^1.0",
         "capell-app/frontend": "^1.0.60",

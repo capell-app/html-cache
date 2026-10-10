@@ -16,6 +16,7 @@ use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
 use Capell\HtmlCache\Filament\Components\Tables\Columns\PageCachedIconColumn;
 use Capell\HtmlCache\Filament\Concerns\HasPageCacheNotification;
+use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Jobs\RefreshOriginStaleCachedUrlJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
@@ -344,7 +345,10 @@ it('fails stale refresh commands when any attempted URL fails', function (string
     }
 
     $kernel = Mockery::mock(Kernel::class);
-    $kernel->shouldReceive('handle')->andReturnUsing(fn (Request $request): Response => new Response('fresh HTML', $request->path() === 'failed' ? 500 : 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']));
+    $kernel->shouldReceive('handle')->andReturnUsing(static fn (Request $request): Response => resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        static fn (): Response => new Response('fresh HTML', $request->path() === 'failed' ? 500 : 200, ['Content-Type' => 'text/html', 'Cache-Control' => 'public']),
+    ));
     $kernel->shouldReceive('terminate');
     app()->instance(Kernel::class, $kernel);
     MarkAllCachedUrlsStaleAction::run();

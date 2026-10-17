@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Support\Cache;
 use Capell\Core\Models\SiteDomain;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 
 final class HtmlCachePathResolver
 {
@@ -56,13 +57,20 @@ final class HtmlCachePathResolver
 
     public function hasSafeKey(string|Request $url): bool
     {
-        return $this->relativePathForRequest($url instanceof Request ? $url : Request::create($url)) !== null;
+        try {
+            return $this->relativePathForRequest($url instanceof Request ? $url : Request::create($url)) !== null;
+        } catch (BadRequestException) {
+            return false;
+        }
     }
 
     public function rootForRequest(Request $request, ?SiteDomain $siteDomain = null): string
     {
-        $scheme = $siteDomain instanceof SiteDomain ? $siteDomain->scheme : $request->getScheme();
-        $domain = $siteDomain instanceof SiteDomain ? $siteDomain->domain : $request->getHost();
+        // The model accessor falls back to the ambient request. Wildcard
+        // mappings must use the request whose cache key we are resolving.
+        $configuredScheme = $siteDomain?->getAttributes()['scheme'] ?? null;
+        $scheme = is_string($configuredScheme) ? $configuredScheme : $request->getScheme();
+        $domain = $siteDomain->domain ?? $request->getHost();
         $this->assertSafeSegment('scheme', $scheme);
         $this->assertSafeSegment('domain', $domain);
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Filament\Pages;
 
 use BackedEnum;
+use Capell\Admin\Contracts\Diagnostics\SiteHealthSubpage;
+use Capell\Admin\Filament\Pages\SiteHealthPage;
 use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\Site;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
@@ -30,9 +32,11 @@ use Illuminate\Support\Collection;
 use Override;
 use RuntimeException;
 
-class MaintenanceCachePage extends Page implements HasActions
+class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
 {
     use InteractsWithActions;
+
+    protected static bool $shouldRegisterNavigation = true;
 
     protected static ?string $slug = 'html-cache/maintenance-cache';
 
@@ -52,6 +56,12 @@ class MaintenanceCachePage extends Page implements HasActions
     public static function getNavigationLabel(): string
     {
         return __('capell-html-cache::admin.maintenance_cache');
+    }
+
+    #[Override]
+    public static function getNavigationParentItem(): ?string
+    {
+        return SiteHealthPage::canAccess() ? SiteHealthPage::getNavigationLabel() : null;
     }
 
     #[Override]

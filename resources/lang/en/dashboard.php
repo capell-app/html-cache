@@ -39,6 +39,7 @@ return [
     'status_processed' => 'Processed',
     'status_failed' => 'Failed',
     'status_exhausted' => 'Exhausted',
+    'status_not_applicable' => 'Not applicable',
     'no_cache_coverage_urls' => 'No cache coverage URLs',
     'no_cache_coverage_urls_description' => 'Cached URLs and public page URL traffic will appear here after the cache has been warmed.',
     'no_stale_queue' => 'No regeneration work',

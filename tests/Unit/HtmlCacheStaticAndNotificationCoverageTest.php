@@ -53,6 +53,7 @@ use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\Tests\Support\Filament\AdminSurfaceAssertions;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -67,7 +68,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -294,11 +294,7 @@ it('visits static urls internally with host and port server headers', function (
 
     app()->instance(HttpKernel::class, $kernel);
 
-    $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
-    $generator = new StaticSiteGenerator(new Site);
-
-    $method->invoke($generator, 'https://example.test/docs?preview=1');
-    $method->invoke($generator, 'http://example.test:8080/path');
+    generateResidualStaticUrls(['https://example.test/docs?preview=1', 'http://example.test:8080/path']);
 
     expect($requests)->toBe([
         ['uri' => '/docs?preview=1', 'host' => 'example.test', 'https' => 'on'],
@@ -315,12 +311,9 @@ it('fails internal static generation when a public URL does not render successfu
 
     app()->instance(HttpKernel::class, $kernel);
 
-    $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
-
-    expect(fn (): mixed => $method->invoke(
-        new StaticSiteGenerator(new Site),
-        'https://example.test/unusable-page',
-    ))->toThrow(
+    expect(function (): void {
+        generateResidualStaticUrls(['https://example.test/unusable-page']);
+    })->toThrow(
         RuntimeException::class,
         "Static generation request [https://example.test/unusable-page] returned HTTP {$status}.",
     );
@@ -329,15 +322,14 @@ it('fails internal static generation when a public URL does not render successfu
     'server error' => Response::HTTP_INTERNAL_SERVER_ERROR,
 ]);
 
-it('rejects invalid internal static urls instead of dispatching them', function (): void {
-    Log::shouldReceive('warning')
-        ->once()
-        ->with('StaticSiteGenerator: rejected invalid internal url', ['url' => '/relative-only']);
+it('rejects invalid extension static urls instead of dispatching them', function (): void {
+    $kernel = Mockery::mock(HttpKernel::class);
+    $kernel->shouldNotReceive('handle');
+    app()->instance(HttpKernel::class, $kernel);
 
-    $method = new ReflectionMethod(StaticSiteGenerator::class, 'visitUrlInternally');
-
-    expect(fn (): mixed => $method->invoke(new StaticSiteGenerator(new Site), '/relative-only'))
-        ->toThrow(UrlVisitFailedException::class);
+    expect(function (): void {
+        generateResidualStaticUrls(['javascript:alert(1)']);
+    })->toThrow(UrlVisitFailedException::class);
 });
 
 it('notifies or clears cached page urls for changed models', function (): void {
@@ -407,11 +399,13 @@ it('resolves cached page rows for page urls and pageable records', function (): 
         'last_seen_at' => now(),
     ]);
 
-    $method = new ReflectionMethod(PageCachedIconColumn::class, 'getCachedPage');
-    $column = PageCachedIconColumn::make('cached');
+    $column = PageCachedIconColumn::make('cached')->table(AdminSurfaceAssertions::table());
+    $urlState = $column->record($pageUrl)->getState();
+    $pageState = $column->record($page)->getState();
+    throw_unless($urlState instanceof CachedModelUrl && $pageState instanceof CachedModelUrl, RuntimeException::class);
 
-    expect($method->invoke($column, $pageUrl)->is($cachedModelUrl))->toBeTrue()
-        ->and($method->invoke($column, $page)->is($cachedModelUrl))->toBeTrue()
+    expect($urlState->is($cachedModelUrl))->toBeTrue()
+        ->and($pageState->is($cachedModelUrl))->toBeTrue()
         ->and(HtmlCacheHealthCheck::compatibleCapellApiVersion())->toBe('^1.0');
 });
 
@@ -632,16 +626,30 @@ it('keeps long-lived html cache state in the container instead of process static
 
 it('flushes the invalidation model memo between Octane operations', function (): void {
     $observer = resolve(HtmlCacheModelInvalidationObserver::class);
-    $modelClasses = new ReflectionProperty($observer, 'capellModelClasses');
+    $model = new class extends Model
+    {
+        #[Override]
+        public function getMorphClass(): string
+        {
+            return 'late-registered-cacheable';
+        }
+    };
+    $model->forceFill(['id' => 904]);
+    $url = 'https://octane-reset.test/late-registered';
+    CachedModelUrl::query()->create([
+        'url' => $url, 'url_hash' => CachedModelUrl::hashUrl($url), 'path' => '/late-registered',
+        'cacheable_type' => $model->getMorphClass(), 'cacheable_id' => $model->getKey(),
+    ]);
 
-    new ReflectionMethod($observer, 'capellModelClasses')->invoke($observer);
-
-    expect($modelClasses->getValue($observer))->toBeArray()
+    $observer->created($model);
+    CapellCore::registerModels([$model::class]);
+    $observer->created($model);
+    expect(CachedModelUrl::query()->where('url', $url)->exists())->toBeTrue()
         ->and(collect(app()->tagged(Resettable::TAG))->contains($observer))->toBeTrue();
 
     $observer->flushOctaneState();
-
-    expect($modelClasses->getValue($observer))->toBeNull();
+    $observer->createdFromEvent('eloquent.created: ' . $model::class, [$model]);
+    expect(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
 });
 
 it('invalidates cached urls through a single generic model observer', function (): void {
@@ -1014,10 +1022,10 @@ it('builds maintenance admin actions for permitted users', function (): void {
 });
 
 it('shows no maintenance cache page header action when there is no actor or accessible site', function (): void {
-    $method = new ReflectionMethod(MaintenanceCachePage::class, 'getHeaderActions');
     $page = new MaintenanceCachePage;
+    $page->cacheInteractsWithHeaderActions();
 
-    expect($method->invoke($page))->toHaveCount(0);
+    expect($page->getCachedHeaderActions())->toHaveCount(0);
 });
 
 it('prepares and toggles site maintenance cache state through the typed actions', function (): void {
@@ -1249,3 +1257,22 @@ it('skips page cache reads and writes for encoded hostile request paths', functi
     '/unsafe/%00/secret',
     '/unsafe/%5c/secret',
 ]);
+
+/** @param list<string> $urls */
+function generateResidualStaticUrls(array $urls): void
+{
+    $registry = resolve(StaticSiteExtensionRegistry::class);
+    $registry->clear();
+    $domain = htmlCacheResidualCoverageSiteDomain('example.test');
+    config(['capell-html-cache.static_generation.internal_requests' => true]);
+    $registry->register('request-contract', function (Site $site, SiteDomain $siteDomain, Closure $visit) use ($urls): void {
+        foreach ($urls as $url) {
+            $visit($url);
+        }
+    });
+    try {
+        new StaticSiteGenerator($domain->site)->process();
+    } finally {
+        $registry->clear();
+    }
+}

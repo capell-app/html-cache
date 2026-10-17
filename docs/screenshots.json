@@ -45,13 +45,31 @@
             "targetType": "dashboard-widgets",
             "target": "CapellDashboard",
             "required": false,
-            "notes": "Deferred authentic route target. Requires an authenticated admin with the dashboard cache widgets enabled, migrated HTML Cache tables, and seeded PageUrl, CachedModelUrl, and StaleCachedUrl rows so the widgets show real state.",
+            "notes": "Enable the real cache overview widget and seed a published workshop PageUrl, cache dependency and pending regeneration row. Frame the populated card after lazy loading.",
             "useCase": "An administrator checks cache overview, coverage, and stale queue widgets.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-dashboard-widgets.png",
             "scenario": "admin-index",
-            "url": "/",
-            "waitFor": "body",
-            "colorSchemes": ["light"]
+            "url": "/admin",
+            "waitFor": ".fi-wi-stats-overview:has-text(\"Cache coverage\")",
+            "colorSchemes": ["light"],
+            "fullPage": false,
+            "beforeWait": [
+                {
+                    "type": "scrollIntoView",
+                    "selector": ".fi-section:not(.fi-collapsed) [wire\\:snapshot*=\"html-cache-overview-filament-widget\"]",
+                    "block": "start"
+                },
+                {
+                    "type": "waitFor",
+                    "selector": ".fi-wi-stats-overview:has-text(\"Cache coverage\")"
+                },
+                {
+                    "type": "scrollIntoView",
+                    "selector": ".fi-wi-stats-overview:has-text(\"Cache coverage\")",
+                    "block": "start"
+                }
+            ],
+            "frameSelector": ".fi-wi-stats-overview:has-text(\"Cache coverage\")"
         },
         {
             "id": "html-cache-site-health-cache-map",
@@ -61,13 +79,31 @@
             "targetType": "admin-page",
             "target": "SiteHealthPage",
             "required": false,
-            "notes": "Deferred authentic route target. Requires an authenticated admin, one seeded site/domain, and cache-map dependency rows so the HTML Cache Site Health widget renders on the real diagnostics page.",
+            "notes": "Seed the workshop page cache dependency, wait for a real top-resource row and frame the cache map on the installed Site Health page.",
             "useCase": "An operator reviews cache-map diagnostics and public-output safety checks in Site Health.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-site-health-cache-map.png",
             "scenario": "admin-index",
-            "url": "/site-health",
-            "waitFor": ".capell-site-health-cache-map",
-            "colorSchemes": ["light"]
+            "url": "/admin/site-health",
+            "waitFor": ".capell-site-health-cache-map [wire\\:key^=\"cache-map-top-resource-\"]",
+            "colorSchemes": ["light"],
+            "fullPage": false,
+            "beforeWait": [
+                {
+                    "type": "scrollIntoView",
+                    "selector": ".capell-site-health-cache-map",
+                    "block": "start"
+                },
+                {
+                    "type": "waitFor",
+                    "selector": ".capell-site-health-cache-map [wire\\:key^=\"cache-map-top-resource-\"]"
+                },
+                {
+                    "type": "scrollIntoView",
+                    "selector": ".capell-site-health-cache-map [wire\\:key^=\"cache-map-top-resource-\"]",
+                    "block": "start"
+                }
+            ],
+            "frameSelector": ".capell-site-health-cache-map"
         },
         {
             "id": "html-cache-page-table-extension",
@@ -77,13 +113,45 @@
             "targetType": "admin-resource",
             "target": "PageResource",
             "required": false,
-            "notes": "Deferred authentic route target. Requires an authenticated admin, one seeded Page with a published URL, and HTML Cache state recorded for that page so the package table extension renders its real indicator.",
+            "notes": "Search the owned workshop page, open the column manager and enable the default-hidden Cached column. Wait for its actual row indicator.",
             "useCase": "An editor sees cache state indicators directly in the core Pages resource.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-page-table-extension.png",
             "scenario": "admin-index",
-            "url": "/pages",
-            "waitFor": "table",
-            "colorSchemes": ["light"]
+            "url": "/admin/pages",
+            "waitFor": ".fi-ta-row:has-text(\"Studio workshop programme\") .fi-ta-col-cached",
+            "colorSchemes": ["light"],
+            "fullPage": false,
+            "beforeWait": [
+                {
+                    "type": "fill",
+                    "selector": ".fi-ta-search-field input",
+                    "value": "Studio workshop programme"
+                },
+                {
+                    "type": "waitFor",
+                    "selector": ".fi-ta-row:has-text(\"Studio workshop programme\")"
+                },
+                {
+                    "type": "click",
+                    "selector": "button[aria-label=\"Column manager\"]"
+                },
+                {
+                    "type": "click",
+                    "selector": ".fi-ta-col-manager button[wire\\:click=\"resetTableColumnManager\"]"
+                },
+                {
+                    "type": "click",
+                    "selector": ".fi-ta-col-manager input[id$=\"-cached\"]:not(:checked)"
+                },
+                {
+                    "type": "click",
+                    "selector": ".fi-ta-col-manager-actions-ctn button:has-text(\"Apply\")"
+                },
+                {
+                    "type": "click",
+                    "selector": "button[aria-label=\"Column manager\"]"
+                }
+            ]
         },
         {
             "id": "html-cache-public-cache-hit",
@@ -93,13 +161,14 @@
             "targetType": "frontend-url",
             "target": "/",
             "required": false,
-            "notes": "Deferred authentic route target. Requires an anonymous capture of the seeded public root page after the supported HTML Cache pipeline has warmed it; verify the response is a cache HIT with no authoring surface or session cookie.",
+            "notes": "Capture the real anonymous public root. The pre-capture guard reloads through the real cache middleware and requires X-Frontend-Cache=HIT, no Set-Cookie and no authoring markers; a bypass or miss fails capture. Cache population and the HIT still need a real capture to confirm.",
             "useCase": "An anonymous visitor receives cached public HTML with no authoring markers, editor URLs, or session cookies.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-public-cache-hit.png",
             "scenario": "frontend-page",
             "url": "/",
-            "waitFor": "body",
-            "colorSchemes": ["light"]
+            "waitFor": "main h1",
+            "colorSchemes": ["light"],
+            "user": false
         },
         {
             "id": "html-cache-maintenance-page",
@@ -143,92 +212,10 @@
                     "selector": ".fi-sidebar.fi-sidebar-open"
                 }
             ]
-        },
-        {
-            "id": "cloudflare-capell-app-cache-rule",
-            "title": "Cloudflare anonymous public HTML cache rule.",
-            "package": "html-cache",
-            "surface": "admin",
-            "targetType": "external-admin-url",
-            "target": "https://dash.cloudflare.com/",
-            "url": "https://dash.cloudflare.com/",
-            "user": false,
-            "colorSchemes": ["light"],
-            "required": false,
-            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
-            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
-            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
-            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-rule.jpg",
-            "fullPage": true,
-            "waitFor": "text=Edit Cache Rule",
-            "interactions": [
-                {
-                    "type": "click",
-                    "selector": "text=Cache Rules"
-                },
-                {
-                    "type": "click",
-                    "selector": "text=Capell anonymous public HTML"
-                }
-            ]
-        },
-        {
-            "id": "cloudflare-capell-app-cache-rules-active",
-            "title": "Cloudflare cache rule activation.",
-            "package": "html-cache",
-            "surface": "admin",
-            "targetType": "external-admin-url",
-            "target": "https://dash.cloudflare.com/",
-            "url": "https://dash.cloudflare.com/",
-            "user": false,
-            "colorSchemes": ["light"],
-            "required": false,
-            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
-            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
-            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
-            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-rules-active.jpg",
-            "fullPage": true,
-            "waitFor": "text=Cache Rules",
-            "interactions": [
-                {
-                    "type": "click",
-                    "selector": "text=Cache Rules"
-                }
-            ]
-        },
-        {
-            "id": "cloudflare-capell-app-cache-ttl",
-            "title": "Cloudflare Edge TTL and Browser TTL settings.",
-            "package": "html-cache",
-            "surface": "admin",
-            "targetType": "external-admin-url",
-            "target": "https://dash.cloudflare.com/",
-            "url": "https://dash.cloudflare.com/",
-            "user": false,
-            "colorSchemes": ["light"],
-            "required": false,
-            "docsPage": "packages/html-cache/docs/cache-invalidation.md",
-            "notes": "Existing external Cloudflare dashboard documentation capture. Recapture requires an authorised Cloudflare browser session and selection of the Capell anonymous public HTML rule; the local Capell admin login does not authenticate this dashboard. This image remains in the receipt backlog until an accepted shared-runner receipt is promoted.",
-            "useCase": "An operator configures anonymous public HTML caching in the external Cloudflare dashboard.",
-            "screenshotPath": "packages/html-cache/docs/screenshots/cloudflare-capell-app-cache-ttl.jpg",
-            "fullPage": false,
-            "waitFor": "text=Edge TTL",
-            "interactions": [
-                {
-                    "type": "click",
-                    "selector": "text=Cache Rules"
-                },
-                {
-                    "type": "click",
-                    "selector": "text=Capell anonymous public HTML"
-                },
-                {
-                    "type": "scrollIntoView",
-                    "selector": "text=Edge TTL",
-                    "block": "start"
-                }
-            ]
         }
     ],
-    "fixtureCommands": ["capell:screenshot-admin-fixture --package=html-cache"]
+    "fixtureCommands": [
+        "capell:screenshot-admin-fixture --package=html-cache",
+        "capell:screenshot-dashboard-widgets --widget=html_cache_overview"
+    ]
 }

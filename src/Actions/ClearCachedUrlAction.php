@@ -47,11 +47,11 @@ final class ClearCachedUrlAction
             $urlString = $url;
         }
 
-        $request = Request::create($urlString);
-        if (! resolve(HtmlCachePathResolver::class)->hasSafeKey($request)) {
+        if (! resolve(HtmlCachePathResolver::class)->hasSafeKey($urlString)) {
             return false;
         }
 
+        $request = Request::create($urlString);
         $selectedCachedModelUrl?->load([
             'siteDomain' => static fn (BuilderContract $query): BuilderContract => $query->withTrashed(),
             'language',

@@ -15,6 +15,7 @@ use Capell\Admin\Contracts\Extenders\PageTableExtender;
 use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
+use Capell\Core\Actions\Install\RegisterProviderCommandsInCurrentProcessAction;
 use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Exceptions\UrlMissingSiteDomainException;
 use Capell\Core\Facades\CapellCore;
@@ -23,6 +24,7 @@ use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Octane\Resettable;
 use Capell\Core\Support\Database\RuntimeSchemaState;
+use Capell\Core\Support\Extensions\ExtensionContributionReceiptRegistry;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
 use Capell\Frontend\Contracts\FrontendOutputCacheInvalidator;
 use Capell\Frontend\Contracts\RenderedModelTracker;
@@ -47,6 +49,7 @@ use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Filament\Extenders\PageCachePageTableExtender;
 use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
+use Capell\HtmlCache\Filament\Pages\UncachedPagesPage;
 use Capell\HtmlCache\Filament\Settings\Contributors\HtmlCacheDashboardSettingsContributor;
 use Capell\HtmlCache\Filament\Widgets\CacheCoverageUrlsFilamentWidget;
 use Capell\HtmlCache\Filament\Widgets\HtmlCacheOverviewFilamentWidget;
@@ -120,7 +123,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasMigration('2026_05_10_190854_01_create_cached_model_urls_table')
             ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
             ->hasMigration('2026_06_07_000001_add_telemetry_to_cached_model_urls_table')
-            ->hasMigration('2026_07_18_000001_create_html_cache_generation_runs_table');
+            ->hasMigration('2026_07_18_000001_create_html_cache_generation_runs_table')
+            ->hasMigration('2026_10_12_000001_create_html_cache_request_observations_table');
     }
 
     #[Override]
@@ -202,12 +206,17 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerCommands()
             ->registerOptimization();
 
-        if (! $this->isPackageInstalled()) {
-            return;
+        // Fail closed at boot: the cache middleware is registered unconditionally, and a throw inside
+        // bootInstalledRuntime() is swallowed by the installed-runtime lifecycle, which would leave pages
+        // cached with no invalidation hooks.
+        if ($this->isPackageInstalled()) {
+            AssertHtmlCacheInvalidationTopologyAction::run();
         }
+    }
 
-        AssertHtmlCacheInvalidationTopologyAction::run();
-
+    #[Override]
+    protected function bootInstalledRuntime(): void
+    {
         // registerPageCacheDisk() already ran during registeringPackage()
         // (the Laravel register phase, which always completes before any
         // provider's boot phase runs), so it is intentionally not repeated
@@ -264,14 +273,18 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerFrontendMiddleware(): self
     {
-        $this->app->afterResolving(
+        $this->callAfterResolving(
             FrontendRouteMiddlewareRegistry::class,
-            fn (FrontendRouteMiddlewareRegistry $registry): FrontendRouteMiddlewareRegistry => $this->configureFrontendMiddleware($registry),
+            function (FrontendRouteMiddlewareRegistry $registry): void {
+                // Record under this provider's own context: whichever package resolves
+                // the registry first must not be credited with these middleware.
+                $receipts = $this->app->make(ExtensionContributionReceiptRegistry::class);
+                $receipts->withContexts(
+                    $receipts->providerContexts(self::class),
+                    fn (): FrontendRouteMiddlewareRegistry => $this->configureFrontendMiddleware($registry),
+                );
+            },
         );
-
-        if ($this->app->resolved(FrontendRouteMiddlewareRegistry::class)) {
-            $this->configureFrontendMiddleware(resolve(FrontendRouteMiddlewareRegistry::class));
-        }
 
         return $this;
     }
@@ -309,6 +322,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     {
         CapellAdmin::registerAdminBridge(self::$packageName, HtmlCacheAdminBridge::class);
         CapellAdmin::registerExtensionPage(self::$packageName, MaintenanceCachePage::class);
+        CapellAdmin::registerExtensionPage(self::$packageName, UncachedPagesPage::class);
         CapellAdmin::bootAdminBridges(self::$packageName);
 
         return $this;
@@ -498,13 +512,15 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     private function registerCommands(): self
     {
         if ($this->app->runningInConsole()) {
-            $this->commands([
-                ClearHtmlCacheCommand::class,
-                DiagnoseHtmlCacheCommand::class,
-                ProcessStaleHtmlCacheCommand::class,
-                StaticSiteCommand::class,
-                VerifyEdgeCachePurgeCommand::class,
-            ]);
+            RegisterProviderCommandsInCurrentProcessAction::run(function (): void {
+                $this->commands([
+                    ClearHtmlCacheCommand::class,
+                    DiagnoseHtmlCacheCommand::class,
+                    ProcessStaleHtmlCacheCommand::class,
+                    StaticSiteCommand::class,
+                    VerifyEdgeCachePurgeCommand::class,
+                ]);
+            });
         }
 
         return $this;

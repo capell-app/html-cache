@@ -32,7 +32,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -506,7 +506,11 @@ it('registers html cache middleware into the real frontend route middleware stac
 
     throw_if($route === null, RuntimeException::class, 'Expected frontend route to be registered.');
 
-    $middleware = $route->gatherMiddleware();
+    // The route only names the `capell-frontend` group; the stack lives in the group.
+    $middleware = collect($route->gatherMiddleware())
+        ->flatMap(static fn (mixed $name): array => is_string($name) ? (Route::getMiddlewareGroups()[$name] ?? [$name]) : [$name])
+        ->values()
+        ->all();
     $frontendCachePosition = array_search('frontend.cache', $middleware, true);
     $webPosition = array_search('web', $middleware, true);
     $frontendResolvePosition = array_search('frontend.resolve', $middleware, true);

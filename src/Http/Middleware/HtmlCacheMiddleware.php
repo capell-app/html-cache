@@ -19,6 +19,7 @@ use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\BuildHtmlCacheOriginDecisionAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
+use Capell\HtmlCache\Actions\RecordHtmlCacheRequestObservationAction;
 use Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction;
 use Capell\HtmlCache\Actions\ResolveEdgeCacheTagsAction;
 use Capell\HtmlCache\Actions\RetireCachedUrlAction;
@@ -76,10 +77,25 @@ final class HtmlCacheMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
+        $renderMilliseconds = null;
+        $render = static function (Request $request) use ($next, &$renderMilliseconds): Response {
+            $startedAt = hrtime(true);
+            try {
+                return $next($request);
+            } finally {
+                // Measure actual downstream rendering, excluding coalescing
+                // lock waits, cache writes and telemetry delivery.
+                $renderMilliseconds = ($renderMilliseconds ?? 0) + (hrtime(true) - $startedAt) / 1_000_000;
+            }
+        };
         $response = resolve(AuthorizeInternalHtmlCacheBypass::class)->handle(
             $request,
-            fn (Request $request): Response => $this->handleRequest($request, $next),
+            fn (Request $request): Response => $this->handleRequest($request, $render),
         );
+
+        // Recording runs after the response has been sent: its lookups and
+        // counter update must not add latency to a cache hit.
+        defer(static fn () => RecordHtmlCacheRequestObservationAction::run($request, $response, $renderMilliseconds));
 
         if ($request->isMethod('HEAD')) {
             $response->setContent('');
@@ -397,28 +413,11 @@ final class HtmlCacheMiddleware
             return true;
         }
 
-        if ($this->hasAccessGateBrowserToken($request)) {
+        if (resolve(ActiveAccessGateAreaResolver::class)->hasBrowserToken($request)) {
             return true;
         }
 
         return resolve(ActiveAccessGateAreaResolver::class)->hasActiveArea();
-    }
-
-    private function hasAccessGateBrowserToken(Request $request): bool
-    {
-        $cookieName = config('access-gate.cookies.browser_token.name', 'capell_access_gate_browser_token');
-
-        if (! is_string($cookieName) || $cookieName === '') {
-            return false;
-        }
-
-        if ($request->cookies->has($cookieName)) {
-            return true;
-        }
-
-        $cookieHeader = $request->headers->get('Cookie');
-
-        return is_string($cookieHeader) && str_contains($cookieHeader, $cookieName . '=');
     }
 
     private function shouldBypassHttpCache(Request $request, Response $response): bool

@@ -54,9 +54,21 @@ final class ClearCachedUrlsForSurrogateKeysAction
 
         $store = resolve(HtmlCacheStore::class);
         $paths = resolve(HtmlCachePathResolver::class);
-        foreach (SiteDomain::query()->withTrashed()->whereIn('site_id', $resolver->siteIds($surrogateKeys))->get() as $domain) {
-            // Pages without model dependencies never enter the URL index. Only
-            // isolated roots need this fallback; legacy roots keep their policy.
+        // Wildcard mappings have no concrete root. Their indexed request URLs
+        // were cleared above; never invent an origin for unindexed port copies.
+        $domains = SiteDomain::query()->withTrashed()
+            ->whereIn('site_id', $resolver->siteIds($surrogateKeys))
+            ->whereNotNull('scheme')
+            ->whereNotNull('domain')
+            ->get();
+        foreach ($domains as $domain) {
+            if (! $paths->hasSafeKey($domain->root_url)) {
+                continue;
+            }
+
+            // Pages without model dependencies never enter the URL index.
+            $cleared += $this->clearUnindexedStandardPages($domain, $store, $paths);
+
             foreach ($store->portDirectories($paths->directoryForSiteDomain($domain)) as $directory) {
                 if (preg_match('/^~port-(\d+)\//', $directory, $matches) !== 1
                     || ! CanClearHtmlCachePortCopyAction::run(Request::create($domain->scheme . '://' . $domain->domain . ':' . $matches[1] . '/'), $domain, entireMount: true)) {
@@ -72,5 +84,75 @@ final class ClearCachedUrlsForSurrogateKeysAction
         }
 
         return $cleared;
+    }
+
+    private function clearUnindexedStandardPages(SiteDomain $domain, HtmlCacheStore $store, HtmlCachePathResolver $paths): int
+    {
+        $origin = Request::create($domain->root_url);
+        if ($paths->nonStandardPortForRequest($origin) !== null) {
+            return 0;
+        }
+
+        $root = $paths->rootForRequest($origin, $domain);
+        $directory = $paths->directoryForSiteDomain($domain);
+        $files = $store->allFiles($directory);
+        if ($directory !== $root) {
+            // A mounted homepage is beside its directory: /selected -> selected.html.
+            $homepage = $paths->pathForRequestUrl($domain->full_url, $domain);
+            foreach ($store->files(dirname($homepage)) as $file) {
+                if ($this->isHomepageArtefact($file, $homepage)) {
+                    $files[] = $file;
+                }
+            }
+        }
+
+        $mounts = [];
+        foreach (SiteDomain::query()->withTrashed()->where('domain', $domain->domain)->get() as $mount) {
+            if ($paths->rootForRequest(Request::create($mount->root_url), $mount) === $root) {
+                $mounts[$paths->directoryForSiteDomain($mount)] = $paths->pathForRequestUrl($mount->full_url, $mount);
+            }
+        }
+        uksort($mounts, static fn (string $left, string $right): int => strlen($right) <=> strlen($left));
+
+        $cleared = 0;
+
+        foreach (array_unique($files) as $file) {
+            if (! $store->isSafePagePath($file, $root)) {
+                continue;
+            }
+
+            $relative = substr($file, strlen($root) + 1);
+            $pagePath = preg_replace('/(?:~f?[a-f0-9]{16})?(?:\.404)?\.(?:html|json|xml)(?:\.fragments\.json)?$/', '', $relative) ?? $relative;
+            foreach ($mounts as $mountDirectory => $homepage) {
+                if (! str_starts_with($file, $mountDirectory . '/') && ! $this->isHomepageArtefact($file, $homepage)) {
+                    continue;
+                }
+
+                // Suffix-looking mount names are literal URL bytes. Never strip
+                // /neighbour.404.html back into the root site's /neighbour.
+                $mountPath = substr($mountDirectory, strlen($root) + 1);
+                if ($mountPath !== '' && $pagePath !== $mountPath && ! str_starts_with($pagePath, $mountPath . '/')) {
+                    $pagePath = $mountPath;
+                }
+                break;
+            }
+            $path = implode('/', array_map(rawurlencode(...), explode('/', $pagePath)));
+            $request = Request::create($origin->getSchemeAndHttpHost() . '/' . $path);
+            // A nested mount can belong to another site on the same origin.
+            if (CanClearHtmlCachePortCopyAction::run($request, $domain)
+                && $store->deletePage($file, $root)
+                && str_ends_with($file, '.html')) {
+                $cleared++;
+            }
+        }
+
+        return $cleared;
+    }
+
+    private function isHomepageArtefact(string $file, string $homepage): bool
+    {
+        $stem = substr($homepage, 0, -strlen('.html'));
+
+        return preg_match('/^' . preg_quote($stem, '/') . '(?:~f?[a-f0-9]{16})?(?:\.404)?\.(?:html|json|xml)(?:\.fragments\.json)?$/', $file) === 1;
     }
 }

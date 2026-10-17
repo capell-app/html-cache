@@ -30,18 +30,18 @@ use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
 /**
- * @method static HtmlCacheEligibilityReportData run(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null)
+ * @method static HtmlCacheEligibilityReportData run(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null, bool $inspectCacheState = true)
  */
 final class BuildHtmlCacheEligibilityReportAction
 {
     use AsFake;
     use AsObject;
 
-    public function handle(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null): HtmlCacheEligibilityReportData
+    public function handle(Request $request, ?Response $response = null, ?PageUrl $pageUrl = null, bool $inspectCacheState = true): HtmlCacheEligibilityReportData
     {
         $reasons = [
             ...$this->requestReasons($request, $response instanceof Response),
-            ...$this->configurationReasons($response),
+            ...$this->configurationReasons(),
             ...$this->packageReasons(),
             ...$this->staleClaimReasons($request),
             ...$this->pageUrlReasons($pageUrl),
@@ -50,9 +50,10 @@ final class BuildHtmlCacheEligibilityReportAction
 
         $reasons = $this->deduplicateReasons($reasons);
 
-        $cachedUrl = $this->latestCachedUrl($request);
-        $staleCachedUrl = $this->latestStaleCachedUrl($request);
-        $cacheState = $this->cacheState($request, $cachedUrl, $staleCachedUrl);
+        // PageCache reads may delete expired files; inventories supply scoped metadata separately.
+        $cachedUrl = $inspectCacheState ? $this->latestCachedUrl($request) : null;
+        $staleCachedUrl = $inspectCacheState ? $this->latestStaleCachedUrl($request) : null;
+        $cacheState = $inspectCacheState ? $this->cacheState($request, $cachedUrl, $staleCachedUrl) : 'unknown';
 
         return new HtmlCacheEligibilityReportData(
             url: $request->getUri(),
@@ -65,13 +66,15 @@ final class BuildHtmlCacheEligibilityReportAction
             lastCachedAt: $cachedUrl?->cached_at?->toIso8601String(),
             fragmented: $this->fragmentKeys() !== [],
             fragmentKeys: $this->fragmentKeys(),
+            // Runtime eligibility is a hot path; only scoped inspections read metrics.
+            requestMetrics: $pageUrl instanceof PageUrl ? ReadHtmlCacheRequestMetricsAction::run($request, $pageUrl) : null,
         );
     }
 
     /**
      * @return list<HtmlCacheEligibilityReason>
      */
-    private function requestReasons(Request $request, bool $forCacheWrite): array
+    public function requestReasons(Request $request, bool $forCacheWrite = false): array
     {
         $reasons = [];
 
@@ -112,13 +115,13 @@ final class BuildHtmlCacheEligibilityReportAction
     /**
      * @return list<HtmlCacheEligibilityReason>
      */
-    private function configurationReasons(?Response $response): array
+    private function configurationReasons(): array
     {
         if (config('capell-html-cache.enabled', true) !== true) {
             return [HtmlCacheEligibilityReason::CacheDisabled];
         }
 
-        if ($response instanceof Response && config('capell-html-cache.write_enabled', true) !== true) {
+        if (config('capell-html-cache.write_enabled', true) !== true) {
             return [HtmlCacheEligibilityReason::CacheWriteDisabled];
         }
 

@@ -12,6 +12,7 @@ use Capell\Admin\Providers\Filament\AdminPanelProvider;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Macros\BlueprintMacros;
 use Capell\Core\Models\Media;
+use Capell\DiscoveryFoundation\Providers\DiscoveryFoundationServiceProvider;
 use Capell\Frontend\Providers\FrontendServiceProvider;
 use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
@@ -63,6 +64,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
             WidgetsServiceProvider::class,
             AdminPanelProvider::class,
             FrontendServiceProvider::class,
+            DiscoveryFoundationServiceProvider::class,
             PaginateRouteServiceProvider::class,
             LivewireServiceProvider::class,
             HtmlCacheServiceProvider::class,
@@ -75,7 +77,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
         parent::getEnvironmentSetUp($app);
 
         Blueprint::mixin(new BlueprintMacros);
-        (new NestedSetServiceProvider($app))->register();
+        new NestedSetServiceProvider($app)->register();
         config(['activitylog.enabled' => false]);
         config(['media-library.media_model' => Media::class]);
 
@@ -85,6 +87,7 @@ abstract class HtmlCacheTestCase extends AbstractTestCase
         );
         CapellCore::forcePackageInstalled(CapellAdminServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(FrontendServiceProvider::$packageName);
+        CapellCore::forcePackageInstalled(DiscoveryFoundationServiceProvider::$packageName);
         CapellCore::forcePackageInstalled(HtmlCacheServiceProvider::$packageName);
     }
 }

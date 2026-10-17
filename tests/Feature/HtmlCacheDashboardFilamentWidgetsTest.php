@@ -19,6 +19,7 @@ use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueFilamentWidget;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\Tests\Support\Concerns\CreatesAdminUser;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -27,7 +28,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Support\Collection as SupportCollection;
 use Livewire\Livewire;
 
-uses(HtmlCacheTestCase::class);
+uses(HtmlCacheTestCase::class, CreatesAdminUser::class);
 
 /**
  * @param  SupportCollection<int, int>  $assignedSiteIds
@@ -99,6 +100,8 @@ it('registers HTML Cache dashboard widgets and settings contributor', function (
 });
 
 it('renders HTML Cache dashboard widgets', function (string $widgetClass): void {
+    $this->actingAsAdmin();
+
     Livewire::test($widgetClass)->assertSuccessful();
 })->with([
     HtmlCacheOverviewFilamentWidget::class,

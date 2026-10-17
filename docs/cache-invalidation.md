@@ -60,9 +60,12 @@ Broad model and page-surrogate clears discover sibling port roots on disk as wel
 as indexed URLs, so a queued dependency-registration job cannot leave another
 port's copy readable. Site-surrogate clearing also removes matching non-standard
 domain directories, including mounted site paths, when pages have no model index.
-It fences in-flight publication even before an origin directory exists. Unindexed
-standard-port directories retain their existing policy; exact URL clears still
-preserve neighbouring ports. Native URL deletion strips the complete domain root
+It fences in-flight publication even before an origin directory exists. For
+standard-port domains, it also removes unindexed pages and their fragment sidecars
+under the site's mount, preserving pages owned by another site's nested mount.
+This includes theme activation through Core's site-surrogate invalidation event:
+public HTML without recorded model dependencies must not retain the previous theme.
+Exact URL clears still preserve neighbouring ports. Native URL deletion strips the complete domain root
 before checking descendants: a port root has two components, not one.
 
 Publication and generic filesystem operations verify the resolved target or its
@@ -236,14 +239,6 @@ Use these rule settings:
 - **Cache key:** Keep Cloudflare's default query-string behaviour. Capell rejects unsafe or unknown variants at the origin.
 
 Do not replace the Edge TTL policy with "ignore cache-control". Capell relies on `private`, `no-store`, and `no-cache` to keep authenticated, signed, preview, personalised, and otherwise unsafe responses out of the shared edge cache. The path and session-cookie conditions are an additional guard, not a replacement for the origin response policy.
-
-The saved production rule and active rule list are shown below.
-
-![Full Cloudflare edit view for the Capell anonymous public HTML cache rule with the sidebar collapsed](screenshots/cloudflare-capell-app-cache-rule.jpg)
-
-![Cloudflare Edge TTL and Browser TTL settings for the Capell anonymous public HTML cache rule](screenshots/cloudflare-capell-app-cache-ttl.jpg)
-
-![Cloudflare cache rule list showing the Capell anonymous public HTML rule active](screenshots/cloudflare-capell-app-cache-rules-active.jpg)
 
 After deploying or changing the rule, make two anonymous requests to a public page. The first response should normally be `MISS`; the second should be `HIT` and include an `Age` header. An excluded or private route must remain `DYNAMIC` or `BYPASS`:
 

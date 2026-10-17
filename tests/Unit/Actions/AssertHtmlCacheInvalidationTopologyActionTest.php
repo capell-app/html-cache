@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\HtmlCache\Actions\AssertHtmlCacheInvalidationTopologyAction;
+use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 
 uses(HtmlCacheTestCase::class);
@@ -70,3 +71,14 @@ it('accepts a configured cross-node purge path', function (string $driver): void
 
     expect(true)->toBeTrue();
 })->with(['cloudflare', 'http']);
+
+it('aborts provider boot on an unsafe topology instead of leaving unpurgeable cached pages', function (): void {
+    config()->set('capell.multi_node', true);
+
+    $provider = $this->app->getProvider(HtmlCacheServiceProvider::class);
+
+    expect($provider)->toBeInstanceOf(HtmlCacheServiceProvider::class);
+    assert($provider instanceof HtmlCacheServiceProvider);
+
+    expect(fn () => $provider->packageBooted())->toThrow(RuntimeException::class, 'CAPELL_MULTI_NODE=true');
+});

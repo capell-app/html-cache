@@ -26,6 +26,10 @@ return [
         'flush_delay_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_FLUSH_DELAY_SECONDS', 30),
         'buffer_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_HIT_BUFFER_TTL_SECONDS', 3600),
     ],
+    'observation_recording' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_OBSERVATIONS', true),
+        'sample_rate' => $integerEnv('CAPELL_HTML_CACHE_OBSERVATION_SAMPLE_RATE', 10),
+    ],
     'http_cache' => [
         /*
         |--------------------------------------------------------------------------

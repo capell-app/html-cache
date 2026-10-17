@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Console\Commands;
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
+use Capell\HtmlCache\Actions\BuildAnonymousHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Data\HtmlCacheEligibilityReportData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -29,6 +30,8 @@ final class DiagnoseHtmlCacheCommand extends Command
     {
         $url = $this->url();
         $request = Request::create($url, \Symfony\Component\HttpFoundation\Request::METHOD_GET);
+        $request->setUserResolver(static fn (): null => null);
+
         $pageUrl = $this->pageUrl($request);
 
         if ($this->option('render') === true) {
@@ -37,7 +40,7 @@ final class DiagnoseHtmlCacheCommand extends Command
             $report = $rendered['report'];
         } else {
             $response = null;
-            $report = BuildHtmlCacheEligibilityReportAction::run($request, pageUrl: $pageUrl);
+            $report = BuildAnonymousHtmlCacheEligibilityReportAction::run($request, pageUrl: $pageUrl);
         }
 
         if ($this->option('json') === true) {
@@ -59,6 +62,9 @@ final class DiagnoseHtmlCacheCommand extends Command
             ['Cache state', $report->cacheState],
             ['Stale', $report->stale ? 'yes' : 'no'],
             ['Last cached at', $report->lastCachedAt ?? 'never'],
+            ['Last sampled render (ms)', $report->requestMetrics?->lastRenderMilliseconds !== null ? number_format($report->requestMetrics->lastRenderMilliseconds, 2) : 'not observed'],
+            ['Estimated origin hit rate', $report->requestMetrics?->hitRate !== null ? number_format($report->requestMetrics->hitRate, 2) . '%' : 'not observed'],
+            ['Observations since', $report->requestMetrics === null ? 'not observed' : $report->requestMetrics->observedSince],
         ];
 
         if ($response instanceof Response) {
@@ -128,7 +134,7 @@ final class DiagnoseHtmlCacheCommand extends Command
             return $url;
         }
 
-        $baseUrl = rtrim((string) config('app.url', 'http://localhost'), '/');
+        $baseUrl = rtrim(config()->string('app.url', 'http://localhost'), '/');
 
         return $baseUrl . '/' . ltrim($url, '/');
     }

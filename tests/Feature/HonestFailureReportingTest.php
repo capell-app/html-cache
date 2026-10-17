@@ -11,6 +11,7 @@ use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\DeletePageCacheAction;
 use Capell\HtmlCache\Actions\GenerateStaticSiteAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
+use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
@@ -234,7 +235,10 @@ it('does not report page deletion success when a URL cannot be cleared', functio
 it('reports the page cache column clear as queued until the job executes', function (): void {
     $pageUrl = new PageUrl;
     $column = PageCachedIconColumn::make('cached');
-    new ReflectionMethod($column, 'deleteCacheFile')->invoke($column, $pageUrl);
+    $column->record($pageUrl);
+    $action = $column->getAction();
+    throw_unless($action instanceof Closure, RuntimeException::class, 'Expected a page cache clear callback.');
+    $action($pageUrl);
 
     DeletePageCacheAction::assertPushed();
     Notification::assertNotified(Notification::make()->title(__('capell-html-cache::admin.clear_queued'))->info());
@@ -425,3 +429,13 @@ it('reports incomplete safety diagnostics when unindexed enumeration fails', fun
 
     expect(collect($checks)->pluck('status')->all())->toContain('amber')->not->toContain('green');
 })->with(['files', 'allFiles']);
+
+it('rejects malformed origins before attempting to delete cached files', function (string $url): void {
+    Storage::fake('page_cache');
+    Storage::disk('page_cache')->put('https.example.test/keep.html', 'Keep this cached page');
+
+    expect(resolve(HtmlCachePathResolver::class)->hasSafeKey($url))->toBeFalse()
+        ->and(ClearCachedUrlAction::run($url))->toBeFalse()
+        ->and(MarkCachedUrlStaleAction::run($url))->toBe(0)
+        ->and(Storage::disk('page_cache')->get('https.example.test/keep.html'))->toBe('Keep this cached page');
+})->with(['https://*.example.test/about', 'https://bad host.example.test/about']);

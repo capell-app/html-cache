@@ -52,6 +52,7 @@ final class BuildHtmlCacheOriginDecisionAction
                 ?? ($report instanceof HtmlCacheEligibilityReportData ? ($report->reasons[0] ?? null) : null),
             );
         }
+
         if (! $report instanceof HtmlCacheEligibilityReportData) {
             $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
         }

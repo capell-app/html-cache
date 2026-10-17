@@ -39,6 +39,8 @@ afterEach(function (): void {
 });
 
 it('bounds renderer entries while a cold render outlives the coalescing wait or lease', function (bool $expiredLease): void {
+    $this->freezeTime();
+
     SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $request = Request::create('https://example.test/slow');
     app()->instance('request', $request);

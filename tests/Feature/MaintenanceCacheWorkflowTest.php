@@ -557,14 +557,15 @@ it('shows exactly the applicable global header action for each state', function 
     // hides them), so `assertActionHidden` — which expects a real, resolvable
     // Action instance — does not apply here. Assert the single applicable
     // action directly and that the other two labels never render.
-    Livewire::test(MaintenanceCachePage::class)
+    $component = Livewire::test(MaintenanceCachePage::class)
         ->assertActionVisible('prepare')
         ->assertDontSee(MaintenanceGlobalAction::ReviewAndEnable->label())
         ->assertDontSee(MaintenanceGlobalAction::ExitMaintenance->label());
 
-    $method = new ReflectionMethod(MaintenanceCachePage::class, 'getHeaderActions');
+    $page = $component->instance();
+    throw_unless($page instanceof MaintenanceCachePage, RuntimeException::class, 'Expected a maintenance page.');
 
-    expect($method->invoke(new MaintenanceCachePage))->toHaveCount(1);
+    expect($page->getCachedHeaderActions())->toHaveCount(1);
 });
 
 it('scopes site rows and actions to the actor accessible sites', function (): void {

@@ -18,6 +18,7 @@ use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
+use Capell\HtmlCache\Filament\Pages\UncachedPagesPage;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\CachedModelUrlResource;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
@@ -27,15 +28,21 @@ use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
 use Carbon\CarbonImmutable;
+use Filament\Facades\Filament;
+use Filament\Navigation\NavigationGroup;
+use Filament\Navigation\NavigationItem;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+
+use function Pest\Laravel\get;
+
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
-require_once dirname(__DIR__) . '/Support/CachedModelUrlsTestSupport.php';
+require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -57,7 +64,7 @@ it('exposes the selected site and cache map widget on site health', function ():
         ->and(view()->getFinder()->find('capell-html-cache::livewire.site-health-cache-map'))->toContain('packages/html-cache/resources/views');
 });
 
-it('does not register the cached model urls resource as an admin page', function (): void {
+it('registers cached pages through the admin bridge', function (): void {
     CapellAdmin::clearAdminSurfaceContributions();
 
     (new HtmlCacheAdminBridge)->register(
@@ -65,16 +72,43 @@ it('does not register the cached model urls resource as an admin page', function
         AdminBridgeContextData::forPackage('capell-app/html-cache'),
     );
 
-    expect(CapellAdmin::getAdminSurfaceContributions(AdminSurfaceContributionType::Resource))->toBe([]);
+    expect(collect(CapellAdmin::getAdminSurfaceContributions(AdminSurfaceContributionType::Resource))
+        ->pluck('class')->all())->toContain(CachedModelUrlResource::class);
 });
 
-it('keeps html cache monitoring links contained', function (): void {
+it('groups cached pages and maintenance beneath site health', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('super_admin');
+
+    test()->actingAs($user);
     expect(MaintenanceCachePage::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
         ->and(MaintenanceCachePage::getNavigationSort())->toBe(10)
-        ->and(MaintenanceCachePage::getNavigationParentItem())->toBeNull()
+        ->and(MaintenanceCachePage::getNavigationParentItem())->toBe(SiteHealthPage::getNavigationLabel())
         ->and(CachedModelUrlResource::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
         ->and(CachedModelUrlResource::getNavigationSort())->toBe(11)
-        ->and(CachedModelUrlResource::getNavigationParentItem())->toBe((string) __('capell-html-cache::admin.maintenance_cache'));
+        ->and(CachedModelUrlResource::getNavigationParentItem())->toBe(SiteHealthPage::getNavigationLabel())
+        ->and(CachedModelUrlResource::getNavigationLabel())->toBe('Cached pages')
+        ->and(CachedModelUrlResource::getPluralModelLabel())->toBe('Cached pages');
+});
+
+it('renders the cached pages resource for an authorised operator', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('super_admin');
+
+    test()->actingAs($user);
+
+    get(CachedModelUrlResource::getUrl('index', panel: 'admin'))
+        ->assertOk()
+        ->assertSee('Cached pages');
+
+    $health = collect(Filament::getNavigation())
+        ->flatMap(fn (NavigationGroup $group): array => collect($group->getItems())->all())
+        ->first(fn (NavigationItem $item): bool => $item->getLabel() === SiteHealthPage::getNavigationLabel());
+
+    expect($health)->toBeInstanceOf(NavigationItem::class);
+    assert($health instanceof NavigationItem);
+    expect(collect($health->getChildItems())->map(fn (NavigationItem $item): string => is_string($label = $item->getLabel()) ? $label : $label->toHtml())->all())
+        ->toContain('Cached pages', MaintenanceCachePage::getNavigationLabel());
 });
 
 it('builds a cache map overview grouped by model and top resource impact', function (): void {
@@ -330,6 +364,17 @@ it('denies cached model url resource rows when no actor is available', function 
     ]);
 
     expect(CachedModelUrlResource::getEloquentQuery()->count())->toBe(0);
+});
+
+it('denies cache map access when its view permission has not been installed', function (): void {
+    Permission::query()->where('name', HtmlCachePermission::ViewCachedModelUrls->value)->delete();
+    resolve(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    test()->actingAs(User::factory()->create());
+
+    expect(CachedModelUrlResource::canAccess())->toBeFalse()
+        ->and(CachedModelUrlResource::canViewAny())->toBeFalse()
+        ->and(UncachedPagesPage::canAccess())->toBeFalse();
 });
 
 it('requires cache map view permission for the cached model url resource', function (): void {

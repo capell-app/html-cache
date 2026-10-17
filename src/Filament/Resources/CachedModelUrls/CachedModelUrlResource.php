@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Filament\Resources\CachedModelUrls;
 
 use BackedEnum;
+use Capell\Admin\Filament\Pages\SiteHealthPage;
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Filament\Resources\CachedModelUrls\Pages\ListCachedModelUrls;
@@ -17,6 +18,7 @@ use Filament\Tables\Table;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Override;
+use Spatie\Permission\Exceptions\PermissionDoesNotExist;
 
 final class CachedModelUrlResource extends Resource
 {
@@ -73,15 +75,27 @@ final class CachedModelUrlResource extends Resource
     }
 
     #[Override]
+    public static function getModelLabel(): string
+    {
+        return (string) __('capell-html-cache::admin.cached_page');
+    }
+
+    #[Override]
+    public static function getPluralModelLabel(): string
+    {
+        return (string) __('capell-html-cache::admin.cached_model_urls');
+    }
+
+    #[Override]
     public static function getNavigationGroup(): string
     {
         return (string) __('capell-admin::navigation.group_monitoring');
     }
 
     #[Override]
-    public static function getNavigationParentItem(): string
+    public static function getNavigationParentItem(): ?string
     {
-        return __('capell-html-cache::admin.maintenance_cache');
+        return SiteHealthPage::canAccess() ? SiteHealthPage::getNavigationLabel() : null;
     }
 
     #[Override]
@@ -104,6 +118,10 @@ final class CachedModelUrlResource extends Resource
             return true;
         }
 
-        return $actor->hasPermissionTo(HtmlCachePermission::ViewCachedModelUrls->value) === true;
+        try {
+            return $actor->hasPermissionTo(HtmlCachePermission::ViewCachedModelUrls->value) === true;
+        } catch (PermissionDoesNotExist) {
+            return false;
+        }
     }
 }

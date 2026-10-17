@@ -2,74 +2,61 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Actions\RuntimeRefresh\RefreshInstalledPackageRuntimeAction;
+use Capell\Core\Facades\CapellCore;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\Tests\Support\InstalledRuntimeParity;
+use Capell\Tests\Support\InstalledRuntimeState;
+use Capell\Tests\Support\InstalledRuntimeTestCase;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 
 uses(HtmlCacheTestCase::class);
 
-/**
- * Regression coverage for the packageBooted() permission-sync fix: syncing
- * used to run EnsureHtmlCachePermissionsAction (a permission SELECT/
- * firstOrCreate query per HtmlCachePermission case, plus a
- * forgetCachedPermissions() cache bust) unconditionally on every single
- * request. That is now gated behind a cached "already synced" marker so the
- * DB work only happens once per marker window, while still self-healing if
- * permissions are ever missing.
- *
- * EnsureHtmlCachePermissionsAction is `final`, so it cannot be Mockery-mocked
- * (repo convention keeps Actions final); the queries-eliminated claim is
- * instead proven directly via the query log, which is also the more honest
- * metric for a performance fix.
- */
-function callHtmlCacheProviderEnsurePermissions(): void
+/** @param Closure(int): void $assertPermissions */
+function activateHtmlCacheWithPermissionMarker(bool $synced, Closure $assertPermissions): void
 {
-    $provider = app()->getProvider(HtmlCacheServiceProvider::class);
+    InstalledRuntimeState::run(function () use ($synced, $assertPermissions): void {
+        $application = InstalledRuntimeTestCase::boot(InstalledRuntimeParity::manifest('html-cache'), false, sourceRoot: dirname(__DIR__, 2));
+        InstalledRuntimeTestCase::prepareLateInstallMigrations($application);
+        resolve(RuntimeSchemaState::class)->refreshTable('permissions');
+        Cache::forget('capell-html-cache.permissions-synced');
+        if ($synced) {
+            Cache::put('capell-html-cache.permissions-synced', true, 3600);
+        }
 
-    if (! $provider instanceof HtmlCacheServiceProvider) {
-        throw new RuntimeException('HtmlCacheServiceProvider was not registered in the test application.');
-    }
+        $queryCount = 0;
+        DB::listen(function (QueryExecuted $query) use (&$queryCount): void {
+            if (str_contains($query->sql, '"permissions"')) {
+                $queryCount++;
+            }
+        });
 
-    $ensurePermissions = new ReflectionMethod($provider, 'ensurePermissions');
-    $ensurePermissions->setAccessible(true);
-    $ensurePermissions->invoke($provider);
+        CapellCore::markPackageInstalled(HtmlCacheServiceProvider::$packageName);
+        RefreshInstalledPackageRuntimeAction::run(CapellCore::getPackage(HtmlCacheServiceProvider::$packageName));
+        $assertPermissions($queryCount);
+    });
 }
 
-it('syncs permissions, runs queries, and sets the cache marker the first time permissions are missing', function (): void {
-    resolve(RuntimeSchemaState::class)->refreshTable('permissions');
-    Cache::forget('capell-html-cache.permissions-synced');
+it('creates missing permissions and records the sync marker when the package becomes available', function (): void {
+    activateHtmlCacheWithPermissionMarker(false, function (int $queryCount): void {
+        expect($queryCount)->toBeGreaterThan(0)
+            ->and(Cache::get('capell-html-cache.permissions-synced'))->toBeTrue();
 
-    expect(Cache::get('capell-html-cache.permissions-synced'))->toBeNull();
-
-    $queryCount = 0;
-    DB::listen(function () use (&$queryCount): void {
-        $queryCount++;
+        foreach (HtmlCachePermission::cases() as $permission) {
+            expect(Permission::query()->where('name', $permission->value)->exists())->toBeTrue();
+        }
     });
-
-    callHtmlCacheProviderEnsurePermissions();
-
-    expect($queryCount)->toBeGreaterThan(0)
-        ->and(Cache::get('capell-html-cache.permissions-synced'))->toBeTrue();
-
-    foreach (HtmlCachePermission::cases() as $permission) {
-        expect(Permission::query()->where('name', $permission->value)->exists())->toBeTrue();
-    }
 });
 
-it('runs no queries for permission sync once the cache marker is already set', function (): void {
-    resolve(RuntimeSchemaState::class)->refreshTable('permissions');
-    Cache::put('capell-html-cache.permissions-synced', true, 3600);
-
-    $queryCount = 0;
-    DB::listen(function () use (&$queryCount): void {
-        $queryCount++;
+it('avoids permission database work when activation sees an existing sync marker', function (): void {
+    activateHtmlCacheWithPermissionMarker(true, function (int $queryCount): void {
+        expect($queryCount)->toBe(0)
+            ->and(Cache::get('capell-html-cache.permissions-synced'))->toBeTrue();
     });
-
-    callHtmlCacheProviderEnsurePermissions();
-
-    expect($queryCount)->toBe(0);
 });

@@ -27,6 +27,7 @@ final class HtmlCacheEligibilityReportData extends Data
         public readonly ?string $lastCachedAt = null,
         public readonly bool $fragmented = false,
         public readonly array $fragmentKeys = [],
+        public readonly ?HtmlCacheRequestMetricsData $requestMetrics = null,
     ) {}
 
     public function hasReason(HtmlCacheEligibilityReason $reason): bool
@@ -60,6 +61,7 @@ final class HtmlCacheEligibilityReportData extends Data
             'lastCachedAt' => $this->lastCachedAt,
             'fragmented' => $this->fragmented,
             'fragmentKeys' => $this->fragmentKeys,
+            'requestMetrics' => $this->requestMetrics?->toArray(),
         ];
     }
 }

@@ -5,12 +5,29 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\AccessGate;
 
 use Illuminate\Database\Schema\Builder as SchemaBuilder;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 final class ActiveAccessGateAreaResolver
 {
+    public function hasBrowserToken(Request $request): bool
+    {
+        $cookieName = config('access-gate.cookies.browser_token.name', 'capell_access_gate_browser_token');
+        if (! is_string($cookieName) || $cookieName === '') {
+            return false;
+        }
+
+        if ($request->cookies->has($cookieName)) {
+            return true;
+        }
+
+        $cookieHeader = $request->headers->get('Cookie');
+
+        return is_string($cookieHeader) && str_contains($cookieHeader, $cookieName . '=');
+    }
+
     public function hasActiveArea(): bool
     {
         $connectionName = $this->connectionName();

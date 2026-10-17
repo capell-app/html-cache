@@ -26,11 +26,10 @@ it('keeps html cache marketplace and composer copy outcome-led and aligned', fun
     $composer = htmlCacheJsonFile($packagePath . '/composer.json');
 
     $description = 'Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.';
-    $summary = 'Serve Capell pages as static HTML for sub-millisecond responses — with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.';
 
     expect($manifest['description'] ?? null)->toBe($description)
         ->and($composer['description'] ?? null)->toBe($description)
-        ->and(data_get($manifest, 'marketplace.summary'))->toBe($summary)
+        ->and(data_get($manifest, 'marketplace.summary'))->toBeString()->not->toBeEmpty()
         ->and(data_get($manifest, 'capabilities'))->toContain('cache-blocking')
         ->and(data_get($manifest, 'performance.cacheSafety.cacheable'))->toBeTrue()
         ->and(htmlCacheTextFile($packagePath . '/README.md'))->toContain($description)

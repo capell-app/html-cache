@@ -41,6 +41,9 @@ Screenshot contract: `docs/screenshots.json`.
 - Anonymous public cache hit (frontend, supplementary evidence).
 - Public maintenance page (frontend, supplementary evidence).
 - HTML Cache maintenance cache page with admin sidebar menu open (admin, supplementary evidence).
+- Cloudflare anonymous public HTML cache rule (admin, supplementary evidence).
+- Cloudflare cache rule activation (admin, supplementary evidence).
+- Cloudflare Edge TTL and Browser TTL settings (admin, supplementary evidence).
 
 ## Technical Shape
 
@@ -73,6 +76,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `PageCachePageTableExtender`
 - `MaintenanceSiteHeaderActionExtender`
 - `MaintenanceCachePage`
+- `UncachedPagesPage`
 - `CachedModelUrlResource`
 - `ListCachedModelUrls`
 - `CachedModelUrlsTable`
@@ -99,6 +103,8 @@ Screenshot contract: `docs/screenshots.json`.
 - `BuildHtmlCacheOriginDecisionAction`
 - `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`
 - `BuildMaintenanceCacheOverviewAction`
+- `BuildUncachedPagesAction`
+- `CanClearHtmlCachePortCopyAction`
 - `ClaimStaleCachedUrlAction`
 - `ClearAllHtmlCacheAction`
 - `ClearCachedPageUrlsAction`
@@ -125,6 +131,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `MarkCachedUrlsForModelStaleAction`
 - `MarkCachedUrlsForSiteStaleAction`
 - `NotifyClearCachedPagesAction`
+- `PlanEditorHtmlCacheConsequencesAction`
 - `PrepareMaintenanceCacheAction`
 - `PrepareSiteMaintenanceCacheAction`
 - `ProcessStaleHtmlCacheAction`
@@ -160,6 +167,8 @@ Screenshot contract: `docs/screenshots.json`.
 - `MaintenanceCacheOverviewData`
 - `MaintenanceSiteStatusData`
 - `StaleHtmlCacheProcessResultData`
+- `UncachedPageData`
+- `UncachedPagesData`
 
 ### Jobs
 
@@ -191,6 +200,7 @@ Screenshot contract: `docs/screenshots.json`.
 ### Manifest contributions
 
 - `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`
+- `admin-resource: Capell\HtmlCache\Manifest\HtmlCacheAdminResourcesContribution`
 - `console-command: Capell\HtmlCache\Manifest\HtmlCacheConsoleCommandsContribution`
 - `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`
 - `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`
@@ -204,6 +214,8 @@ Screenshot contract: `docs/screenshots.json`.
 ### Blade views
 
 - `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`
+- `packages/html-cache/resources/views/filament/pages/partials/uncached-pages-table.blade.php`
+- `packages/html-cache/resources/views/filament/pages/uncached-pages.blade.php`
 - `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`
 
 ### Cache tags
@@ -223,7 +235,7 @@ Screenshot contract: `docs/screenshots.json`.
 ## Install Impact
 
 - Required packages: `capell-app/admin`, `capell-app/core`, `capell-app/discovery-foundation`, `capell-app/frontend`.
-- Admin navigation: declares `admin-page: HtmlCacheAdminPagesContribution`; each Filament page or resource controls its own navigation visibility.
+- Admin navigation: declares `admin-page: HtmlCacheAdminPagesContribution`, `admin-resource: HtmlCacheAdminResourcesContribution`; each Filament page or resource controls its own navigation visibility.
 - Admin/editor extensions: `dashboard-widget: HtmlCacheDashboardFilamentWidgetsContribution`.
 - Permissions: `capell-html-cache.view`, `capell-html-cache.clear`, `capell-html-cache.maintenance.manage`.
 - Public routes: registers `HtmlCacheFrontendRoutesContribution`.

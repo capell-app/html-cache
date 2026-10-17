@@ -33,10 +33,21 @@
     },
     "contributes": [
         {
+            "type": "admin-resource",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheAdminResourcesContribution",
+            "resourceClass": "Capell\\HtmlCache\\Filament\\Resources\\CachedModelUrls\\CachedModelUrlResource"
+        },
+        {
             "type": "admin-page",
             "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheAdminPagesContribution",
             "pageClass": "Capell\\HtmlCache\\Filament\\Pages\\MaintenanceCachePage",
             "labelKey": "capell-html-cache::admin.maintenance_cache"
+        },
+        {
+            "type": "admin-page",
+            "class": "Capell\\HtmlCache\\Manifest\\HtmlCacheAdminPagesContribution",
+            "pageClass": "Capell\\HtmlCache\\Filament\\Pages\\UncachedPagesPage",
+            "labelKey": "capell-html-cache::admin.uncached_pages"
         },
         {
             "type": "dashboard-widget",
@@ -104,6 +115,7 @@
         "requiredTables": [
             "cached_model_urls",
             "html_cache_generation_runs",
+            "html_cache_request_observations",
             "stale_cached_urls"
         ]
     },
@@ -140,6 +152,7 @@
             "encryptedFields": [],
             "hashedTokenFields": [
                 "cached_model_urls.url_hash",
+                "html_cache_request_observations.url_hash",
                 "stale_cached_urls.url_hash"
             ],
             "redactedOutputClasses": [],
@@ -223,7 +236,7 @@
         "privateDocsRequested": false
     },
     "marketplace": {
-        "summary": "Serve Capell pages as static HTML for sub-millisecond responses — with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
+        "summary": "Serve Capell pages as static HTML for sub-millisecond responses, with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
         "screenshots": [
             {
                 "path": "docs/screenshots/html-cache-maintenance-cache-page.png",

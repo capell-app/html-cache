@@ -123,3 +123,15 @@ it('rejects encoded unsafe cache path segments', function (string $url): void {
     '/unsafe/%00/secret',
     '/unsafe/%5c/secret',
 ]);
+
+it('uses the resolved request origin for wildcard site domain fields', function (?string $scheme, ?string $host): void {
+    $domain = htmlCachePathResolverSiteDomain(['scheme' => $scheme, 'domain' => $host, 'path' => '/docs']);
+    $resolver = new HtmlCachePathResolver;
+
+    expect($resolver->pathForRequestUrl('https://resolved.example.test:8443/docs/guide', $domain))
+        ->toBe('~port-8443/https.resolved.example.test/docs/guide.html');
+})->with([
+    'host agnostic' => ['https', null],
+    'scheme agnostic' => [null, 'resolved.example.test'],
+    'host and scheme agnostic' => [null, null],
+]);

@@ -118,7 +118,7 @@
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-page-table-extension.png",
             "scenario": "admin-index",
             "url": "/admin/pages",
-            "waitFor": ".fi-ta-row:has-text(\"Studio workshop programme\") .fi-ta-col-cached",
+            "waitFor": ".fi-ta-row:has-text(\"Studio workshop programme\") [wire\\:key$=\".column.cached\"] svg",
             "colorSchemes": ["light"],
             "fullPage": false,
             "beforeWait": [

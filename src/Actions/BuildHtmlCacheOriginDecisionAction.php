@@ -54,7 +54,7 @@ final class BuildHtmlCacheOriginDecisionAction
         }
 
         if (! $report instanceof HtmlCacheEligibilityReportData) {
-            $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+            $report = BuildHtmlCacheEligibilityReportAction::run($request, $response, inspectCacheState: false);
         }
 
         if ($report->hasReason(HtmlCacheEligibilityReason::StaleClaimInvalid)) {

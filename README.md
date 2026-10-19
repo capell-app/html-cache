@@ -41,9 +41,6 @@ Screenshot contract: `docs/screenshots.json`.
 - Anonymous public cache hit (frontend, supplementary evidence).
 - Public maintenance page (frontend, supplementary evidence).
 - HTML Cache maintenance cache page with admin sidebar menu open (admin, supplementary evidence).
-- Cloudflare anonymous public HTML cache rule (admin, supplementary evidence).
-- Cloudflare cache rule activation (admin, supplementary evidence).
-- Cloudflare Edge TTL and Browser TTL settings (admin, supplementary evidence).
 
 ## Technical Shape
 
@@ -62,6 +59,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`
 - `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`
 - `packages/html-cache/database/migrations/2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`
+- `packages/html-cache/database/migrations/2026_10_12_000001_create_html_cache_request_observations_table.php`
 
 ### Models
 
@@ -97,6 +95,7 @@ Screenshot contract: `docs/screenshots.json`.
 ### Actions
 
 - `AssertHtmlCacheInvalidationTopologyAction`
+- `BuildAnonymousHtmlCacheEligibilityReportAction`
 - `BuildCacheMapOverviewAction`
 - `BuildCachedModelUrlDiagnosticsAction`
 - `BuildHtmlCacheEligibilityReportAction`
@@ -138,14 +137,17 @@ Screenshot contract: `docs/screenshots.json`.
 - `PruneHtmlCacheMetadataAction`
 - `PurgeEdgeCacheAction`
 - `QueueMaintenancePageGenerationAction`
+- `ReadHtmlCacheRequestMetricsAction`
 - `RecordCachedModelUrlsAction`
 - `RecordHtmlCacheHitAction`
+- `RecordHtmlCacheRequestObservationAction`
 - `RefreshCachedUrlAtomicallyAction`
 - `RefreshOriginStaleCachedUrlAction`
 - `RenderCoalescedHtmlCacheMissAction`
 - `ResolveCachedUrlsForModelAction`
 - `ResolveCachedUrlsForSurrogateKeysAction`
 - `ResolveEdgeCacheTagsAction`
+- `ResolveHtmlCachePageUrlAction`
 - `RetireCachedUrlAction`
 - `ScheduleOriginStaleCachedUrlRefreshAction`
 - `SelectStaleHtmlCacheCandidatesAction`
@@ -163,6 +165,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `HtmlCacheEligibilityReportData`
 - `HtmlCacheHitBatchData`
 - `HtmlCacheOriginDecisionData`
+- `HtmlCacheRequestMetricsData`
 - `MaintenanceCacheDomainData`
 - `MaintenanceCacheOverviewData`
 - `MaintenanceSiteStatusData`
@@ -225,10 +228,10 @@ Screenshot contract: `docs/screenshots.json`.
 
 ## Data Model
 
-- Required tables: `cached_model_urls`, `html_cache_generation_runs`, `stale_cached_urls`.
+- Required tables: `cached_model_urls`, `html_cache_generation_runs`, `html_cache_request_observations`, `stale_cached_urls`.
 - Models: `CachedModelUrl`, `HtmlCacheGenerationRun`, `StaleCachedUrl`.
 - Core record references in migrations: `sites via site_id`, `languages via language_id`, `site domains via site_domain_id`.
-- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`.
+- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`, `2026_10_12_000001_create_html_cache_request_observations_table.php`.
 - Migration impact: run host migrations through the package install flow before opening package surfaces.
 - Deletion/retention behaviour: migrations declare null-on-delete relationships; no timed pruning or retention schedule is declared in `capell.json`.
 

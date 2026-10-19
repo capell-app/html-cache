@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\RenderHookExtensionInterface;
@@ -735,6 +736,56 @@ it('caches active access gate area lookups so repeated anonymous requests do not
         ->toContain('no-store')
         ->and($queriesAfterFirstRequest)->toBeGreaterThan(0)
         ->and(htmlCacheAccessGateQueryCount())->toBe($queriesAfterFirstRequest);
+});
+
+it('decides whether a cache miss may be written without reading the cache tracking tables', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $request = Request::create('https://example.test/tracking-free', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('<main>tracking free</main>', 200, ['Content-Type' => 'text/html']),
+    );
+
+    $trackingReads = collect(DB::getQueryLog())
+        ->map(static fn (array $entry): string => (string) $entry['query'])
+        ->filter(static fn (string $sql): bool => (str_starts_with(mb_strtolower($sql), 'select') && str_contains($sql, 'cached_model_urls'))
+            || (str_starts_with(mb_strtolower($sql), 'select') && str_contains($sql, 'stale_cached_urls')))
+        ->values()
+        ->all();
+
+    expect($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
+        ->and(Storage::disk('page_cache')->get('https.example.test/tracking-free.html'))->toBe('<main>tracking free</main>')
+        ->and($trackingReads)->toBe([]);
+});
+
+it('shares the access gate area table probe with the runtime schema state of the request', function (): void {
+    Cache::flush();
+    htmlCacheCreateAccessGateAreasTable();
+    $schemaState = resolve(RuntimeSchemaState::class);
+    expect($schemaState->hasTable('access_gate_areas'))->toBeTrue();
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    expect(resolve(ActiveAccessGateAreaResolver::class)->refreshActiveArea())->toBeFalse();
+
+    $tableProbes = collect(DB::getQueryLog())
+        ->map(static fn (array $entry): string => (string) $entry['query'])
+        ->filter(static fn (string $sql): bool => str_contains($sql, 'information_schema.tables') || str_contains($sql, 'sqlite_master'))
+        ->values()
+        ->all();
+
+    expect($tableProbes)->toBe([])
+        ->and(htmlCacheAccessGateQueryCount())->toBe(1);
 });
 
 it('refreshes cached active access gate area lookups after gate status changes', function (): void {

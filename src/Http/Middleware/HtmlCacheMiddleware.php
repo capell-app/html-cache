@@ -146,7 +146,7 @@ final class HtmlCacheMiddleware
             $this->retireOriginResponse($request, $response);
             $request->attributes->set(
                 self::ELIGIBILITY_REPORT_ATTRIBUTE,
-                BuildHtmlCacheEligibilityReportAction::run($request, $response),
+                BuildHtmlCacheEligibilityReportAction::run($request, $response, inspectCacheState: false),
             );
 
             if ($this->shouldBypassHttpCache($request, $response)) {
@@ -499,7 +499,7 @@ final class HtmlCacheMiddleware
         }
 
         // Deterministic origin policy changes must retire before any write-only rejection.
-        $report = BuildHtmlCacheEligibilityReportAction::run($request, $response);
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, $response, inspectCacheState: false);
         $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
 
         if (! $report->eligible) {
@@ -793,7 +793,7 @@ final class HtmlCacheMiddleware
             return $report;
         }
 
-        $report = BuildHtmlCacheEligibilityReportAction::run($request);
+        $report = BuildHtmlCacheEligibilityReportAction::run($request, inspectCacheState: false);
         $request->attributes->set(self::ELIGIBILITY_REPORT_ATTRIBUTE, $report);
 
         return $report;

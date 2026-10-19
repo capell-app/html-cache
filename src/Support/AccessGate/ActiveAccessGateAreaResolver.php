@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\AccessGate;
 
+use Capell\Core\Facades\CapellCore;
+use Capell\Core\Support\Database\RuntimeSchemaState;
+use Closure;
 use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -59,11 +62,7 @@ final class ActiveAccessGateAreaResolver
 
     private function queryHasActiveArea(?string $connectionName, string $defaultAreaKey): bool
     {
-        $schema = $connectionName !== null
-            ? Schema::connection($connectionName)
-            : Schema::getFacadeRoot();
-
-        if (! $schema instanceof SchemaBuilder || ! $schema->hasTable('access_gate_areas')) {
+        if (! $this->areasTableExists($connectionName)) {
             return false;
         }
 
@@ -71,10 +70,30 @@ final class ActiveAccessGateAreaResolver
             ? DB::connection($connectionName)->table('access_gate_areas')
             : DB::table('access_gate_areas');
 
-        return $query
-            ->where('key', $defaultAreaKey)
-            ->where('status', 'active')
-            ->exists();
+        if (CapellCore::isPackageAvailable('capell-app/access-gate') && app()->bound('capell.access-gate.area-lookup')) {
+            $lookup = app()->make('capell.access-gate.area-lookup');
+
+            if ($lookup instanceof Closure) {
+                $area = $lookup($defaultAreaKey);
+
+                return is_object($area) && ($area->status->value ?? null) === 'active';
+            }
+        }
+
+        return $query->where('key', $defaultAreaKey)->where('status', 'active')->exists();
+    }
+
+    private function areasTableExists(?string $connectionName): bool
+    {
+        // The default connection shares the request's schema probe with every other
+        // consumer of this table; a dedicated connection keeps its own builder.
+        if ($connectionName === null) {
+            return resolve(RuntimeSchemaState::class)->hasTable('access_gate_areas');
+        }
+
+        $schema = Schema::connection($connectionName);
+
+        return $schema instanceof SchemaBuilder && $schema->hasTable('access_gate_areas');
     }
 
     private function connectionName(): ?string

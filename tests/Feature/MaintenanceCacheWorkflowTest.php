@@ -2,7 +2,12 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Contracts\Themes\ThemePreviewRendererInterface;
+use Capell\Core\Models\Language;
+use Capell\Core\Models\Page;
 use Capell\Core\Models\Site;
+use Capell\Core\Models\SiteDomain;
+use Capell\Core\Models\Theme;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Actions\BuildMaintenanceCacheOverviewAction;
 use Capell\HtmlCache\Actions\DisableGlobalMaintenanceAction;
@@ -13,6 +18,7 @@ use Capell\HtmlCache\Actions\PrepareMaintenanceCacheAction;
 use Capell\HtmlCache\Actions\PrepareSiteMaintenanceCacheAction;
 use Capell\HtmlCache\Contracts\CachePurger;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Data\MaintenanceCacheOverviewData;
 use Capell\HtmlCache\Enums\MaintenanceCacheAttentionReason;
 use Capell\HtmlCache\Enums\MaintenanceCacheStatus;
 use Capell\HtmlCache\Enums\MaintenanceGlobalAction;
@@ -28,8 +34,9 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
+use Symfony\Component\HttpFoundation\Response;
 
-require_once dirname(__DIR__) . '/Support/MaintenanceCacheWorkflowTestSupport.php';
+require_once __DIR__ . '/../Support/MaintenanceCacheWorkflowTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
 
@@ -80,7 +87,7 @@ function bindRecordingCachePurger(): void
 function recordedPurges(): array
 {
     /** @var object{calls: list<EdgeCachePurgeData>} $purger */
-    $purger = app(CachePurger::class);
+    $purger = resolve(CachePurger::class);
 
     return $purger->calls;
 }
@@ -88,6 +95,7 @@ function recordedPurges(): array
 it('is off with no generated output and reports zero of N sites ready', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('off-state.test');
@@ -105,6 +113,7 @@ it('is off with no generated output and reports zero of N sites ready', function
 it('flags attention when no accessible site is enabled', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $overview = BuildMaintenanceCacheOverviewAction::run(collect());
@@ -117,6 +126,7 @@ it('flags attention when no accessible site is enabled', function (): void {
 it('flags attention when no accessible site has a domain configured', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $site = Site::factory()->create(['status' => true]);
@@ -132,6 +142,7 @@ it('flags attention when no accessible site has a domain configured', function (
 it('flags attention with a retry action after a failed generation run', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('failed-run.test');
@@ -155,6 +166,7 @@ it('flags attention with a retry action after a failed generation run', function
 it('flags attention when the manifest and Artisan maintenance state disagree', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('drift.test');
@@ -175,6 +187,7 @@ it('flags attention when the manifest and Artisan maintenance state disagree', f
 it('is preparing while a generation run targets an accessible site', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('preparing.test');
@@ -200,6 +213,7 @@ it('is preparing while a generation run targets an accessible site', function ()
 it('is ready once every accessible enabled site has generated output', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('ready.test');
@@ -227,6 +241,7 @@ it('is ready once every accessible enabled site has generated output', function 
 it('is active when the global manifest flag is set, and covers every site regardless of its own override', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     $siteDomain = maintenanceCacheSiteDomain('active.test');
@@ -437,6 +452,7 @@ it('denies enabling global maintenance to a site-scoped, non-global actor', func
 it('refuses to enable global maintenance until every accessible site is ready', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
     maintenanceCacheSiteDomain('not-ready.test');
 
@@ -447,6 +463,7 @@ it('refuses to enable global maintenance until every accessible site is ready', 
 it('refuses to enable global maintenance a second time while it is already active', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
     maintenanceCacheSiteDomain('already-active.test');
     resolve(MaintenanceManifestStore::class)->setGlobalActive(true);
@@ -465,6 +482,7 @@ it('enables global maintenance end to end: generates, flips the manifest, downs 
 
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
     $siteDomain = maintenanceCacheSiteDomain('enable-global.test');
 
@@ -549,6 +567,7 @@ it('exiting maintenance also resolves an Artisan/manifest state drift', function
 it('shows exactly the applicable global header action for each state', function (): void {
     $globalAdmin = User::factory()->create();
     $globalAdmin->assignRole('super_admin');
+
     test()->actingAs($globalAdmin);
 
     maintenanceCacheSiteDomain('header-actions.test');
@@ -632,4 +651,202 @@ it('warns instead of failing when enabling a site override before it is prepared
     Livewire::test(MaintenanceCachePage::class)
         ->call('enableSiteOverride', (int) $siteDomain->site_id)
         ->assertNotified();
+});
+
+it('refreshes queued preparation without redispatch and removes polling at terminal state', function (): void {
+    Queue::fake();
+    fakeMaintenanceThemeRenderer();
+    $domain = maintenanceCacheSiteDomain('live-progress.test');
+    $manager = maintenanceCacheSiteManager([$domain->site]);
+    test()->actingAs($manager);
+    $page = Livewire::test(MaintenanceCachePage::class)->callAction('prepare')
+        ->assertSee(MaintenanceCacheStatus::Preparing->label())
+        ->assertSeeHtml('wire:poll.5s="refreshStatus"');
+    $run = HtmlCacheGenerationRun::query()->sole();
+    $page->call('refreshStatus')->assertSeeHtml('wire:poll.5s="refreshStatus"');
+    $run->update(['status' => HtmlCacheGenerationRun::STATUS_RUNNING, 'completed_sites' => 1]);
+    $page->call('refreshStatus')->assertSee(__('capell-html-cache::admin.maintenance_run_progress', ['completed' => 1, 'total' => 1]));
+    $run->update(['status' => HtmlCacheGenerationRun::STATUS_PENDING, 'completed_sites' => 0]);
+    new GenerateMaintenancePagesJob($run->id, [(int) $domain->site_id])->handle();
+    $page->call('refreshStatus')->assertSee(MaintenanceCacheStatus::Ready->label())
+        ->assertDontSeeHtml('wire:poll.5s="refreshStatus"');
+    Queue::assertPushed(GenerateMaintenancePagesJob::class, 1);
+});
+
+it('keeps status actions and polling coherent when preparation finishes between reads', function (bool $failed): void {
+    $admin = User::factory()->create();
+    $admin->assignRole('super_admin');
+
+    test()->actingAs($admin);
+    $preparing = new MaintenanceCacheOverviewData(
+        status: MaintenanceCacheStatus::Preparing,
+        globalManifestActive: false,
+        artisanMaintenanceActive: false,
+        totalSites: 1,
+        readySites: 0,
+        sites: [],
+        currentRunId: 'controlled-run',
+    );
+    $terminal = new MaintenanceCacheOverviewData(
+        status: $failed ? MaintenanceCacheStatus::Attention : MaintenanceCacheStatus::Ready,
+        globalManifestActive: false,
+        artisanMaintenanceActive: false,
+        totalSites: 1,
+        readySites: $failed ? 0 : 1,
+        sites: [],
+        attentionReasons: $failed ? [MaintenanceCacheAttentionReason::GenerationFailed] : [],
+    );
+
+    app()->instance('LaravelActions:AsFake:' . BuildMaintenanceCacheOverviewAction::class, Mockery::mock(BuildMaintenanceCacheOverviewAction::make()));
+    $projection = $preparing;
+    $state = new class
+    {
+        public bool $interleave = false;
+
+        public int $reads = 0;
+    };
+    BuildMaintenanceCacheOverviewAction::shouldRun()->andReturnUsing(
+        function () use (&$projection, $state, $preparing, $terminal): MaintenanceCacheOverviewData {
+            return $state->interleave ? (++$state->reads <= 2 ? $preparing : $terminal) : $projection;
+        },
+    );
+    $page = Livewire::test(MaintenanceCachePage::class);
+
+    // Boot and refresh calculate header actions. The worker then completes,
+    // so another projection for the view reproduces the completion race.
+    $state->interleave = true;
+    $page->call('refreshStatus')
+        ->assertSee(MaintenanceCacheStatus::Preparing->label())
+        ->assertSeeHtml('wire:poll.5s="refreshStatus"');
+    $instance = $page->instance();
+    throw_unless($instance instanceof MaintenanceCachePage, RuntimeException::class);
+    expect($instance->getCachedHeaderActions())->toBe([]);
+
+    $state->interleave = false;
+    $projection = $terminal;
+    $page->call('refreshStatus')
+        ->assertSee($terminal->status->label())
+        ->assertActionVisible($failed ? 'prepare' : 'review-and-enable')
+        ->assertDontSeeHtml('wire:poll.5s="refreshStatus"');
+})->with(['ready' => false, 'failed' => true]);
+
+it('projects only accessible preparation failures safely and clears them after a successful replacement', function (): void {
+    $domain = maintenanceCacheSiteDomain('visible-failure.test');
+    $other = maintenanceCacheSiteDomain('hidden-failure.test');
+    test()->actingAs(maintenanceCacheSiteManager([$domain->site]));
+    $run = HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_FAILED, 'site_ids' => [(int) $domain->site_id, (int) $other->site_id],
+        'total_sites' => 2, 'completed_sites' => 0, 'failed_sites' => 2, 'finished_at' => now(),
+        'errors' => [(string) $domain->site_id => 'render token=private-secret /private/path', (string) $other->site_id => 'hidden secret', 'job' => 'password=job-secret'],
+    ]);
+    $page = Livewire::test(MaintenanceCachePage::class)
+        ->assertSee(__('capell-html-cache::admin.preparation_site_failed', ['site' => $domain->site->name]))
+        ->assertSee(__('capell-html-cache::admin.preparation_worker_failed'))
+        ->assertSee(__('capell-html-cache::admin.preparation_template_recovery'))
+        ->assertDontSee('private-secret')->assertDontSee('job-secret')->assertDontSee('hidden secret')
+        ->assertDontSee('hidden-failure.test');
+    HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_COMPLETED, 'site_ids' => [(int) $domain->site_id],
+        'total_sites' => 1, 'completed_sites' => 1, 'finished_at' => now()->addSecond(),
+    ]);
+    $page->call('refreshStatus')->assertDontSee(__('capell-html-cache::admin.preparation_worker_failed'));
+    expect($run->refresh()->errors)->toHaveCount(3);
+});
+
+it('withholds aggregate progress and failures belonging only to inaccessible sites', function (): void {
+    $domain = maintenanceCacheSiteDomain('accessible-progress.test');
+    $other = maintenanceCacheSiteDomain('private-progress.test');
+    test()->actingAs(maintenanceCacheSiteManager([$domain->site]));
+    $run = HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_RUNNING, 'site_ids' => [(int) $domain->site_id, (int) $other->site_id],
+        'total_sites' => 2, 'completed_sites' => 0, 'failed_sites' => 1,
+    ]);
+    $overview = BuildMaintenanceCacheOverviewAction::run(collect([$domain->site]));
+    expect($overview->showRunCounters)->toBeFalse()->and($overview->currentRunFailedSites)->toBe(0)
+        ->and($overview->currentRunTotalSites)->toBe(0);
+    $run->update(['status' => HtmlCacheGenerationRun::STATUS_FAILED, 'finished_at' => now(), 'errors' => [(string) $other->site_id => 'Private failure']]);
+    $overview = BuildMaintenanceCacheOverviewAction::run(collect([$domain->site]));
+    expect($overview->failures)->toBe([])->and($overview->attentionReasons)->not->toContain(MaintenanceCacheAttentionReason::GenerationFailed);
+});
+
+it('shows a real two-site worker failure and clears its safe display after a successful replacement', function (): void {
+    Queue::fake();
+    $good = maintenanceCacheSiteDomain('working-worker.test');
+    $bad = maintenanceCacheSiteDomain('broken-worker.test');
+    test()->actingAs(maintenanceCacheSiteManager([$good->site, $bad->site]));
+    $renderer = Mockery::mock(ThemePreviewRendererInterface::class);
+    $renderer->shouldReceive('render')->andReturnUsing(function (Theme $theme, Site $site, Page $page, ?Language $language = null, ?SiteDomain $domain = null): Response {
+        if ($domain?->domain === 'broken-worker.test') {
+            throw new RuntimeException('View failed token=worker-secret /private/path');
+        }
+
+        return new Response('<h1>Maintenance</h1>');
+    });
+    app()->instance(ThemePreviewRendererInterface::class, $renderer);
+    $run = PrepareMaintenanceCacheAction::run(auth()->user());
+    new GenerateMaintenancePagesJob($run->id, $run->site_ids ?? [])->handle();
+    expect($run->refresh()->status)->toBe(HtmlCacheGenerationRun::STATUS_FAILED)
+        ->and($run->completed_sites)->toBe(1)->and($run->failed_sites)->toBe(1);
+    $page = Livewire::test(MaintenanceCachePage::class)
+        ->assertSee(__('capell-html-cache::admin.preparation_site_failed', ['site' => $bad->site->name]))
+        ->assertDontSee(__('capell-html-cache::admin.preparation_site_failed', ['site' => $good->site->name]))
+        ->assertDontSee('worker-secret')->assertDontSee('/private/path');
+    fakeMaintenanceThemeRenderer();
+    $replacement = PrepareMaintenanceCacheAction::run(auth()->user());
+    new GenerateMaintenancePagesJob($replacement->id, $replacement->site_ids ?? [])->handle();
+    $page->call('refreshStatus')->assertSee(MaintenanceCacheStatus::Ready->label())
+        ->assertDontSee(__('capell-html-cache::admin.preparation_failures'));
+    expect($run->refresh()->errors)->not->toBeEmpty()
+        ->and($replacement->refresh()->status)->toBe(HtmlCacheGenerationRun::STATUS_COMPLETED);
+});
+
+it('keeps an unresolved site failure visible when another site is successfully prepared later', function (): void {
+    $first = maintenanceCacheSiteDomain('unresolved-site.test');
+    $second = maintenanceCacheSiteDomain('successful-site.test');
+    test()->actingAs(maintenanceCacheSiteManager([$first->site, $second->site]));
+    HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_FAILED, 'site_ids' => [(int) $first->site_id],
+        'total_sites' => 1, 'failed_sites' => 1, 'finished_at' => now(),
+        'errors' => [(string) $first->site_id => 'View unavailable'],
+    ]);
+    HtmlCacheGenerationRun::query()->create([
+        'status' => HtmlCacheGenerationRun::STATUS_COMPLETED, 'site_ids' => [(int) $second->site_id],
+        'total_sites' => 1, 'completed_sites' => 1, 'finished_at' => now()->addSecond(),
+    ]);
+    Livewire::test(MaintenanceCachePage::class)
+        ->assertSee(__('capell-html-cache::admin.preparation_site_failed', ['site' => $first->site->name]))
+        ->assertSee(MaintenanceCacheStatus::Attention->label());
+});
+
+it('retains a disabled site failure without blocking readiness after enabled sites succeed', function (): void {
+    Queue::fake();
+    $failed = maintenanceCacheSiteDomain('disabled-failure.test');
+    $enabled = maintenanceCacheSiteDomain('enabled-success.test');
+    test()->actingAs(maintenanceCacheSiteManager([$failed->site, $enabled->site]));
+    $renderer = Mockery::mock(ThemePreviewRendererInterface::class);
+    $renderer->shouldReceive('render')->andThrow(new RuntimeException('View unavailable'));
+    app()->instance(ThemePreviewRendererInterface::class, $renderer);
+
+    $run = PrepareSiteMaintenanceCacheAction::run(auth()->user(), (int) $failed->site_id);
+    new GenerateMaintenancePagesJob($run->id, $run->site_ids ?? [])->handle();
+    expect($run->refresh()->status)->toBe(HtmlCacheGenerationRun::STATUS_FAILED);
+    $failed->site->update(['status' => false]);
+
+    fakeMaintenanceThemeRenderer();
+    $replacement = PrepareMaintenanceCacheAction::run(auth()->user());
+    expect($replacement->site_ids)->toBe([(int) $enabled->site_id]);
+    new GenerateMaintenancePagesJob($replacement->id, $replacement->site_ids ?? [])->handle();
+    expect($replacement->refresh()->status)->toBe(HtmlCacheGenerationRun::STATUS_COMPLETED);
+
+    $overview = BuildMaintenanceCacheOverviewAction::run(collect([
+        $failed->site->refresh()->load('siteDomains'), $enabled->site->refresh()->load('siteDomains'),
+    ]));
+    expect($overview->status)->toBe(MaintenanceCacheStatus::Ready)
+        ->and($overview->primaryAction())->toBe(MaintenanceGlobalAction::ReviewAndEnable)
+        ->and($overview->totalSites)->toBe(1)
+        ->and($overview->readySites)->toBe(1)
+        ->and($overview->attentionReasons)->not->toContain(MaintenanceCacheAttentionReason::GenerationFailed)
+        ->and($overview->failures)->toHaveCount(1)
+        ->and($overview->failures[0]->summary)->toBe(__('capell-html-cache::admin.preparation_site_failed', ['site' => $failed->site->name]))
+        ->and($run->refresh()->errors)->not->toBeEmpty();
 });

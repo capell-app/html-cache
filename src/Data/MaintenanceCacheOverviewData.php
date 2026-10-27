@@ -13,6 +13,7 @@ final class MaintenanceCacheOverviewData extends Data
 {
     /**
      * @param  list<MaintenanceSiteStatusData>  $sites
+     * @param  list<MaintenancePreparationFailureData>  $failures
      * @param  list<MaintenanceCacheAttentionReason>  $attentionReasons
      */
     public function __construct(
@@ -28,6 +29,8 @@ final class MaintenanceCacheOverviewData extends Data
         public readonly int $currentRunTotalSites = 0,
         public readonly int $currentRunCompletedSites = 0,
         public readonly int $currentRunFailedSites = 0,
+        public readonly array $failures = [],
+        public readonly bool $showRunCounters = true,
     ) {}
 
     public function hasAttentionReason(MaintenanceCacheAttentionReason $reason): bool

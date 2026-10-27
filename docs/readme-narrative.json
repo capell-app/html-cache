@@ -19,11 +19,13 @@
     },
     "whyItMatters": {
         "developers": {
-            "text": "Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable.",
+            "text": "Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.",
             "evidence": [
                 "src/Actions/RecordCachedModelUrlsAction.php",
                 "src/Actions/MarkCachedUrlsForModelStaleAction.php",
                 "src/Actions/RefreshCachedUrlAtomicallyAction.php",
+                "src/Actions/ClearAllHtmlCacheAction.php",
+                "src/Providers/HtmlCacheServiceProvider.php",
                 "tests/Feature/StaleCachedUrlsTest.php"
             ]
         },

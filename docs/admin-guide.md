@@ -92,7 +92,9 @@ measured durations sort slowest first; unknown durations sort last.
 1. Open **Insights & health > Site Health > Maintenance cache**.
 2. Click **Prepare pages** to build the static maintenance page for every site, or use **Prepare** for a single site.
 3. Use **Edit maintenance page** to change what visitors see while a site is offline, and **Edit 404 page** to change the page shown when an address is not found.
-4. Generating ahead of time means the maintenance page is ready the moment you enable maintenance mode.
+4. Preparation progress updates automatically while the run is active. **Refresh status** checks the same run without queuing it again. Counters are shown only when all sites in the run are accessible to you.
+5. When preparation fails, review the accessible site or worker recovery guidance, correct the cause and prepare again. Raw technical errors are withheld; an administrator can inspect the generation log. Successful replacement runs clear the displayed failures and preserve the earlier run history.
+6. Generating ahead of time means the maintenance page is ready the moment you enable maintenance mode.
 
 ### How to confirm caching is healthy and safe
 

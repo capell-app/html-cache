@@ -46,6 +46,8 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
 
     protected string $view = 'capell-html-cache::filament.pages.maintenance-cache';
 
+    private ?MaintenanceCacheOverviewData $requestOverview = null;
+
     #[Override]
     public static function canAccess(): bool
     {
@@ -92,24 +94,31 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
     }
 
     /**
-     * The single typed projection the page and its actions read from. Always
-     * recomputed from current manifest, site, and run state rather than
-     * cached across the request, so the rendered state can never lag behind
-     * what a write action just did.
+     * Share a request-local snapshot across header actions, status and polling.
+     * A worker completing during render must not remove polling while leaving
+     * the terminal action absent. Refresh and writes invalidate this snapshot.
      */
     public function overview(): MaintenanceCacheOverviewData
     {
-        return BuildMaintenanceCacheOverviewAction::run($this->sites());
+        return $this->requestOverview ??= BuildMaintenanceCacheOverviewAction::run($this->sites());
+    }
+
+    public function refreshStatus(): void
+    {
+        abort_unless(static::canAccess(), 403);
+        $this->refreshOverview();
     }
 
     public function prepareSite(int $siteId): void
     {
         try {
             PrepareSiteMaintenanceCacheAction::run(auth()->user(), $siteId);
-        } catch (RuntimeException $exception) {
-            Notification::make()->warning()->title($exception->getMessage())->send();
+        } catch (RuntimeException $runtimeException) {
+            Notification::make()->warning()->title($runtimeException->getMessage())->send();
 
             return;
+        } finally {
+            $this->refreshOverview();
         }
 
         Notification::make()
@@ -122,10 +131,12 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
     {
         try {
             EnableSiteMaintenanceOverrideAction::run(auth()->user(), $siteId);
-        } catch (RuntimeException $exception) {
-            Notification::make()->warning()->title($exception->getMessage())->send();
+        } catch (RuntimeException $runtimeException) {
+            Notification::make()->warning()->title($runtimeException->getMessage())->send();
 
             return;
+        } finally {
+            $this->refreshOverview();
         }
 
         Notification::make()
@@ -136,7 +147,11 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
 
     public function disableSiteOverride(int $siteId): void
     {
-        DisableSiteMaintenanceOverrideAction::run(auth()->user(), $siteId);
+        try {
+            DisableSiteMaintenanceOverrideAction::run(auth()->user(), $siteId);
+        } finally {
+            $this->refreshOverview();
+        }
 
         Notification::make()
             ->success()
@@ -156,6 +171,13 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
         };
     }
 
+    private function refreshOverview(): void
+    {
+        $this->requestOverview = null;
+        $this->cachedHeaderActions = [];
+        $this->cacheInteractsWithHeaderActions();
+    }
+
     private function prepareAction(): Action
     {
         return Action::make('prepare')
@@ -165,10 +187,12 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
             ->action(function (): void {
                 try {
                     PrepareMaintenanceCacheAction::run(auth()->user());
-                } catch (RuntimeException $exception) {
-                    Notification::make()->warning()->title($exception->getMessage())->send();
+                } catch (RuntimeException $runtimeException) {
+                    Notification::make()->warning()->title($runtimeException->getMessage())->send();
 
                     return;
+                } finally {
+                    $this->refreshOverview();
                 }
 
                 Notification::make()
@@ -188,10 +212,12 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
             ->action(function (): void {
                 try {
                     EnableGlobalMaintenanceAction::run(auth()->user());
-                } catch (RuntimeException $exception) {
-                    Notification::make()->warning()->title($exception->getMessage())->send();
+                } catch (RuntimeException $runtimeException) {
+                    Notification::make()->warning()->title($runtimeException->getMessage())->send();
 
                     return;
+                } finally {
+                    $this->refreshOverview();
                 }
 
                 Notification::make()
@@ -210,7 +236,11 @@ class MaintenanceCachePage extends Page implements HasActions, SiteHealthSubpage
             ->authorize(fn (): bool => MaintenanceCachePermissions::canManageGlobal(auth()->user()))
             ->requiresConfirmation()
             ->action(function (): void {
-                DisableGlobalMaintenanceAction::run(auth()->user());
+                try {
+                    DisableGlobalMaintenanceAction::run(auth()->user());
+                } finally {
+                    $this->refreshOverview();
+                }
 
                 Notification::make()
                     ->success()

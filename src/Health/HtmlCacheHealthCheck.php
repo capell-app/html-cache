@@ -80,6 +80,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
                 ? (string) __('capell-html-cache::health.exhausted.passed')
                 : (string) __('capell-html-cache::health.exhausted.failed', ['count' => $count]),
             remediation: $count === 0 ? null : (string) __('capell-html-cache::health.exhausted.remediation'),
+            id: 'legacy.html.cache.exhausted.refreshes',
         );
     }
 
@@ -96,6 +97,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $supportsLocalPaths
                 ? null
                 : (string) __('capell-html-cache::health.local_path.remediation'),
+            id: 'legacy.html.cache.disk.supports.atomic.local.paths',
         );
     }
 
@@ -115,6 +117,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $writable
                 ? null
                 : (string) __('capell-html-cache::health.disk.remediation'),
+            id: 'legacy.html.cache.disk.writable',
         );
     }
 
@@ -148,6 +151,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $passed
                 ? null
                 : (string) __('capell-html-cache::health.multi_node_purge.remediation'),
+            id: 'legacy.html.cache.multi.node.purge.safety',
         );
     }
 
@@ -167,6 +171,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $wired
                 ? null
                 : (string) __('capell-html-cache::health.middleware.remediation'),
+            id: 'legacy.frontend.html.cache.middleware.wired',
         );
     }
 
@@ -186,6 +191,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $missingTables === []
                 ? null
                 : (string) __('capell-html-cache::health.tables.remediation'),
+            id: 'legacy.html.cache.storage.tables',
         );
     }
 
@@ -205,6 +211,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             remediation: $passed
                 ? null
                 : (string) __('capell-html-cache::health.stale_command.remediation', ['command' => self::STALE_PROCESSING_COMMAND]),
+            id: 'legacy.scheduled.stale.regeneration.command.registered',
         );
     }
 

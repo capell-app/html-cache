@@ -15,7 +15,7 @@ use Lorisleiva\Actions\Concerns\AsObject;
 use RuntimeException;
 
 /**
- * @method static HtmlCacheClearResult run()
+ * @method static HtmlCacheClearResult run(bool $awaitEdgePurge = false)
  */
 final class ClearAllHtmlCacheAction
 {
@@ -25,7 +25,7 @@ final class ClearAllHtmlCacheAction
 
     public bool $jobDeleteWhenMissingModels = true;
 
-    public function handle(): HtmlCacheClearResult
+    public function handle(bool $awaitEdgePurge = false): HtmlCacheClearResult
     {
         $result = resolve(HtmlCacheStore::class)->deleteAll();
 
@@ -40,7 +40,13 @@ final class ClearAllHtmlCacheAction
             CachedModelUrl::query()->delete();
         }
 
-        PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(purgeAll: true));
+        $purge = new EdgeCachePurgeData(purgeAll: true);
+
+        if ($awaitEdgePurge) {
+            PurgeEdgeCacheAction::run($purge);
+        } else {
+            PurgeEdgeCacheAction::dispatchAfterCommit($purge);
+        }
 
         return $result;
     }

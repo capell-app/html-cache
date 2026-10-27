@@ -21,7 +21,7 @@ Status details:
 
 ## Why It Matters
 
-**For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable.
+**For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.
 
 **For teams:** Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.
 
@@ -91,6 +91,10 @@ Screenshot contract: `docs/screenshots.json`.
 
 - `CachePurger`
 - `PageCacheNotifiable`
+
+### Listeners
+
+- `RemediatePrivateSiteSpecHtmlCache`
 
 ### Actions
 
@@ -168,6 +172,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `HtmlCacheRequestMetricsData`
 - `MaintenanceCacheDomainData`
 - `MaintenanceCacheOverviewData`
+- `MaintenancePreparationFailureData`
 - `MaintenanceSiteStatusData`
 - `StaleHtmlCacheProcessResultData`
 - `UncachedPageData`
@@ -271,6 +276,12 @@ Screenshot contract: `docs/screenshots.json`.
 
 1. Install the package: `composer require capell-app/html-cache`.
 2. Open the package admin surface at `/admin/html-cache/maintenance-cache` and confirm HTML Cache is available.
+
+## Upgrading
+
+No manual steps between minor versions.
+
+Read [CHANGELOG.md](CHANGELOG.md) before upgrading.
 
 ## Next Steps
 

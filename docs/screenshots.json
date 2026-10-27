@@ -45,18 +45,18 @@
             "targetType": "dashboard-widgets",
             "target": "CapellDashboard",
             "required": false,
-            "notes": "Enable the real cache overview widget and seed a published workshop PageUrl, cache dependency and pending regeneration row. Frame the populated card after lazy loading.",
+            "notes": "Enable the real cache overview widget, seed the owned workshop cache/stale rows, and load Dashboard tools, where unregioned legacy tool widgets render. Wait for the native lazy widget and frame populated coverage and regeneration stats.",
             "useCase": "An administrator checks cache overview, coverage, and stale queue widgets.",
             "screenshotPath": "packages/html-cache/docs/screenshots/html-cache-dashboard-widgets.png",
             "scenario": "admin-index",
-            "url": "/admin",
+            "url": "/dashboard-tools",
             "waitFor": ".fi-wi-stats-overview:has-text(\"Cache coverage\")",
             "colorSchemes": ["light"],
             "fullPage": false,
             "beforeWait": [
                 {
                     "type": "scrollIntoView",
-                    "selector": ".fi-section:not(.fi-collapsed) [wire\\:snapshot*=\"html-cache-overview-filament-widget\"]",
+                    "selector": "[wire\\:snapshot*=\"html-cache-overview-filament-widget\"]",
                     "block": "start"
                 },
                 {
@@ -217,5 +217,14 @@
     "fixtureCommands": [
         "capell:screenshot-admin-fixture --package=html-cache",
         "capell:screenshot-dashboard-widgets --widget=html_cache_overview"
+    ],
+    "fixtureEntryIds": [
+        "html-cache-maintenance-cache-page",
+        "html-cache-cached-model-urls",
+        "html-cache-dashboard-widgets",
+        "html-cache-site-health-cache-map",
+        "html-cache-page-table-extension",
+        "html-cache-maintenance-page",
+        "html-cache-admin-sidebar-menu-open"
     ]
 }

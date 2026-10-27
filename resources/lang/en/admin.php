@@ -3,6 +3,16 @@
 declare(strict_types=1);
 
 return [
+    'refresh_status' => 'Refresh status',
+    'preparation_updating' => 'Preparing maintenance pages. This screen updates automatically.',
+    'preparation_failures' => 'Why preparation failed',
+    'preparation_site_failed' => 'Preparation failed for :site.',
+    'preparation_site_recovery' => 'Check the site domains, maintenance template and writable cache storage, then prepare again. An administrator can inspect the generation log for technical details.',
+    'preparation_failure_unrecorded' => 'Preparation failed without a recorded reason.',
+    'preparation_storage_recovery' => 'Maintenance storage could not be used. Ask an administrator to check the static maintenance store, disk space and write permissions, then prepare again.',
+    'preparation_template_recovery' => 'The maintenance page could not be rendered safely. Check its theme and template and remove unsupported authoring content, then prepare again.',
+    'preparation_worker_failed' => 'The generation worker failed.',
+    'preparation_worker_recovery' => 'Ask an administrator to check the queue worker and generation log, then prepare again. Technical error messages are withheld because they may contain credentials or private paths.',
     'cached_model_urls' => 'Cached pages',
     'cached_page' => 'Cached page',
     'uncached_pages' => 'Uncached public pages',

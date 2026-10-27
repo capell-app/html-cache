@@ -8,12 +8,15 @@ use Capell\Core\Models\Site;
 use Capell\Frontend\Support\Maintenance\MaintenanceManifestStore;
 use Capell\HtmlCache\Data\MaintenanceCacheDomainData;
 use Capell\HtmlCache\Data\MaintenanceCacheOverviewData;
+use Capell\HtmlCache\Data\MaintenancePreparationFailureData;
 use Capell\HtmlCache\Data\MaintenanceSiteStatusData;
 use Capell\HtmlCache\Enums\MaintenanceCacheAttentionReason;
 use Capell\HtmlCache\Enums\MaintenanceCacheStatus;
 use Capell\HtmlCache\Enums\MaintenanceSiteStatus;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Lang;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -44,14 +47,12 @@ final class BuildMaintenanceCacheOverviewAction
         $globalManifestActive = ($manifest['global_active'] ?? false) === true;
         $artisanMaintenanceActive = app()->maintenanceMode()->active();
 
-        $activeRun = HtmlCacheGenerationRun::query()
+        $siteIds = array_values($accessibleSites->map(static fn (Site $site): int => $site->id)->all());
+
+        $activeRun = $this->accessibleRuns($siteIds)
             ->whereIn('status', [HtmlCacheGenerationRun::STATUS_PENDING, HtmlCacheGenerationRun::STATUS_RUNNING])
             ->latest('created_at')
-            ->first();
-
-        $latestFinishedRun = HtmlCacheGenerationRun::query()
-            ->whereIn('status', [HtmlCacheGenerationRun::STATUS_COMPLETED, HtmlCacheGenerationRun::STATUS_FAILED])
-            ->latest('finished_at')
+            ->latest('id')
             ->first();
 
         $enabledSites = $accessibleSites->filter(static fn (Site $site): bool => $site->isEnabled())->values();
@@ -65,15 +66,20 @@ final class BuildMaintenanceCacheOverviewAction
             fn (Site $site): bool => data_get($manifest, 'sites.' . $site->id . '.domains', []) !== [],
         )->count();
 
+        $failureHistory = $activeRun === null ? $this->preparationFailures($accessibleSites) : ['failures' => [], 'blocksReadiness' => false];
+
         $attentionReasons = $this->buildAttentionReasons(
             $enabledSites,
-            $latestFinishedRun,
+            $failureHistory['blocksReadiness'],
             $activeRun,
             $globalManifestActive,
             $artisanMaintenanceActive,
         );
 
         $status = $this->resolveStatus($attentionReasons, $globalManifestActive, $activeRun, $enabledSites, $readySites);
+
+        // Existing runs have aggregate counters only. Do not reveal counts for inaccessible sites.
+        $showRunCounters = $activeRun === null || array_diff($activeRun->site_ids ?? [], $siteIds) === [];
 
         return new MaintenanceCacheOverviewData(
             status: $status,
@@ -85,10 +91,85 @@ final class BuildMaintenanceCacheOverviewAction
             attentionReasons: $attentionReasons,
             currentRunId: $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->id : null,
             currentRunStatus: $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->status : null,
-            currentRunTotalSites: $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->total_sites : 0,
-            currentRunCompletedSites: $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->completed_sites : 0,
-            currentRunFailedSites: $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->failed_sites : 0,
+            currentRunTotalSites: $showRunCounters && $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->total_sites : 0,
+            currentRunCompletedSites: $showRunCounters && $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->completed_sites : 0,
+            currentRunFailedSites: $showRunCounters && $activeRun instanceof HtmlCacheGenerationRun ? $activeRun->failed_sites : 0,
+            failures: $failureHistory['failures'],
+            showRunCounters: $showRunCounters,
         );
+    }
+
+    /**
+     * @param  Collection<int, Site>  $accessibleSites
+     * @return array{failures: list<MaintenancePreparationFailureData>, blocksReadiness: bool}
+     */
+    private function preparationFailures(Collection $accessibleSites): array
+    {
+        $failures = [];
+        $blocksReadiness = false;
+        $seenJobs = [];
+        foreach ($accessibleSites as $site) {
+            // A later success for a different site does not resolve this site's failure.
+            $run = $this->accessibleRuns([$site->id])
+                ->whereIn('status', [HtmlCacheGenerationRun::STATUS_COMPLETED, HtmlCacheGenerationRun::STATUS_FAILED])
+                ->latest('finished_at')->latest('created_at')->latest('id')->first();
+            if ($run?->status !== HtmlCacheGenerationRun::STATUS_FAILED) {
+                continue;
+            }
+
+            $errors = $run->errors ?? [];
+            // Disabled sites retain their history but are outside global preparation.
+            // Evaluate before deduplicating job failures shared with another site.
+            $siteFailed = array_key_exists((string) $site->id, $errors) || array_key_exists('job', $errors) || $errors === [];
+            $blocksReadiness = $blocksReadiness || ($site->isEnabled() && $siteFailed);
+            if (array_key_exists((string) $site->id, $errors)) {
+                $failures[] = new MaintenancePreparationFailureData(
+                    summary: __('capell-html-cache::admin.preparation_site_failed', ['site' => $site->name]),
+                    recovery: $this->failureRecovery($errors[(string) $site->id]),
+                );
+            }
+
+            if ((array_key_exists('job', $errors) || $errors === []) && ! isset($seenJobs[$run->id])) {
+                $seenJobs[$run->id] = true;
+                $failures[] = new MaintenancePreparationFailureData(
+                    summary: $errors === [] ? __('capell-html-cache::admin.preparation_failure_unrecorded') : __('capell-html-cache::admin.preparation_worker_failed'),
+                    recovery: __('capell-html-cache::admin.preparation_worker_recovery'),
+                );
+            }
+        }
+
+        return ['failures' => $failures, 'blocksReadiness' => $blocksReadiness];
+    }
+
+    private function failureRecovery(?string $error): string
+    {
+        // Only project known categories. Stored exceptions are never safe display text.
+        $message = strtolower($error ?? '');
+        $key = match (true) {
+            str_contains($message, 'store'), str_contains($message, 'writ'), str_contains($message, 'permission denied'), str_contains($message, 'disk') => 'preparation_storage_recovery',
+            str_contains($message, 'render'), str_contains($message, 'view'), str_contains($message, 'theme') => 'preparation_template_recovery',
+            default => 'preparation_site_recovery',
+        };
+
+        return Lang::string('capell-html-cache::admin.' . $key);
+    }
+
+    /** @param list<int> $siteIds
+     * @return Builder<HtmlCacheGenerationRun>
+     */
+    private function accessibleRuns(array $siteIds): Builder
+    {
+        return HtmlCacheGenerationRun::query()->where(static function (Builder $query) use ($siteIds): void {
+            if ($siteIds === []) {
+                $query->whereRaw('1 = 0');
+
+                return;
+            }
+
+            foreach ($siteIds as $siteId) {
+                $query->orWhereJsonContains('site_ids', $siteId);
+            }
+        });
     }
 
     /**
@@ -97,7 +178,7 @@ final class BuildMaintenanceCacheOverviewAction
      */
     private function buildAttentionReasons(
         Collection $enabledSites,
-        ?HtmlCacheGenerationRun $latestFinishedRun,
+        bool $generationFailed,
         ?HtmlCacheGenerationRun $activeRun,
         bool $globalManifestActive,
         bool $artisanMaintenanceActive,
@@ -110,11 +191,7 @@ final class BuildMaintenanceCacheOverviewAction
             $reasons[] = MaintenanceCacheAttentionReason::NoSiteDomainsConfigured;
         }
 
-        if (
-            ! $activeRun instanceof HtmlCacheGenerationRun
-            && $latestFinishedRun instanceof HtmlCacheGenerationRun
-            && $latestFinishedRun->status === HtmlCacheGenerationRun::STATUS_FAILED
-        ) {
+        if (! $activeRun instanceof HtmlCacheGenerationRun && $generationFailed) {
             $reasons[] = MaintenanceCacheAttentionReason::GenerationFailed;
         }
 

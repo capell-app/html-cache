@@ -15,13 +15,22 @@
 @endphp
 
 <x-filament-panels::page>
-    <div class="space-y-4">
+    <div
+        class="space-y-4"
+        @if ($overview->currentRunId !== null) wire:poll.5s="refreshStatus" @endif
+    >
         <section
+            aria-live="polite"
             class="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-gray-900"
         >
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div
+                class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
                 <div>
-                    <x-filament::badge :color="$statusColor" wire:key="maintenance-status-badge">
+                    <x-filament::badge
+                        :color="$statusColor"
+                        wire:key="maintenance-status-badge"
+                    >
                         {{ $overview->status->label() }}
                     </x-filament::badge>
 
@@ -35,22 +44,50 @@
 
                 @if ($overview->status === MaintenanceCacheStatus::Preparing)
                     <p class="text-sm text-gray-600 dark:text-gray-400">
-                        {{ __('capell-html-cache::admin.maintenance_run_progress', [
+                        @if ($overview->showRunCounters)
+                            {{ __('capell-html-cache::admin.maintenance_run_progress', [
                             'completed' => $overview->currentRunCompletedSites,
                             'total' => $overview->currentRunTotalSites,
                         ]) }}
+                        @endif
+                        {{ __('capell-html-cache::admin.preparation_updating') }}
                     </p>
                 @endif
             </div>
 
             @if ($overview->attentionReasons !== [])
-                <ul class="mt-3 space-y-1 text-sm text-amber-700 dark:text-amber-400">
+                <ul
+                    class="mt-3 space-y-1 text-sm text-amber-700 dark:text-amber-400"
+                >
                     @foreach ($overview->attentionReasons as $reason)
                         <li>{{ $reason->label() }}</li>
                     @endforeach
                 </ul>
             @endif
         </section>
+
+        <x-filament::button
+            wire:click="refreshStatus"
+            wire:loading.attr="disabled"
+        >
+            {{ __('capell-html-cache::admin.refresh_status') }}
+        </x-filament::button>
+        @if ($overview->failures !== [])
+            <section
+                aria-live="polite"
+                class="space-y-3"
+            >
+                <h2>
+                    {{ __('capell-html-cache::admin.preparation_failures') }}
+                </h2>
+                @foreach ($overview->failures as $failure)
+                    <article>
+                        <h3>{{ $failure->summary }}</h3>
+                        <p>{{ $failure->recovery }}</p>
+                    </article>
+                @endforeach
+            </section>
+        @endif
 
         <section class="space-y-3">
             @forelse ($overview->sites as $site)
@@ -105,9 +142,7 @@
                         class="mt-3 space-y-1 text-sm text-gray-600 dark:text-gray-400"
                     >
                         @forelse ($site->domains as $domain)
-                            <li class="break-all">
-                                {{ $domain->url() }}
-                            </li>
+                            <li class="break-all">{{ $domain->url() }}</li>
                         @empty
                             <li>
                                 {{ __('capell-html-cache::admin.no_maintenance_cache') }}
@@ -122,14 +157,20 @@
             @endforelse
         </section>
 
-        <details class="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-gray-900">
-            <summary class="cursor-pointer text-sm font-medium text-gray-600 dark:text-gray-400">
+        <details
+            class="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-gray-900"
+        >
+            <summary
+                class="cursor-pointer text-sm font-medium text-gray-600 dark:text-gray-400"
+            >
                 {{ __('capell-html-cache::admin.technical_details') }}
             </summary>
 
             <dl class="mt-3 grid gap-3 md:grid-cols-2">
                 <div>
-                    <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    <dt
+                        class="text-sm font-medium text-gray-500 dark:text-gray-400"
+                    >
                         {{ __('capell-html-cache::admin.manifest_path') }}
                     </dt>
                     <dd class="mt-1 text-sm break-all">
@@ -143,7 +184,9 @@
                     @foreach ($site->domains as $domain)
                         <li class="break-all">
                             {{ $site->siteName }}: {{ $domain->url() }}
-                            <span class="text-gray-400">-> {{ $domain->file }}</span>
+                            <span class="text-gray-400"
+                                >-> {{ $domain->file }}</span
+                            >
                         </li>
                     @endforeach
                 @endforeach

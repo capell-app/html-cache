@@ -17,6 +17,7 @@ use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
 use Capell\Core\Actions\Install\RegisterProviderCommandsInCurrentProcessAction;
 use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
+use Capell\Core\Events\SiteSpecPrivacyRepaired;
 use Capell\Core\Exceptions\UrlMissingSiteDomainException;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Page;
@@ -57,8 +58,11 @@ use Capell\HtmlCache\Filament\Widgets\HtmlCacheStaleQueueFilamentWidget;
 use Capell\HtmlCache\Http\Middleware\EnsureModelEventsRegistered;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Http\Middleware\PreventSessionCookieOnCacheableRequests;
+use Capell\HtmlCache\Listeners\RemediatePrivateSiteSpecHtmlCache;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
+use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
+use Capell\HtmlCache\Policies\CachedModelUrlPolicy;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
@@ -89,6 +93,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Client\Events\ResponseReceived;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
 use Override;
@@ -156,6 +161,11 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         $this->app->singleton(StaticSiteRequestObserver::class);
         $this->app->tag([StaticSiteRequestObserver::class], Resettable::TAG);
         Event::listen(ResponseReceived::class, [StaticSiteRequestObserver::class, 'record']);
+
+        if (class_exists(SiteSpecPrivacyRepaired::class)) {
+            Event::listen(SiteSpecPrivacyRepaired::class, [RemediatePrivateSiteSpecHtmlCache::class, 'handle']);
+        }
+
         $this->app->singleton(ModelEventRegistrar::class);
         $this->app->singleton(HtmlCacheModelInvalidationObserver::class);
         $this->app->tag([HtmlCacheModelInvalidationObserver::class], Resettable::TAG);
@@ -232,6 +242,8 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->registerModelInvalidationHooks()
             ->registerScheduledInvalidation()
             ->ensurePermissions();
+
+        Gate::policy(CachedModelUrl::class, CachedModelUrlPolicy::class);
     }
 
     #[Override]

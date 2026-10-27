@@ -19,6 +19,29 @@ In `scheduled` mode, model changes insert rows into `stale_cached_urls` instead 
 
 Site-domain scheme, host, path, site, and language mutations enqueue a full cache-clear job immediately after commit, even in scheduled mode. Those changes can make the old file path or public URL unsafe to serve while waiting for the next scheduled refresh cycle.
 
+Private SiteSpec repair is a synchronous security boundary. When Core dispatches
+`Capell\Core\Events\SiteSpecPrivacyRepaired` with its `SiteSpecPrivacyRepairData`
+(`siteIds` and `domains`), HTML Cache immediately clears the entire page-cache
+store through its publication guard, removes the dependency index, and awaits a
+complete purge by the configured package edge driver. This deliberately evicts
+other sites too: dependency registration may still be queued, and historical
+domain, port, query and fragment files may have no index entry identifying their
+site. Publication fencing prevents renders started before repair from restoring
+those files. Neither stopped workers nor pending scheduled invalidation delays
+this withdrawal. Pending stale rows may subsequently regenerate from the repaired
+database state.
+
+Origin deletion and edge purge failures propagate to Core without marking the
+repair complete. Retrying performs the edge purge again even if the previous
+attempt already removed every origin file. Normal full clears retain their
+queued after-commit edge purge; this listener calls
+`ClearAllHtmlCacheAction::run(awaitEdgePurge: true)`. The listener is registered
+only when Core provides the event class.
+
+The Core Composer constraint temporarily targets
+`dev-fix/siteimport-and-errorpage-hardening`, which contains the event and payload.
+Replace it with the first Core release shipping this contract before release.
+
 Route/structure model creates and deletes still trigger broad invalidation because they can change public URL resolution. Non-route model creates and translation updates use the dependency index instead: only cached URLs that previously recorded that model are cleared in `instant` mode or marked stale in `scheduled` mode. This avoids cold-starting the full cache when a leaf record is created.
 
 Domain non-resolution is treated as an obsolete-domain policy, including preview-excluded domains and temporarily disabled sites. If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete. While caching and cache writes are enabled, it deletes the old cache files and removes matching `cached_model_urls` rows; otherwise it leaves the artefacts intact and the refresh retryable.
@@ -201,7 +224,7 @@ CAPELL_HTML_CACHE_WEB_NODE_COUNT=2
 CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=false
 ```
 
-Set `CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true` only when every web and queue node mounts the same POSIX directory. Otherwise configure the HTTP or Cloudflare purge driver. The **HTML cache multi-node purge safety** health check fails when more than one web node is declared while `page_cache` is local, shared storage is not acknowledged, and `purge.driver` is `null`.
+Set `CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true` only when every web and queue node mounts the same POSIX directory. Otherwise configure the HTTP or Cloudflare purge driver. The **HTML Cache: cache clearing configured for every server** health check fails when more than one web node is declared while `page_cache` is local, shared storage is not acknowledged, and `purge.driver` is `null`.
 
 The `stale_cached_urls` table is not a cross-node purge journal. Scheduled invalidation runs `capell:html-cache:process-stale` with `onOneServer()`, and each row has one global claim and processed state. It safely regenerates one shared cache entry, but it cannot make every node consume the same deletion. A correct per-node journal would require stable node identities, membership and retirement rules, per-node acknowledgements, and bounded retention; do not treat scheduled mode as a workaround for node-local multi-node storage.
 

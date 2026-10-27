@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Capell\Admin\Actions\Themes\SetActiveThemeForSitesAction;
 use Capell\Admin\Data\Themes\SetActiveThemeForSitesData;
 use Capell\Admin\Enums\Themes\ThemeActivationScope;
+use Capell\Core\Actions\CreateThemeAction;
+use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Theme;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
@@ -14,6 +16,7 @@ use Capell\Tests\Support\Concerns\CreatesAdminUser;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
@@ -45,13 +48,23 @@ it('refreshes unindexed public html after activating a theme and switching back'
         ->and($fetch()->headers->get('X-Frontend-Cache'))->toBe('HIT')
         ->and(CachedModelUrl::query()->count())->toBe(0);
 
+    $invalidatedKeys = [];
+    Event::listen(FrontendSurrogateKeysInvalidated::class, function (FrontendSurrogateKeysInvalidated $event) use (&$invalidatedKeys): void {
+        $invalidatedKeys = [...$invalidatedKeys, ...$event->surrogateKeys];
+    });
+
     foreach ([$otherTheme, $originalTheme] as $theme) {
         $this->actingAsAdmin();
+        // The recovery CLI resolves an existing theme before each activation.
+        $theme = CreateThemeAction::run(key: $theme->key);
+        $invalidatedKeys = [];
         SetActiveThemeForSitesAction::run(new SetActiveThemeForSitesData(
             themeId: $theme->id,
             scope: ThemeActivationScope::SelectedSites,
             siteIds: [$domain->site_id],
         ));
+        expect($domain->site()->sole()->theme_id)->toBe($theme->id)
+            ->and($invalidatedKeys)->toContain('site-' . $domain->site_id);
         Auth::forgetGuards();
 
         $response = $fetch();

@@ -37,6 +37,7 @@ use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForSurrogateKeysAction;
 use Capell\HtmlCache\Actions\EnsureHtmlCachePermissionsAction;
+use Capell\HtmlCache\Actions\ExpireOverdueStaleCachedUrlsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\PlanEditorHtmlCacheConsequencesAction;
@@ -77,6 +78,7 @@ use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\Cache\Purgers\CloudflareCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
+use Capell\HtmlCache\Support\Cache\RefreshWorkerHeartbeat;
 use Capell\HtmlCache\Support\Error\HtmlCacheStaticErrorPageStore;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
@@ -91,6 +93,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -399,7 +402,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 return null;
             });
             $modelClass::deleted(function (Model $model): mixed {
-                $this->dispatchClearAllHtmlCache();
+                // Withdrawal: a stale-marked file stays readable by the web
+                // server until the sweep runs, so deletion always hard-clears.
+                $this->dispatchClearAllHtmlCacheImmediately();
 
                 return null;
             });
@@ -415,12 +420,21 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 return null;
             }
 
-            $this->dispatchClearPageUrlCache($pageUrl);
+            $this->dispatchClearPageUrlCache($pageUrl, withdrawal: $pageUrl->wasChanged(['status', 'type', 'url', 'target_url', 'status_code']));
+
+            if ($pageUrl->wasChanged(['url', 'site_id', 'language_id'])) {
+                // The previous address no longer serves this content; its
+                // origin copy must go too, not only the new address.
+                $this->dispatchClearPageUrlCache(
+                    (new PageUrl)->newFromBuilder($pageUrl->getRawOriginal()),
+                    withdrawal: true,
+                );
+            }
 
             return null;
         });
         PageUrl::deleted(function (PageUrl $pageUrl): mixed {
-            $this->dispatchClearPageUrlCache($pageUrl);
+            $this->dispatchClearPageUrlCache($pageUrl, withdrawal: true);
 
             return null;
         });
@@ -446,6 +460,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return null;
         });
 
+        Event::listen(Looping::class, [RefreshWorkerHeartbeat::class, 'record']);
         Event::listen('eloquent.created: *', [HtmlCacheModelInvalidationObserver::class, 'createdFromEvent']);
         Event::listen('eloquent.updated: *', [HtmlCacheModelInvalidationObserver::class, 'updatedFromEvent']);
         Event::listen('eloquent.deleted: *', [HtmlCacheModelInvalidationObserver::class, 'deletedFromEvent']);
@@ -483,7 +498,12 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         ClearAllHtmlCacheAction::dispatch()->afterCommit();
     }
 
-    private function dispatchClearPageUrlCache(PageUrl $pageUrl): void
+    /**
+     * Creating a URL only adds content, so scheduled mode may stale-mark it.
+     * Deleting, disabling or redirecting a URL withdraws it: the origin copy
+     * must be removed and in-flight renders fenced, never left to the sweep.
+     */
+    private function dispatchClearPageUrlCache(PageUrl $pageUrl, bool $withdrawal = false): void
     {
         $url = $this->pageUrlFullUrl($pageUrl);
 
@@ -491,7 +511,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return;
         }
 
-        if ($this->usesScheduledInvalidation()) {
+        if (! $withdrawal && $this->usesScheduledInvalidation()) {
             MarkCachedUrlStaleAction::dispatch($url, 'page_url_changed')->afterCommit();
 
             return;
@@ -557,6 +577,15 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerScheduledInvalidation(): self
     {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $schedule
+                ->call(static fn (): int => ExpireOverdueStaleCachedUrlsAction::run())
+                ->name('capell-html-cache:expire-overdue-stale')
+                ->everyFiveMinutes()
+                ->withoutOverlapping()
+                ->onOneServer();
+        });
+
         if (! $this->usesScheduledInvalidation()) {
             return $this;
         }

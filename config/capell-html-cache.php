@@ -49,12 +49,46 @@ return [
         'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
         'connection' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR_CONNECTION'),
         'dispatch_interval_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_SWR_DISPATCH_INTERVAL_SECONDS', 30),
+        // Site-wide changes keep stale copies only while a worker on the
+        // refresh connection has polled within this many seconds; otherwise
+        // every copy is cleared so a theme or critical CSS change cannot be
+        // withheld by a missing worker. Scheduled invalidation mode skips this
+        // heartbeat check and the overdue-stale expiry below: the scheduler,
+        // not a queue worker, owns refreshing every stale copy there.
+        'worker_heartbeat_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_SWR_WORKER_HEARTBEAT_SECONDS', 120),
+        // A stale copy still waiting for a refresh after this long is cleared
+        // instead of served (not applied in scheduled invalidation mode).
+        'max_stale_age_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_SWR_MAX_STALE_AGE_SECONDS', 900),
     ],
     'request_coalescing' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_REQUEST_COALESCING', true),
         'lock_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_LOCK_SECONDS', 15),
         'wait_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_WAIT_SECONDS', 3),
         'uncacheable_seconds' => $integerEnv('CAPELL_HTML_CACHE_COALESCING_UNCACHEABLE_SECONDS', 5),
+    ],
+    /*
+    | Uncached renders are heavy (seconds each) and share the PHP-FPM pool with
+    | cache hits. After a release switch or full purge, many distinct cold URLs
+    | can arrive at once; without a budget they occupy every worker. At most
+    | max_concurrent renders run at once; further misses wait up to
+    | wait_seconds for a slot, then receive a short private 503 with
+    | Retry-After. Cached and stale copies are always served without a slot.
+    | The default is half of CAPELL_FPM_MAX_CHILDREN (set by deployment from
+    | the pool's pm.max_children), falling back to half of 8.
+    |
+    | Worst-case FPM worker hold for one cold miss: request_coalescing
+    | wait_seconds (3 s) waiting on the render lock holder, plus this
+    | render_budget wait_seconds (2 s) waiting for a render slot, so up to 5 s
+    | before the 503, excluding the render itself once a slot is held. Size
+    | the pool for max_concurrent renders plus the waiters this allows.
+    */
+    'render_budget' => [
+        'enabled' => Env::get('CAPELL_HTML_CACHE_RENDER_BUDGET', true),
+        'max_concurrent' => $integerEnv(
+            'CAPELL_HTML_CACHE_MAX_CONCURRENT_RENDERS',
+            max(1, intdiv($integerEnv('CAPELL_FPM_MAX_CHILDREN', 8), 2)),
+        ),
+        'wait_seconds' => $integerEnv('CAPELL_HTML_CACHE_RENDER_BUDGET_WAIT_SECONDS', 2),
     ],
     'cache_vary_headers' => ['Accept-Encoding'],
     'stateless_pagination' => [

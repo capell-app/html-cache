@@ -12,11 +12,13 @@ use Capell\Frontend\Data\RenderHookContext;
 use Capell\Frontend\Data\RenderHookContributionData;
 use Capell\Frontend\Enums\RenderHookLocation;
 use Capell\Frontend\Support\Render\RenderHookRegistry;
+use Capell\HtmlCache\Actions\ClaimStaleCachedUrlAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\ProcessStaleHtmlCacheAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
 use Capell\HtmlCache\Actions\RefreshCachedUrlAtomicallyAction;
 use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
@@ -24,7 +26,9 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
+use Capell\HtmlCache\Support\Cache\RefreshWorkerHeartbeat;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
@@ -2068,4 +2072,53 @@ it('names the publication guard when the retried render is rejected again', func
         ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
         ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($row->last_error)->toContain('the publication guard rejected the render twice');
+});
+
+it('purges the edge for a url once its refresh replaces the copy a live-worker site-wide change kept', function (): void {
+    Storage::fake('page_cache');
+    Queue::fake();
+    config()->set('capell-html-cache.invalidation.mode', 'instant');
+    config()->set('capell-html-cache.origin_stale_while_revalidate.enabled', true);
+    config()->set('capell-html-cache.origin_stale_while_revalidate.connection', null);
+
+    $siteDomain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $page = Page::factory()->recycle($siteDomain->site)->withTranslations()->create();
+    $url = 'https://example.test/about';
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
+
+    bindHtmlCacheFrontendContext($page);
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+    staleCacheOriginRoute('/about', fn (): mixed => response('<main>refreshed page</main>', 200, ['Content-Type' => 'text/html']));
+    CachedModelUrl::query()->create([
+        'url' => $url,
+        'url_hash' => CachedModelUrl::hashUrl($url),
+        'path' => '/about',
+        'site_id' => $siteDomain->site_id,
+        'site_domain_id' => $siteDomain->getKey(),
+        'language_id' => $siteDomain->language_id,
+        'cacheable_type' => $page->getMorphClass(),
+        'cacheable_id' => $page->getKey(),
+        'cached_at' => now(),
+        'last_seen_at' => now(),
+    ]);
+    // Durable-queue detection only; set after the fixtures so their observers keep the test queue.
+    config()->set('queue.default', 'edge-refresh-test');
+    config()->set('queue.connections.edge-refresh-test', ['driver' => 'database']);
+    resolve(RefreshWorkerHeartbeat::class)->touch('edge-refresh-test');
+
+    (new HtmlFrontendOutputCacheInvalidator)->invalidateAll();
+
+    // Marking keeps the copy and purges nothing: the edge would only refetch the same old origin copy.
+    expect(Storage::disk('page_cache')->get($cachePath))->toBe('old cached page');
+    PurgeEdgeCacheAction::assertNotPushed();
+
+    $stale = StaleCachedUrl::query()->where('url', $url)->sole();
+    expect(ClaimStaleCachedUrlAction::run($stale))->toBeTrue();
+    RefreshCachedUrlAtomicallyAction::run($stale->refresh());
+
+    expect(Storage::disk('page_cache')->get($cachePath))->toContain('refreshed page');
+    PurgeEdgeCacheAction::assertPushed(
+        fn (PurgeEdgeCacheAction $action, array $parameters): bool => $parameters[0] instanceof EdgeCachePurgeData
+            && $parameters[0]->urls === [$url],
+    );
 });

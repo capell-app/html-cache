@@ -77,6 +77,12 @@ final class HtmlCacheModelInvalidationObserver implements Resettable
             return;
         }
 
+        if ($this->withdrawsPublicContent($model)) {
+            ClearAllHtmlCacheAction::dispatch()->afterCommit();
+
+            return;
+        }
+
         if ($model instanceof Site && $model->wasChanged('theme_id')) {
             $this->dispatchMarkSiteCachedUrlsStale($model);
 
@@ -108,7 +114,7 @@ final class HtmlCacheModelInvalidationObserver implements Resettable
 
     public function deleted(Model $model): void
     {
-        if ($this->requiresImmediateGlobalInvalidation($model)) {
+        if ($this->requiresImmediateGlobalInvalidation($model) || $model instanceof Site) {
             ClearAllHtmlCacheAction::dispatch()->afterCommit();
 
             return;
@@ -226,6 +232,21 @@ final class HtmlCacheModelInvalidationObserver implements Resettable
 
     private function requiresImmediateGlobalInvalidation(Model $model): bool
     {
-        return in_array($model->getTable(), ['access_gate_areas'], true);
+        return in_array($model->getTable(), ['access_gate_areas', 'access_gate_site_access_policies'], true);
+    }
+
+    /**
+     * Updates that stop serving content that was public. Scheduled mode
+     * stale-marks ordinary edits, but a stale file is still served by the web
+     * server, so withdrawal must remove origin copies and rotate the
+     * publication generation so an in-flight render cannot restore them.
+     */
+    private function withdrawsPublicContent(Model $model): bool
+    {
+        return match (true) {
+            $model instanceof Page => $model->wasChanged(['visible_from', 'visible_until']),
+            $model instanceof Site => $model->wasChanged('status'),
+            default => $model->getTable() === 'blueprints' && $model->wasChanged('status'),
+        };
     }
 }

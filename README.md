@@ -87,6 +87,10 @@ Screenshot contract: `docs/screenshots.json`.
 
 - `SiteHealthCacheMap`
 
+### Policies
+
+- `CachedModelUrlPolicy`
+
 ### Extension contracts
 
 - `CachePurger`
@@ -124,6 +128,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `EnableGlobalMaintenanceAction`
 - `EnableSiteMaintenanceOverrideAction`
 - `EnsureHtmlCachePermissionsAction`
+- `ExpireOverdueStaleCachedUrlsAction`
 - `ForgetCachedUrlAction`
 - `GenerateStaticSiteAction`
 - `GenerateStaticSitesAction`
@@ -148,6 +153,7 @@ Screenshot contract: `docs/screenshots.json`.
 - `RefreshCachedUrlAtomicallyAction`
 - `RefreshOriginStaleCachedUrlAction`
 - `RenderCoalescedHtmlCacheMissAction`
+- `RenderWithinHtmlCacheBudgetAction`
 - `ResolveCachedUrlsForModelAction`
 - `ResolveCachedUrlsForSurrogateKeysAction`
 - `ResolveEdgeCacheTagsAction`
@@ -245,7 +251,7 @@ Screenshot contract: `docs/screenshots.json`.
 - Required packages: `capell-app/admin`, `capell-app/core`, `capell-app/discovery-foundation`, `capell-app/frontend`.
 - Admin navigation: declares `admin-page: HtmlCacheAdminPagesContribution`, `admin-resource: HtmlCacheAdminResourcesContribution`; each Filament page or resource controls its own navigation visibility.
 - Admin/editor extensions: `dashboard-widget: HtmlCacheDashboardFilamentWidgetsContribution`.
-- Permissions: `capell-html-cache.view`, `capell-html-cache.clear`, `capell-html-cache.maintenance.manage`.
+- Permissions: `capell-html-cache.view`, `capell-html-cache.clear`, `capell-html-cache.maintenance.manage`; access also governed by package policies: `CachedModelUrlPolicy`.
 - Public routes: registers `HtmlCacheFrontendRoutesContribution`.
 - Database changes: package migrations are declared.
 - Config: `config/capell-html-cache.php`.

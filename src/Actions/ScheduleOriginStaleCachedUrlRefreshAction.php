@@ -21,10 +21,14 @@ final class ScheduleOriginStaleCachedUrlRefreshAction
     use AsFake;
     use AsObject;
 
-    public function handle(string $url): void
+    /**
+     * The queue connection that refreshes stale origin copies outside the web
+     * worker, or null when origin stale-while-revalidate cannot run.
+     */
+    public static function durableConnection(): ?string
     {
         if (config('capell-html-cache.origin_stale_while_revalidate.enabled', true) !== true) {
-            return;
+            return null;
         }
 
         $connection = config('capell-html-cache.origin_stale_while_revalidate.connection') ?? config('queue.default');
@@ -34,6 +38,17 @@ final class ScheduleOriginStaleCachedUrlRefreshAction
         if (! is_string($connection) || ! in_array(config('queue.connections.' . $connection . '.driver'), [
             'database', 'redis', 'sqs', 'beanstalkd',
         ], true)) {
+            return null;
+        }
+
+        return $connection;
+    }
+
+    public function handle(string $url): void
+    {
+        $connection = self::durableConnection();
+
+        if ($connection === null) {
             return;
         }
 

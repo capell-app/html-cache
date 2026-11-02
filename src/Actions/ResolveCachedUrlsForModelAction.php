@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -50,7 +51,10 @@ final class ResolveCachedUrlsForModelAction
             $pageUrls = PageUrl::query()
                 ->where('pageable_type', $morphClass)
                 ->where('pageable_id', $key)
+                ->with('siteDomain')
                 ->get()
+                // A URL in a language with no site domain is not served, so it has no cached page to clear.
+                ->filter(static fn (PageUrl $pageUrl): bool => $pageUrl->getRelation('siteDomain') instanceof SiteDomain)
                 ->map(fn (PageUrl $pageUrl): string => $pageUrl->fullUrl());
 
             $urls = $urls

@@ -21,6 +21,7 @@ use Capell\HtmlCache\Actions\BuildHtmlCacheOriginDecisionAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheRequestObservationAction;
 use Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction;
+use Capell\HtmlCache\Actions\RenderWithinHtmlCacheBudgetAction;
 use Capell\HtmlCache\Actions\ResolveEdgeCacheTagsAction;
 use Capell\HtmlCache\Actions\RetireCachedUrlAction;
 use Capell\HtmlCache\Actions\ScheduleOriginStaleCachedUrlRefreshAction;
@@ -72,6 +73,8 @@ final class HtmlCacheMiddleware
     public const string PRIVATE_RESPONSE_ATTRIBUTE = 'capell.html_cache.private_response';
 
     public const string SHELL_VERIFICATION_ATTRIBUTE = 'capell.html_cache.shell_verification';
+
+    private const string RENDER_BUDGET_EXHAUSTED_ATTRIBUTE = 'capell.html_cache.render_budget_exhausted';
 
     private const string INCOMING_SESSION_COOKIE_ATTRIBUTE = 'capell.html_cache.incoming_session_cookie';
 
@@ -262,7 +265,9 @@ final class HtmlCacheMiddleware
         try {
             return $this->handleCacheMiss($pageCache, $request, $next);
         } finally {
-            if ($request->attributes->get(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) !== true) {
+            // A budget refusal rendered nothing, so it says nothing about cacheability.
+            if ($request->attributes->get(self::CACHE_WRITE_SUCCEEDED_ATTRIBUTE) !== true
+                && $request->attributes->get(self::RENDER_BUDGET_EXHAUSTED_ATTRIBUTE) !== true) {
                 try {
                     Cache::put(
                         $this->uncacheableMarkerKey($request),
@@ -279,7 +284,18 @@ final class HtmlCacheMiddleware
     private function handleCacheMiss(PageCache $pageCache, Request $request, Closure $next): Response
     {
         resolve(HtmlCachePublicationGuard::class)->capture($request);
-        $response = $this->renderWithFragmentCapture($request, $next);
+        $response = RenderWithinHtmlCacheBudgetAction::run(
+            fn (): Response => $this->renderWithFragmentCapture($request, $next),
+        );
+
+        if (! $response instanceof Response) {
+            // Every render slot stayed busy: answer cheaply instead of queueing
+            // another heavy render onto a saturated worker pool.
+            $request->attributes->set(self::RENDER_BUDGET_EXHAUSTED_ATTRIBUTE, true);
+
+            return $this->coalescingRetryResponse($request);
+        }
+
         $response = $this->stripCookiesForCacheableAnonymousRequest($request, $response);
 
         if ($this->containsUnsafeSharedHtml($request, $response)) {

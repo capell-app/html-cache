@@ -4,10 +4,23 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\Core\Actions\PublicRead\PublishPublicArtefactAction;
+use Capell\Core\Contracts\PublicRead\PublicArtefactFence;
+use Capell\Core\Data\PublicRead\PublicReadStampData;
+use Capell\Core\Models\Site;
+use Capell\Core\Support\Database\RuntimeSchemaState;
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
+use Capell\Frontend\Support\Loader\SiteLoader;
+use Capell\Frontend\Support\Loader\SiteResolver;
+use Capell\HtmlCache\Models\HtmlCacheModelWithdrawal;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Override;
 use RuntimeException;
 use Throwable;
 
@@ -16,19 +29,56 @@ use Throwable;
  * share it, so a render started before withdrawal cannot restore deleted HTML.
  * The lock lives outside the page directory and has no expiring lease.
  */
-final class HtmlCachePublicationGuard
+final class HtmlCachePublicationGuard implements PublicArtefactFence
 {
     public const string REQUEST_TOKEN_ATTRIBUTE = 'capell.html_cache.publication_token';
 
+    public const string REQUEST_SITE_ATTRIBUTE = 'capell.html_cache.publication_site';
+
     public const string REJECTED_ATTRIBUTE = 'capell.html_cache.publication_rejected';
+
+    /** Model keys ("morph:id") a render retrieved, so publication can refuse renders of withdrawn models. */
+    public const string RENDERED_MODELS_ATTRIBUTE = 'capell.html_cache.rendered_models';
+
+    private const string STAMP_SEPARATOR = '#';
+
+    private const int MODEL_KEY_CHUNK = 500;
+
+    private bool $withdrawalsInstalled = false;
+
+    private bool $withdrawalsProbed = false;
+
+    /** @var Collection<int, Site>|null The sites a request can resolve to, read once per guard (scoped to one request). */
+    private ?Collection $sites = null;
 
     /** @var array<string, true> */
     private static array $heldLocks = [];
+
+    /** @var resource|null The lock handle while exclusive() runs. */
+    private mixed $exclusiveHandle = null;
 
     /** The withdrawal scope for a URL: every query variant of one host and path. */
     public static function urlKey(Request $request): string
     {
         return hash('sha256', mb_strtolower($request->getHost()) . '/' . trim($request->path(), '/'));
+    }
+
+    public static function urlKeyForUrl(string $url): string
+    {
+        return self::urlKey(Request::create($url));
+    }
+
+    public static function modelKey(string $morphClass, int|string $modelKey): string
+    {
+        return $morphClass . ':' . $modelKey;
+    }
+
+    /** @return list<string> the models a render retrieved; see RENDERED_MODELS_ATTRIBUTE */
+    public static function renderedModelKeys(Request $request): array
+    {
+        $renderedModels = $request->attributes->get(self::RENDERED_MODELS_ATTRIBUTE, []);
+
+        return is_array($renderedModels) ? array_values(array_filter($renderedModels, is_string(...))) : [];
     }
 
     public function capture(Request $request): ?string
@@ -37,7 +87,12 @@ final class HtmlCachePublicationGuard
             return $this->token($request);
         }
 
+        // The revision fence is taken first, before anything renders. The site
+        // is then resolved from the request, because capture runs ahead of the
+        // frontend: another site's schedule must not bound this site's stamp.
         $token = $this->snapshot(self::urlKey($request));
+        $token = $token === null ? null : $token . self::STAMP_SEPARATOR . PublicReadDiskCopyPolicy::buildKey($this->requestSiteId($request));
+
         $request->attributes->set(self::REQUEST_TOKEN_ATTRIBUTE, $token);
 
         return $token;
@@ -51,9 +106,11 @@ final class HtmlCachePublicationGuard
     }
 
     /**
-     * A token binds the site-wide generation and, when a URL is given, that
-     * URL's withdrawal counter, so a no-op withdrawal can reject the renders of
-     * its own URL without rejecting every other publish.
+     * A token binds the site-wide generation, the URL's withdrawal counter when
+     * a URL is given, and the model withdrawal sequence. A targeted withdrawal
+     * advances only the counters of the URLs it removes and the sequence of the
+     * models it withdraws, so it rejects renders of those URLs and renders that
+     * retrieved those models without rejecting any other publish.
      */
     public function snapshot(?string $urlKey = null): ?string
     {
@@ -61,9 +118,12 @@ final class HtmlCachePublicationGuard
             return $this->locked(function ($handle) use ($urlKey): string {
                 $generation = $this->generation($handle);
 
-                return $urlKey === null
-                    ? $generation
-                    : $generation . '|' . $urlKey . '|' . ($this->urlCounters()[$urlKey] ?? 0);
+                return implode('|', [
+                    $generation,
+                    $urlKey ?? '',
+                    $urlKey === null ? '' : (string) ($this->urlCounters()[$urlKey] ?? 0),
+                    (string) $this->withdrawalSequence(),
+                ]);
             });
         } catch (Throwable $throwable) {
             report($throwable);
@@ -72,26 +132,50 @@ final class HtmlCachePublicationGuard
         }
     }
 
-    /** @param Closure(): bool $publish */
-    public function publish(?string $token, Closure $publish): bool
+    /**
+     * Publishes through Core's PublishPublicArtefactAction, the one fenced
+     * path for copies served without Laravel: under this guard's lock (the
+     * lock every withdrawal holds) it checks the public-read stamp the render
+     * was built under against a fresh one (refusing changed or time-bounded
+     * rules), then this guard's own generation and URL counter, then writes
+     * with the permit the page cache store requires.
+     *
+     * @param  Closure(PublicArtefactPermit): bool  $publish
+     * @param  list<string>  $renderedModelKeys  models the render retrieved; see modelKey()
+     */
+    public function publish(?string $token, Closure $publish, array $renderedModelKeys = []): bool
     {
         if ($token === null) {
             return false;
         }
 
+        $parts = explode(self::STAMP_SEPARATOR, $token, 2);
+        $builtUnder = PublicReadStampData::fromKey($parts[1] ?? '');
+
         try {
-            return $this->locked(function ($handle) use ($token, $publish): bool {
-                [$generation, $urlKey, $counter] = array_pad(explode('|', $token, 3), 3, null);
+            return PublishPublicArtefactAction::run($this, PublicReadDiskCopyPolicy::siteId(), $builtUnder, [], function (PublicArtefactPermit $permit) use ($parts, $publish, $renderedModelKeys): bool {
+                [$generation, $urlKey, $counter, $sequence] = array_pad(explode('|', $parts[0], 4), 4, null);
+
+                $handle = $this->exclusiveHandle;
+
+                if ($handle === null) {
+                    throw new RuntimeException('HTML cache copies are published only under the publication guard lock.');
+                }
 
                 if (! hash_equals($this->generation($handle), (string) $generation)) {
                     return false;
                 }
 
-                if ($urlKey !== null && (string) ($this->urlCounters()[$urlKey] ?? 0) !== $counter) {
+                if ($urlKey !== null && $urlKey !== '' && (string) ($this->urlCounters()[$urlKey] ?? 0) !== $counter) {
                     return false;
                 }
 
-                return $publish();
+                // Tokens from before model fencing carry no sequence; treat them as the oldest.
+                if ($this->anyWithdrawnAfter($renderedModelKeys, is_numeric($sequence) ? (int) $sequence : 0)) {
+                    return false;
+                }
+
+                return $publish($permit);
             });
         } catch (Throwable $throwable) {
             report($throwable);
@@ -159,6 +243,107 @@ final class HtmlCachePublicationGuard
         });
     }
 
+    /**
+     * Fence a targeted withdrawal without rotating the site-wide generation.
+     *
+     * Each model key records a withdrawal whose sequence is newer than every
+     * token captured so far, rejecting renders that retrieved that model
+     * before the withdrawal, and whose time lets a dependency index recorded
+     * late detect that its page may hold withdrawn content. Each URL key's
+     * counter advances, rejecting renders of that URL holding an older token.
+     * Renders of other URLs that did not retrieve the models still publish.
+     *
+     * @param  list<string>  $urlKeys  see urlKey()
+     * @param  list<string>  $modelKeys  see modelKey()
+     */
+    public function fence(array $urlKeys, array $modelKeys = []): void
+    {
+        if ($modelKeys !== []) {
+            if (! $this->withdrawalsInstalled()) {
+                throw new RuntimeException('The HTML cache model withdrawal table is not installed.');
+            }
+
+            $withdrawnAt = CarbonImmutable::now();
+            foreach (array_chunk(array_values(array_unique($modelKeys)), self::MODEL_KEY_CHUNK) as $chunk) {
+                HtmlCacheModelWithdrawal::query()->insert(array_map(
+                    static fn (string $modelKey): array => ['model_key' => $modelKey, 'withdrawn_at' => $withdrawnAt],
+                    $chunk,
+                ));
+            }
+        }
+
+        if ($urlKeys === []) {
+            return;
+        }
+
+        $this->locked(function () use ($urlKeys): void {
+            $counters = $this->urlCounters();
+            foreach (array_unique($urlKeys) as $urlKey) {
+                $counters[$urlKey] = ($counters[$urlKey] ?? 0) + 1;
+            }
+            $this->writeUrlCounters($counters);
+        });
+    }
+
+    public function withdrawalsInstalled(): bool
+    {
+        if ($this->withdrawalsInstalled) {
+            return true;
+        }
+
+        // Only a positive answer is remembered: an installed table does not
+        // disappear. The first answer comes from the request's shared schema
+        // probe (migrations forget it); every later one is read afresh, so a
+        // table installed meanwhile is found. A probe that fails throws.
+        $installed = resolve(RuntimeSchemaState::class)->hasTableOrFail(
+            (new HtmlCacheModelWithdrawal)->getTable(),
+            refresh: $this->withdrawalsProbed,
+        );
+        $this->withdrawalsProbed = true;
+
+        return $this->withdrawalsInstalled = $installed;
+    }
+
+    /**
+     * Delete artefacts that fence() has already protected, under the lock and
+     * without rotating the site-wide generation. A failure part-way through is
+     * unknowable, so it rotates to stay conservative.
+     *
+     * @param  Closure(): bool  $withdraw
+     */
+    public function withdrawFenced(Closure $withdraw): bool
+    {
+        return $this->locked(function ($handle) use ($withdraw): bool {
+            try {
+                return $withdraw();
+            } catch (Throwable $throwable) {
+                $this->rotate($handle);
+
+                throw $throwable;
+            }
+        });
+    }
+
+    /**
+     * Whether any of the models was withdrawn at or after the given time.
+     *
+     * @param  list<string>  $modelKeys  see modelKey()
+     */
+    public function anyWithdrawnSince(array $modelKeys, CarbonInterface $since): bool
+    {
+        if ($modelKeys === [] || ! $this->withdrawalsInstalled()) {
+            return false;
+        }
+
+        foreach (array_chunk(array_values(array_unique($modelKeys)), self::MODEL_KEY_CHUNK) as $chunk) {
+            if (HtmlCacheModelWithdrawal::query()->whereIn('model_key', $chunk)->where('withdrawn_at', '>=', $since)->exists()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function lockPath(): string
     {
         $root = Storage::disk('page_cache')->path('');
@@ -197,6 +382,53 @@ final class HtmlCachePublicationGuard
         return $path;
     }
 
+    #[Override]
+    public function exclusive(Closure $callback): mixed
+    {
+        return $this->locked(function ($handle) use ($callback): mixed {
+            $this->exclusiveHandle = $handle;
+
+            try {
+                return $callback();
+            } finally {
+                $this->exclusiveHandle = null;
+            }
+        });
+    }
+
+    #[Override]
+    public function fenceIdentity(): string
+    {
+        return 'html-cache:' . $this->lockPath();
+    }
+
+    /** The site the request is served by, retained on the request so the stamp and the publish agree. */
+    private function requestSiteId(Request $request): ?int
+    {
+        if ($request->attributes->has(self::REQUEST_SITE_ATTRIBUTE)) {
+            $retained = $request->attributes->get(self::REQUEST_SITE_ATTRIBUTE);
+
+            return is_int($retained) ? $retained : null;
+        }
+
+        $siteId = PublicReadDiskCopyPolicy::siteId();
+
+        if ($siteId === null) {
+            try {
+                [$site] = SiteResolver::resolve($request->fullUrl(), $this->sites ??= SiteLoader::getSites());
+                $key = $site instanceof Site ? $site->getKey() : null;
+                $siteId = is_int($key) ? $key : null;
+            } catch (Throwable) {
+                // An unresolvable site keeps the all-sites stamp, which is the stricter one.
+                $siteId = null;
+            }
+        }
+
+        $request->attributes->set(self::REQUEST_SITE_ATTRIBUTE, $siteId);
+
+        return $siteId;
+    }
+
     /**
      * @template T
      *
@@ -205,6 +437,7 @@ final class HtmlCachePublicationGuard
      */
     private function locked(Closure $operation): mixed
     {
+        // capell-security-scan: local-stream reads the publication lock file in application storage
         $handle = fopen($this->lockPath(), 'c+b');
 
         if ($handle === false) {
@@ -218,15 +451,18 @@ final class HtmlCachePublicationGuard
             if ($metadata === false) {
                 throw new RuntimeException('Unable to identify the HTML cache publication lock.');
             }
+
             $identity = $metadata['dev'] . ':' . $metadata['ino'];
             // A second handle to our own locked inode blocks forever. Refuse
             // nested publication/invalidation, including across guard instances.
             if (isset(self::$heldLocks[$identity])) {
                 throw new RuntimeException('Cannot reacquire the HTML cache publication lock within the same operation.');
             }
+
             if (! flock($handle, LOCK_EX)) {
                 throw new RuntimeException('Unable to acquire the HTML cache publication lock.');
             }
+
             $acquired = true;
             self::$heldLocks[$identity] = true;
 
@@ -236,6 +472,7 @@ final class HtmlCachePublicationGuard
                 unset(self::$heldLocks[$identity]);
                 flock($handle, LOCK_UN);
             }
+
             fclose($handle);
         }
     }
@@ -286,6 +523,33 @@ final class HtmlCachePublicationGuard
 
             throw new RuntimeException('Unable to record the HTML cache URL withdrawal counters.');
         }
+    }
+
+    private function withdrawalSequence(): int
+    {
+        if (! $this->withdrawalsInstalled()) {
+            return 0;
+        }
+
+        $sequence = HtmlCacheModelWithdrawal::query()->max('id');
+
+        return is_numeric($sequence) ? (int) $sequence : 0;
+    }
+
+    /** @param list<string> $modelKeys */
+    private function anyWithdrawnAfter(array $modelKeys, int $sequence): bool
+    {
+        if ($modelKeys === [] || ! $this->withdrawalsInstalled()) {
+            return false;
+        }
+
+        foreach (array_chunk(array_values(array_unique($modelKeys)), self::MODEL_KEY_CHUNK) as $chunk) {
+            if (HtmlCacheModelWithdrawal::query()->whereIn('model_key', $chunk)->where('id', '>', $sequence)->exists()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param resource $handle */

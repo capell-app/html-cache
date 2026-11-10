@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Jobs\RefreshOriginStaleCachedUrlJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Support\Cache\OriginRefreshLock;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
@@ -53,6 +54,13 @@ final class ScheduleOriginStaleCachedUrlRefreshAction
         }
 
         try {
+            // Only a hint to save a queue push while a deployment refresher owns the
+            // origin and is refreshing every URL itself. Correctness does not rest
+            // on it: the job acquires the lock itself and defers when it cannot.
+            if (resolve(OriginRefreshLock::class)->isRefresherHeld()) {
+                return;
+            }
+
             $interval = config('capell-html-cache.origin_stale_while_revalidate.dispatch_interval_seconds', 30);
 
             if (! Cache::add(

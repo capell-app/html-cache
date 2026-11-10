@@ -121,7 +121,7 @@ it('ignores morph pivot relations when tracking rendered models', function (): v
     expect($store->tracked($page->getMorphClass()))->toBe(1);
 });
 
-it('records rendered models against a cached url and removes stale model links', function (): void {
+it('records rendered models against a cached url and keeps links a later render did not retrieve', function (): void {
     [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $translation = $page->translations()->first();
 
@@ -139,15 +139,15 @@ it('records rendered models against a cached url and removes stale model links',
         ->language_id->toBe($siteDomain->language_id)
         ->path->toBe('/about');
 
+    // A render served from cached render data may not retrieve the translation;
+    // that is not evidence the URL stopped showing it.
     RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
 
-    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1)
-        ->and(CachedModelUrl::query()->where('url', $url)->first())
-        ->cacheable_type->toBe($page->getMorphClass())
-        ->cacheable_id->toBe($page->getKey());
+    expect(CachedModelUrl::query()->where('url', $url)->pluck('cacheable_type')->all())
+        ->toEqualCanonicalizing([$page->getMorphClass(), $translation->getMorphClass()]);
 });
 
-it('prunes stale cached model urls in one delete query', function (): void {
+it('never deletes recorded links when a later render retrieves fewer models', function (): void {
     [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $translation = $page->translations()->first();
 
@@ -157,6 +157,7 @@ it('prunes stale cached model urls in one delete query', function (): void {
     $url = 'https://example.test/about';
 
     RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation, $siteDomain));
+    $recorded = CachedModelUrl::query()->where('url', $url)->count();
 
     $deleteQueryCount = 0;
     DB::listen(function (QueryExecuted $query) use (&$deleteQueryCount): void {
@@ -168,8 +169,9 @@ it('prunes stale cached model urls in one delete query', function (): void {
 
     RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
 
-    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(1)
-        ->and($deleteQueryCount)->toBe(1);
+    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe($recorded)
+        ->and($recorded)->toBeGreaterThan(1)
+        ->and($deleteQueryCount)->toBe(0);
 });
 
 it('records rendered models with bounded cached-url queries', function (): void {
@@ -191,7 +193,8 @@ it('records rendered models with bounded cached-url queries', function (): void 
         htmlCacheModelMap($page, $translation),
     );
 
-    expect($queryCount)->toBe(3);
+    // One read of the existing rows and one upsert; links are never pruned per render.
+    expect($queryCount)->toBe(2);
 });
 
 it('configures cached model url registration retries and backoff', function (): void {

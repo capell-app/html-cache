@@ -12,10 +12,11 @@ final class StaleHtmlCacheProcessResultData
         public int $failed = 0,
         public int $deferred = 0,
         public int $notApplicable = 0,
+        public bool $leaseLost = false,
     ) {}
 
     public function successful(): bool
     {
-        return $this->failed === 0;
+        return $this->failed === 0 && ! $this->leaseLost;
     }
 }

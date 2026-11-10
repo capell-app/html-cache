@@ -796,7 +796,13 @@ final class HtmlCacheMiddleware
         $keys = SurrogateKeyNormalizer::normalize($keys);
 
         if ($keys !== []) {
-            $response->headers->set('Surrogate-Key', implode(' ', $keys));
+            // Cache-Tag is consumed and removed by Cloudflare. Surrogate-Key is
+            // forwarded to visitors by every other edge, so it is opt-in for
+            // deployments whose proxy strips it. Purges build their own keys.
+            if (config('capell-html-cache.expose_surrogate_key_header', false) === true) {
+                $response->headers->set('Surrogate-Key', implode(' ', $keys));
+            }
+
             $response->headers->set('Cache-Tag', implode(',', $keys));
         }
     }

@@ -19,6 +19,7 @@ use Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Illuminate\Support\Arr;
 
 it('keeps html cache marketplace and composer copy outcome-led and aligned', function (): void {
     $packagePath = dirname(__DIR__, 2);
@@ -102,7 +103,7 @@ it('declares shipped html cache extension contributions instead of deferring the
         ])
         ->and($routes)->toBeArray()
         ->and($routes['type'] ?? null)->toBe('route')
-        ->and($routes['routes'] ?? null)->toBe($security['publicSurface']['routeNames'] ?? null)
+        ->and($routes['routes'] ?? null)->toBe(collect(Arr::wrap(data_get($security, 'publicSurface.routeNames', [])))->map(static fn (mixed $name): string => preg_replace('/^[A-Z|]+ \S+ \((.+)\)$/', '$1', is_string($name) ? $name : '') ?? '')->all())
         ->and($routes['middlewareAliases'] ?? null)->toContain(
             'frontend.cache',
             'frontend.model_events',

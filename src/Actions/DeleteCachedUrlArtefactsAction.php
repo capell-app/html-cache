@@ -20,7 +20,7 @@ use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static bool run(Request $request, ?SiteDomain $siteDomain = null, list<string> $storedFiles = [], list<string> $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, list<string> $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true, ?Closure $guard = null)
+ * @method static bool run(Request $request, ?SiteDomain $siteDomain = null, list<string> $storedFiles = [], list<string> $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, list<string> $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true, ?Closure $guard = null, bool $prefenced = false)
  */
 final class DeleteCachedUrlArtefactsAction
 {
@@ -34,8 +34,9 @@ final class DeleteCachedUrlArtefactsAction
      * @param  bool  $rotateWhenUnchanged  false only for retirements that observe origin policy rather than act on a data change
      * @param  bool  $fenceUrlWhenUnchanged  false only for cleanup after this caller's own guarded publish of the URL
      * @param  Closure(Closure(): bool): bool|null  $guard  see HtmlCacheStore::deletePagesInDomain()
+     * @param  bool  $prefenced  see HtmlCacheStore::deletePagesInDomain()
      */
-    public function handle(Request $request, ?SiteDomain $siteDomain = null, array $storedFiles = [], array $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, array $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true, ?Closure $guard = null): bool
+    public function handle(Request $request, ?SiteDomain $siteDomain = null, array $storedFiles = [], array $storedPaths = [], bool $includeVariants = false, ?HtmlCacheStore $store = null, array $preserve = [], bool $rotateWhenUnchanged = true, bool $fenceUrlWhenUnchanged = true, ?Closure $guard = null, bool $prefenced = false): bool
     {
         $paths = resolve(HtmlCachePathResolver::class);
         if (! $paths->hasSafeKey($request)) {
@@ -51,13 +52,17 @@ final class DeleteCachedUrlArtefactsAction
         ];
         $urlRequest = clone $request;
         $urlRequest->headers->remove(StatelessPaginationRequest::FRAGMENT_HEADER);
-        $variantBases = [$paths->pathForRequestUrl($urlRequest, $siteDomain)];
+        $variantBases = [$paths->pathForRequestUrl($urlRequest, $siteDomain, vary: false)];
+        if ($includeVariants) {
+            $files[] = $variantBases[0];
+            $files[] = $paths->pathForRequestUrl($urlRequest, $siteDomain, error: true, vary: false);
+        }
         $pageRequest = clone $urlRequest;
         $pageRequest->query->replace([]);
         // Conservative eviction covers every unattributable legacy hash on this
         // page path, including full query responses as well as fragments. The
         // store excludes canonical no-query keys and recorded neighbour ownership.
-        $unattributableLegacyBases = [$paths->pathForRequestUrl($pageRequest, $siteDomain)];
+        $unattributableLegacyBases = [$paths->pathForRequestUrl($pageRequest, $siteDomain, vary: false)];
         if (isset($storedFiles[0])) {
             $variantBases[] = $storedFiles[0];
             $suffix = StatelessPaginationRequest::cacheKeySuffix($urlRequest);
@@ -99,6 +104,7 @@ final class DeleteCachedUrlArtefactsAction
             $rotateWhenUnchanged,
             $fenceUrlWhenUnchanged ? HtmlCachePublicationGuard::urlKey($request) : null,
             $guard,
+            $prefenced,
         );
     }
 

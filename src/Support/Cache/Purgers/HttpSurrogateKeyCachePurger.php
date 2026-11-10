@@ -5,29 +5,55 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\Cache\Purgers;
 
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
-use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Actions\ForgetCoveredEdgePurgeDropsAction;
+use Capell\HtmlCache\Contracts\ReportsEdgePurgeResponses;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Data\EdgePurgeResponseData;
+use Capell\HtmlCache\Support\Cache\EdgePurge\EdgePurgeLogger;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use InvalidArgumentException;
 use Throwable;
 
-final class HttpSurrogateKeyCachePurger implements CachePurger
+final class HttpSurrogateKeyCachePurger implements ReportsEdgePurgeResponses
 {
     public function __construct(private readonly HttpFactory $http) {}
 
     public function purge(EdgeCachePurgeData $purge): bool
     {
+        $response = $this->sendPurge($purge);
+
+        if (! $response->isSuccessful()) {
+            EdgePurgeLogger::directPurgeRejected($this->edgePurgeZone(), $purge, $response);
+
+            return false;
+        }
+
+        ForgetCoveredEdgePurgeDropsAction::run($this->edgePurgeZone(), $purge);
+
+        return true;
+    }
+
+    public function edgePurgeZone(): ?string
+    {
+        $endpoint = config('capell-html-cache.purge.endpoint');
+        $host = is_string($endpoint) ? parse_url(trim($endpoint), PHP_URL_HOST) : null;
+
+        return is_string($host) && $host !== '' ? 'http:' . strtolower($host) : null;
+    }
+
+    public function sendPurge(EdgeCachePurgeData $purge): EdgePurgeResponseData
+    {
         $endpoint = config('capell-html-cache.purge.endpoint');
         $normalizedKeys = SurrogateKeyNormalizer::normalize($purge->tags);
 
         if (! is_string($endpoint) || trim($endpoint) === '' || ($normalizedKeys === [] && $purge->urls === [] && ! $purge->purgeAll)) {
-            return false;
+            return EdgePurgeResponseData::failed('HTTP edge purge is not configured or the purge was empty.');
         }
 
         try {
             $resolvedEndpoint = $this->resolveEndpoint(trim($endpoint));
-        } catch (Throwable) {
-            return false;
+        } catch (Throwable $exception) {
+            return EdgePurgeResponseData::fromException($exception);
         }
 
         $request = $this->http
@@ -53,19 +79,23 @@ final class HttpSurrogateKeyCachePurger implements CachePurger
         $configuredMethod = config('capell-html-cache.purge.method', 'post');
         $method = is_string($configuredMethod) ? strtolower($configuredMethod) : 'post';
 
-        $response = $request
-            ->withHeaders([
-                is_string($headerName) && $headerName !== '' ? $headerName : 'Surrogate-Key' => implode(' ', $normalizedKeys),
-            ])
-            ->send(in_array($method, ['post', 'put', 'patch', 'delete'], true) ? strtoupper($method) : 'POST', $resolvedEndpoint['url'], [
-                'json' => [
-                    'surrogate_keys' => $normalizedKeys,
-                    'urls' => $purge->urls,
-                    'purge_all' => $purge->purgeAll,
-                ],
-            ]);
+        try {
+            $response = $request
+                ->withHeaders([
+                    is_string($headerName) && $headerName !== '' ? $headerName : 'Surrogate-Key' => implode(' ', $normalizedKeys),
+                ])
+                ->send(in_array($method, ['post', 'put', 'patch', 'delete'], true) ? strtoupper($method) : 'POST', $resolvedEndpoint['url'], [
+                    'json' => [
+                        'surrogate_keys' => $normalizedKeys,
+                        'urls' => $purge->urls,
+                        'purge_all' => $purge->purgeAll,
+                    ],
+                ]);
+        } catch (Throwable $exception) {
+            return EdgePurgeResponseData::fromException($exception);
+        }
 
-        return $response->successful();
+        return EdgePurgeResponseData::fromResponse($response, accepted: $response->successful());
     }
 
     private function timeoutSeconds(): int

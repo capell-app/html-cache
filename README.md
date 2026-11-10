@@ -2,249 +2,55 @@
 
 <!-- prettier-ignore-start -->
 
-## What This Plugin Adds
-
-HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell Foundation** product group. It ships as `capell-app/html-cache` and extends these surfaces: admin, frontend.
+## What It Does
 
 Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees. It stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration.
 
+- **Price and availability:** Check current availability and price on the [Capell Marketplace listing](https://capell.app/extensions/html-cache).
+- **Licence:** Check the licence terms on the [Capell Marketplace listing](https://capell.app/extensions/html-cache).
+- **Requires:** `PHP ^8.4`, `capell-app/admin ^1.0.72`, `capell-app/core ^1.0.76`, `capell-app/discovery-foundation ^1.0`, `capell-app/frontend ^1.0.76`, `laravel/framework ^12.41.1|^13.0`, `lorisleiva/laravel-actions ^2.8`, `spatie/laravel-data ^4.5`, `spatie/laravel-package-tools ^1.14`.
+- **Install:** `composer require capell-app/html-cache`.
+
 Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.
 
-Status details:
+## Who It Is For
 
-- Status: Available
-- Tier: free
-- Bundle: foundation
-- Composer package: `capell-app/html-cache`
-- Namespace: `Capell\HtmlCache`
-- Theme key: not applicable
-
-## Why It Matters
-
-**For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behavior explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.
+**For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behaviour explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.
 
 **For teams:** Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.
 
-## Screens And Workflow
+## Quick Start
 
-Screenshot contract: `docs/screenshots.json`.
+1. Install the package: `composer require capell-app/html-cache`.
+2. Open the package admin surface at `/admin/html-cache/maintenance-cache` and confirm HTML Cache is available.
+
+## Configure
+
+- **Configuration files:** `config/capell-html-cache.php`.
+- **Commands:** `php artisan capell:html-cache:clear`, `php artisan capell:html-cache:diagnose`, `php artisan capell:html-cache:edge-purge:verify`, `php artisan capell:html-cache:process-stale`, `php artisan capell:static-site`.
+
+## Limits And Pitfalls
+
+- Install the required Capell packages at the versions in `composer.json`: `capell-app/admin ^1.0.72`, `capell-app/core ^1.0.76`, `capell-app/discovery-foundation ^1.0`, `capell-app/frontend ^1.0.76`.
+- Run migrations before opening package resources or public routes.
+- Keep the host Laravel scheduler running so package-registered schedules can execute: `capell:html-cache:process-stale (package registered)`.
+- Keep public Blade and cached HTML free of authoring markers, model IDs, permissions, signed editor URLs, and lazy database queries.
+- Custom write integrations must preserve invalidation for `html-cache` cache tags.
+
+## Screens And Workflow
 
 ![HTML Cache maintenance cache page](docs/screenshots/html-cache-maintenance-cache-page.png)
 
 ![Cached model URLs resource index](docs/screenshots/html-cache-cached-model-urls.png)
 
-- HTML Cache maintenance cache page (admin, required evidence).
-- Cached model URLs resource index (admin, supplementary evidence).
-- HTML Cache dashboard widgets (admin, supplementary evidence).
-- HTML Cache site health cache map (admin, supplementary evidence).
-- Page table cache indicator (admin, supplementary evidence).
-- Anonymous public cache hit (frontend, supplementary evidence).
-- Public maintenance page (frontend, supplementary evidence).
-- HTML Cache maintenance cache page with admin sidebar menu open (admin, supplementary evidence).
-
-## Technical Shape
-
-### Service providers
-
-- `Capell\HtmlCache\Providers\HtmlCacheServiceProvider`
-
-### Config files
-
-- `packages/html-cache/config/capell-html-cache.php`
-
-### Migrations
-
-- `packages/html-cache/database/migrations/2026_05_10_190854_01_create_cached_model_urls_table.php`
-- `packages/html-cache/database/migrations/2026_05_14_000001_create_stale_cached_urls_table.php`
-- `packages/html-cache/database/migrations/2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`
-- `packages/html-cache/database/migrations/2026_07_18_000001_create_html_cache_generation_runs_table.php`
-- `packages/html-cache/database/migrations/2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`
-- `packages/html-cache/database/migrations/2026_10_12_000001_create_html_cache_request_observations_table.php`
-
-### Models
-
-- `CachedModelUrl`
-- `HtmlCacheGenerationRun`
-- `StaleCachedUrl`
-
-### Filament classes
-
-- `PageCachedIconColumn`
-- `HasPageCacheNotification`
-- `PageCachePageTableExtender`
-- `MaintenanceSiteHeaderActionExtender`
-- `MaintenanceCachePage`
-- `UncachedPagesPage`
-- `CachedModelUrlResource`
-- `ListCachedModelUrls`
-- `CachedModelUrlsTable`
-- `HtmlCacheDashboardSettingsContributor`
-- `CacheCoverageUrlsFilamentWidget`
-- `HtmlCacheOverviewFilamentWidget`
-- `HtmlCacheStaleQueueFilamentWidget`
-
-### Livewire components
-
-- `SiteHealthCacheMap`
-
-### Policies
-
-- `CachedModelUrlPolicy`
-
-### Extension contracts
-
-- `CachePurger`
-- `PageCacheNotifiable`
-
-### Listeners
-
-- `RemediatePrivateSiteSpecHtmlCache`
-
-### Actions
-
-- `AssertHtmlCacheInvalidationTopologyAction`
-- `BuildAnonymousHtmlCacheEligibilityReportAction`
-- `BuildCacheMapOverviewAction`
-- `BuildCachedModelUrlDiagnosticsAction`
-- `BuildHtmlCacheEligibilityReportAction`
-- `BuildHtmlCacheOriginDecisionAction`
-- `BuildHtmlCachePublicOutputSafetyDiagnosticsAction`
-- `BuildMaintenanceCacheOverviewAction`
-- `BuildUncachedPagesAction`
-- `CanClearHtmlCachePortCopyAction`
-- `ClaimStaleCachedUrlAction`
-- `ClearAllHtmlCacheAction`
-- `ClearCachedPageUrlsAction`
-- `ClearCachedUrlAction`
-- `ClearCachedUrlsForModelAction`
-- `ClearCachedUrlsForSurrogateKeysAction`
-- `BuildHtmlCacheDashboardStatsAction`
-- `BuildHtmlCacheStaleQueueRowsAction`
-- `BuildHtmlCacheUrlRowsAction`
-- `DeleteCachedUrlArtefactsAction`
-- `DeletePageCacheAction`
-- `DisableGlobalMaintenanceAction`
-- `DisableSiteMaintenanceOverrideAction`
-- `EnableGlobalMaintenanceAction`
-- `EnableSiteMaintenanceOverrideAction`
-- `EnsureHtmlCachePermissionsAction`
-- `ExpireOverdueStaleCachedUrlsAction`
-- `ForgetCachedUrlAction`
-- `GenerateStaticSiteAction`
-- `GenerateStaticSitesAction`
-- `InspectEdgeCachePurgeReadinessAction`
-- `ListCacheMapResourceOptionsAction`
-- `MarkAllCachedUrlsStaleAction`
-- `MarkCachedUrlStaleAction`
-- `MarkCachedUrlsForModelStaleAction`
-- `MarkCachedUrlsForSiteStaleAction`
-- `NotifyClearCachedPagesAction`
-- `PlanEditorHtmlCacheConsequencesAction`
-- `PrepareMaintenanceCacheAction`
-- `PrepareSiteMaintenanceCacheAction`
-- `ProcessStaleHtmlCacheAction`
-- `PruneHtmlCacheMetadataAction`
-- `PurgeEdgeCacheAction`
-- `QueueMaintenancePageGenerationAction`
-- `ReadHtmlCacheRequestMetricsAction`
-- `RecordCachedModelUrlsAction`
-- `RecordHtmlCacheHitAction`
-- `RecordHtmlCacheRequestObservationAction`
-- `RefreshCachedUrlAtomicallyAction`
-- `RefreshOriginStaleCachedUrlAction`
-- `RenderCoalescedHtmlCacheMissAction`
-- `RenderWithinHtmlCacheBudgetAction`
-- `ResolveCachedUrlsForModelAction`
-- `ResolveCachedUrlsForSurrogateKeysAction`
-- `ResolveEdgeCacheTagsAction`
-- `ResolveHtmlCachePageUrlAction`
-- `RetireCachedUrlAction`
-- `ScheduleOriginStaleCachedUrlRefreshAction`
-- `SelectStaleHtmlCacheCandidatesAction`
-- `WriteRefreshedHtmlCacheFileAction`
-
-### Data objects
-
-- `CacheMapModelSummaryData`
-- `CacheMapOverviewData`
-- `CacheMapResourceSummaryData`
-- `HtmlCacheDashboardStatsData`
-- `EdgeCachePurgeData`
-- `EdgeCachePurgeReadinessData`
-- `HtmlCacheClearResult`
-- `HtmlCacheEligibilityReportData`
-- `HtmlCacheHitBatchData`
-- `HtmlCacheOriginDecisionData`
-- `HtmlCacheRequestMetricsData`
-- `MaintenanceCacheDomainData`
-- `MaintenanceCacheOverviewData`
-- `MaintenancePreparationFailureData`
-- `MaintenanceSiteStatusData`
-- `StaleHtmlCacheProcessResultData`
-- `UncachedPageData`
-- `UncachedPagesData`
-
-### Jobs
-
-- `FlushHtmlCacheHitBatchJob`
-- `GenerateMaintenancePagesJob`
-- `RefreshOriginStaleCachedUrlJob`
-- `RegisterCachedModelUrlsJob`
-
-### Command signatures
-
-- `capell:html-cache:clear`
-- `capell:html-cache:diagnose`
-- `capell:html-cache:edge-purge:verify`
-- `capell:html-cache:process-stale`
-- `capell:static-site`
-
-### Scheduled commands
-
-- `capell:html-cache:process-stale (package registered)`
-
-### Console command classes
-
-- `ClearHtmlCacheCommand`
-- `DiagnoseHtmlCacheCommand`
-- `ProcessStaleHtmlCacheCommand`
-- `StaticSiteCommand`
-- `VerifyEdgeCachePurgeCommand`
-
-### Manifest contributions
-
-- `admin-page: Capell\HtmlCache\Manifest\HtmlCacheAdminPagesContribution`
-- `admin-resource: Capell\HtmlCache\Manifest\HtmlCacheAdminResourcesContribution`
-- `console-command: Capell\HtmlCache\Manifest\HtmlCacheConsoleCommandsContribution`
-- `dashboard-widget: Capell\HtmlCache\Manifest\HtmlCacheDashboardFilamentWidgetsContribution`
-- `model: Capell\HtmlCache\Manifest\HtmlCacheModelsContribution`
-- `route: Capell\HtmlCache\Manifest\HtmlCacheFrontendRoutesContribution`
-- `scheduled-job: Capell\HtmlCache\Manifest\HtmlCacheStaleProcessingScheduleContribution`
-
-### Health checks
-
-- `Capell\HtmlCache\Health\HtmlCacheHealthCheck`
-
-### Blade views
-
-- `packages/html-cache/resources/views/filament/pages/maintenance-cache.blade.php`
-- `packages/html-cache/resources/views/filament/pages/partials/uncached-pages-table.blade.php`
-- `packages/html-cache/resources/views/filament/pages/uncached-pages.blade.php`
-- `packages/html-cache/resources/views/livewire/site-health-cache-map.blade.php`
-
-### Cache tags
-
-- `html-cache`
-
-
-## Data Model
-
-- Required tables: `cached_model_urls`, `html_cache_generation_runs`, `html_cache_request_observations`, `stale_cached_urls`.
-- Models: `CachedModelUrl`, `HtmlCacheGenerationRun`, `StaleCachedUrl`.
-- Core record references in migrations: `sites via site_id`, `languages via language_id`, `site domains via site_domain_id`.
-- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`, `2026_10_12_000001_create_html_cache_request_observations_table.php`.
-- Migration impact: run host migrations through the package install flow before opening package surfaces.
-- Deletion/retention behaviour: migrations declare null-on-delete relationships; no timed pruning or retention schedule is declared in `capell.json`.
+- HTML Cache maintenance cache page (admin).
+- Cached model URLs resource index (admin).
+- HTML Cache dashboard widgets (admin).
+- HTML Cache site health cache map (admin).
+- Page table cache indicator (admin).
+- Anonymous public cache hit (frontend).
+- Public maintenance page (frontend).
+- HTML Cache maintenance cache page with admin sidebar menu open (admin).
 
 ## Install Impact
 
@@ -260,15 +66,6 @@ Screenshot contract: `docs/screenshots.json`.
 - Cache tags: `html-cache`.
 - Commands: `capell:html-cache:clear`, `capell:html-cache:diagnose`, `capell:html-cache:edge-purge:verify`, `capell:html-cache:process-stale`, `capell:static-site`.
 
-## Common Pitfalls
-
-- Keep required Capell packages on compatible v4 releases: `capell-app/admin`, `capell-app/core`, `capell-app/discovery-foundation`, `capell-app/frontend`.
-- Run migrations before opening package resources or public routes.
-- Review package configuration before production-like verification: `config/capell-html-cache.php`.
-- Keep the host Laravel scheduler running so package-registered schedules can execute: `capell:html-cache:process-stale (package registered)`.
-- Keep public Blade and cached HTML free of authoring markers, model IDs, permissions, signed editor URLs, and lazy database queries.
-- Custom write integrations must preserve invalidation for `html-cache` cache tags.
-
 ## Troubleshooting
 
 | Symptom | Likely cause | Check | Fix |
@@ -277,11 +74,6 @@ Screenshot contract: `docs/screenshots.json`.
 | Admin screen or command fails on missing table | Package migrations have not run | Check the tables listed in `Data Model` | Run host migrations and rerun the focused package test |
 | Background work does not run | Queue worker or declared schedule is not active | Check the jobs and scheduled commands listed in `Technical Shape` | Start the queue worker or host scheduler, then run the focused command or package test |
 | Public output leaks unexpected state | Render data, cache variation, or authoring boundary has regressed | Check public Blade, cache tags, and public-output safety tests | Move data loading out of Blade and rerun the package public-output tests |
-
-## Quick Start
-
-1. Install the package: `composer require capell-app/html-cache`.
-2. Open the package admin surface at `/admin/html-cache/maintenance-cache` and confirm HTML Cache is available.
 
 ## Upgrading
 
@@ -297,11 +89,11 @@ Read [CHANGELOG.md](CHANGELOG.md) before upgrading.
 - [Admin guide](docs/admin-guide.md)
 - Configuration files: [`config/capell-html-cache.php`](config/capell-html-cache.php).
 - [Troubleshooting](#troubleshooting)
-- [Screenshot contract](docs/screenshots.json)
+- [Developer reference](docs/reference.md)
 - [Marketplace assets](docs/assets/marketplace/)
 - [Capell content language plan](../../docs/CONTENT_LANGUAGE_PLAN.md)
 - [Capell documentation design system](../../docs/DESIGN_SYSTEM.md)
 - [Capell and package ERD notes](../../docs/erd/capell-and-package-erds.md)
-- Related packages: [Discovery Foundation](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
+- Related packages: [Discovery Core](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
 
 <!-- prettier-ignore-end -->

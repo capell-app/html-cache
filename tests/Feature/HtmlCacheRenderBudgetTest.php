@@ -12,8 +12,10 @@ use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
+use Capell\HtmlCache\Support\Cache\OriginRefreshLock;
 use Capell\HtmlCache\Support\Cache\RefreshWorkerHeartbeat;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Carbon\CarbonInterval;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
@@ -25,6 +27,8 @@ use Symfony\Component\HttpFoundation\Response;
 uses(HtmlCacheTestCase::class);
 
 beforeEach(function (): void {
+    // The hard cap runs on a monotonic clock; tests drive it from application time.
+    OriginRefreshLock::reset(fn (): int => now()->getTimestamp() * 1_000_000_000);
     Storage::fake('page_cache');
     Queue::fake();
     Cache::flush();
@@ -41,6 +45,7 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
+    OriginRefreshLock::reset();
     Sleep::fake(false);
     $this->travelBack();
 });
@@ -295,6 +300,90 @@ it('clears a stale copy that no refresh replaced within the maximum stale age an
         ->and(Storage::disk('page_cache')->exists($path))->toBeFalse()
         ->and(StaleCachedUrl::query()->sole()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
     PurgeEdgeCacheAction::assertPushed(fn (): bool => true);
+});
+
+it('clears a batch only under the origin refresh lock, so a deployment cannot acquire mid-clear', function (): void {
+    config()->set('capell-html-cache.invalidation.mode', 'instant');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    budgetTrackedUrl($domain, '/pricing');
+    MarkAllCachedUrlsStaleAction::run('frontend_output_changed');
+    $this->travel(901)->seconds();
+    $lock = resolve(OriginRefreshLock::class);
+    $acquiredMidClear = null;
+    StaleCachedUrl::saving(function () use ($lock, &$acquiredMidClear): void {
+        // The barrier: a deployment tries to take the lock while the batch clears.
+        $acquiredMidClear ??= $lock->tryAcquireExclusive('deploy', 120, 1200);
+    });
+
+    expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
+        ->and($acquiredMidClear)->toBeFalse()
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->tryAcquireExclusive('deploy', 120, 1200))->toBeTrue();
+});
+
+it('stops clearing a batch the moment it loses its lock', function (): void {
+    config()->set('capell-html-cache.invalidation.mode', 'instant');
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    budgetTrackedUrl($domain, '/pricing');
+    budgetTrackedUrl($domain, '/about');
+    MarkAllCachedUrlsStaleAction::run('frontend_output_changed');
+    $this->travel(901)->seconds();
+    $lock = resolve(OriginRefreshLock::class);
+    $saves = 0;
+    StaleCachedUrl::saving(function () use (&$saves): void {
+        // After the first row the store loses the lock, as eviction would; a refresher may now own it.
+        if (++$saves === 1) {
+            Cache::lock(OriginRefreshLock::KEY)->forceRelease();
+            Cache::lock(OriginRefreshLock::KEY . ':slot:1')->forceRelease();
+        }
+    });
+
+    expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
+        ->and(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_NOT_APPLICABLE)->count())->toBe(1)
+        ->and($lock->isExclusiveHeld())->toBeFalse();
+});
+
+it('clears nothing while a refresher holds the lock and enforces maximum age again once its absolute deadline passes', function (): void {
+    config()->set('capell-html-cache.invalidation.mode', 'instant');
+    config()->set('capell-html-cache.origin_stale_while_revalidate.max_stale_age_seconds', 900);
+    $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    budgetTrackedUrl($domain, '/pricing');
+    $path = resolve(HtmlCachePathResolver::class)->pathForUrl('/pricing', $domain);
+    Storage::disk('page_cache')->put($path, 'Published pricing copy');
+    MarkAllCachedUrlsStaleAction::run('frontend_output_changed');
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->acquireExclusive('deploy', 120, 0, 1200))->toBeTrue();
+
+    // The refresher keeps renewing well past the stale age: expiry waits.
+    for ($elapsed = 100; $elapsed <= 1000; $elapsed += 100) {
+        $this->travel(100)->seconds();
+        $lock->renew('deploy', 120);
+    }
+
+    // The expiry waits for the lock on real elapsed time, but a faked sleep advances only the clock the lock
+    // runs on, so a refresher that stopped renewing would lapse during the wait. A live refresher renews while
+    // it is waited on; once the expiry has waited its full allowance the sweep is abandoned, having cleared nothing.
+    $waitedSeconds = 0;
+    Sleep::whenFakingSleep(function (CarbonInterval $duration) use ($lock, &$waitedSeconds): void {
+        $waitedSeconds += $duration->totalMilliseconds / 1000;
+        throw_if($waitedSeconds > ExpireOverdueStaleCachedUrlsAction::LOCK_WAIT_SECONDS, RuntimeException::class, 'wait elapsed');
+        expect($lock->renew('deploy', 120))->toBeTrue();
+    });
+
+    expect(fn (): int => ExpireOverdueStaleCachedUrlsAction::run())->toThrow(RuntimeException::class, 'wait elapsed')
+        ->and(Storage::disk('page_cache')->exists($path))->toBeTrue()
+        ->and(StaleCachedUrl::query()->sole()->status)->not->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
+
+    Sleep::fake(syncWithCarbon: true);
+
+    // Renewal is refused past the absolute deadline, so enforcement resumes.
+    while ($lock->renew('deploy', 120)) {
+        $this->travel(100)->seconds();
+    }
+
+    $this->travel(121)->seconds();
+    expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($path))->toBeFalse();
 });
 
 /** @param  Fiber<mixed, mixed, mixed, mixed>  $fiber */

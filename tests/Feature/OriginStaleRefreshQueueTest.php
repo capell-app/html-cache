@@ -16,9 +16,13 @@ use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Capell\HtmlCache\Support\Cache\OriginRefreshLock;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Bus\UniqueLock;
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\CacheLock;
+use Illuminate\Cache\Lock;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\QueryExecuted;
@@ -38,6 +42,19 @@ use Symfony\Component\HttpFoundation\Response;
 require_once __DIR__ . '/../Support/CachedModelUrlsTestSupport.php';
 
 uses(HtmlCacheTestCase::class);
+
+/** Simulates the store losing every record of the origin refresh lock, as eviction or a restart would. */
+function evictOriginRefreshLock(): void
+{
+    Cache::lock(OriginRefreshLock::KEY)->forceRelease();
+
+    foreach (range(1, resolve(OriginRefreshLock::class)->slotCount()) as $slot) {
+        Cache::lock(OriginRefreshLock::KEY . ':slot:' . $slot)->forceRelease();
+    }
+
+    Cache::lock('capell-html-cache:origin-refresh:gate')->forceRelease();
+    Cache::lock('capell-html-cache:origin-refresh:refresher')->forceRelease();
+}
 
 function queuedOriginRoute(string $uri, callable $origin): Illuminate\Routing\Route
 {
@@ -100,7 +117,13 @@ function queuedOriginRefreshJob(): RefreshOriginStaleCachedUrlJob
     return $job;
 }
 
+afterEach(function (): void {
+    OriginRefreshLock::reset();
+});
+
 beforeEach(function (): void {
+    // The hard cap runs on a monotonic clock; tests drive it from application time.
+    OriginRefreshLock::reset(fn (): int => now()->getTimestamp() * 1_000_000_000);
     Storage::fake('page_cache');
     Cache::flush();
     Queue::fake([RefreshOriginStaleCachedUrlJob::class]);
@@ -504,4 +527,441 @@ it('records exhausted refresh attempts without logging the raw URL', function ()
             'exception' => RuntimeException::class,
         ],
     );
+});
+
+it('admits a refresh job through the lock alone, so a deployment cannot acquire while the job renders', function (): void {
+    $row = queuedOriginStaleRow();
+    $lock = resolve(OriginRefreshLock::class);
+    $acquiredMidRender = null;
+    queuedOriginRoute('/stale', function () use ($lock, &$acquiredMidRender): Response {
+        // The barrier: the deployment tries to take the lock while the job is rendering.
+        $acquiredMidRender = $lock->tryAcquireExclusive('deploy', 120, 1200);
+
+        return response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']);
+    });
+    $job = new RefreshOriginStaleCachedUrlJob($row->url);
+    $job->withFakeQueueInteractions();
+
+    $job->handle();
+
+    $job->assertNotReleased();
+    expect($acquiredMidRender)->toBeFalse()
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->acquireExclusive('deploy', 120, 0, 1200))->toBeTrue();
+});
+
+it('defers a job queued before the deployment took the lock, without rendering', function (): void {
+    $row = queuedOriginStaleRow();
+    $renders = 0;
+    queuedOriginRoute('/stale', function () use (&$renders): Response {
+        $renders++;
+
+        return response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']);
+    });
+    queuedOriginCacheHit($row->url);
+    $queued = queuedOriginRefreshJob();
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->acquireExclusive('deploy', 120, 0, 1200))->toBeTrue();
+
+    $queued->withFakeQueueInteractions();
+    $queued->handle();
+
+    // A deployment refresher holds the lock for minutes, so the job polls less often than it would behind an ordinary render.
+    $queued->assertReleased(30);
+    expect($renders)->toBe(0)
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING)
+        ->and(Storage::disk('page_cache')->get(queuedOriginCachePath($row)))->toBe('Previous public HTML');
+
+    $lock->release('deploy');
+    $retry = new RefreshOriginStaleCachedUrlJob($row->url);
+    $retry->withFakeQueueInteractions();
+    $retry->handle();
+
+    $retry->assertNotReleased();
+    expect($renders)->toBe(1)
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED);
+});
+
+it('skips the cheap visitor dispatch while a refresher holds the lock and queues again once it is released', function (): void {
+    $row = queuedOriginStaleRow();
+    queuedOriginRoute('/stale', static fn (): Response => response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']));
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->acquireExclusive('deploy', 120, 0, 1200))->toBeTrue();
+
+    expect(queuedOriginCacheHit($row->url)->getContent())->toBe('Previous public HTML');
+    Queue::assertNotPushed(RefreshOriginStaleCachedUrlJob::class);
+
+    $lock->release('deploy');
+    queuedOriginCacheHit($row->url);
+
+    Queue::assertPushed(RefreshOriginStaleCachedUrlJob::class, 1);
+});
+
+it('refuses renewal past the absolute deadline and then gives the lock back', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->acquireExclusive('deploy', 120, 0, 600))->toBeTrue();
+
+    for ($elapsed = 100; $elapsed < 600; $elapsed += 100) {
+        $this->travel(100)->seconds();
+        expect($lock->renew('deploy', 120))->toBeTrue()
+            ->and($lock->isExclusiveHeld())->toBeTrue();
+    }
+
+    $this->travel(101)->seconds();
+
+    expect($lock->renew('deploy', 120))->toBeFalse()
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->tryAcquireSlot('another', 60))->toBeTrue();
+});
+
+it('lets an abandoned holder lapse on its short TTL and only the holder renew or release', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->acquireExclusive('crashed-job', 120, 0))->toBeTrue()
+        ->and($lock->tryAcquireSlot('intruder', 60))->toBeFalse()
+        ->and($lock->renew('intruder', 60))->toBeFalse()
+        ->and($lock->release('intruder'))->toBeFalse()
+        ->and($lock->isExclusiveHeld())->toBeTrue();
+
+    $this->travel(121)->seconds();
+
+    // Admission is what matters: some drivers keep reporting an expired record until the next acquisition.
+    expect($lock->tryAcquireSlot('next', 60))->toBeTrue();
+});
+
+it('rejects a lock without an owner or without a TTL or hard cap', function (string $owner, int $ttl, ?int $cap): void {
+    resolve(OriginRefreshLock::class)->tryAcquireExclusive($owner, $ttl, $cap);
+})->with([
+    'no owner' => [' ', 60, null],
+    'no ttl' => ['deploy', 0, null],
+    'no cap' => ['deploy', 60, 0],
+])->throws(InvalidArgumentException::class);
+
+it('lets a holder whose lock lapsed release without deleting the replacement owner', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->tryAcquireExclusive('first', 60))->toBeTrue();
+
+    // The first owner's records lapse or are evicted; a second owner is admitted.
+    evictOriginRefreshLock();
+    expect($lock->tryAcquireExclusive('second', 60))->toBeTrue();
+
+    expect($lock->release('first'))->toBeFalse()
+        ->and($lock->isExclusiveHeld())->toBeTrue()
+        ->and($lock->tryAcquireSlot('third', 60))->toBeFalse()
+        ->and($lock->release('second'))->toBeTrue()
+        ->and($lock->isExclusiveHeld())->toBeFalse();
+});
+
+it('accepts a hard cap shorter than the renewal TTL and never holds past it', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect($lock->tryAcquireExclusive('deploy', 120, 10))->toBeTrue()
+        ->and($lock->isExclusiveHeld())->toBeTrue();
+
+    $this->travel(11)->seconds();
+
+    expect($lock->renewOwned())->toBeFalse()
+        ->and($lock->tryAcquireSlot('next', 60))->toBeTrue();
+});
+
+it('reports a lost lock from renewOwned so a refresher stops rendering', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect($lock->renewOwned())->toBeNull()
+        ->and($lock->tryAcquireExclusive('deploy', 120, 600))->toBeTrue()
+        ->and($lock->renewOwned())->toBeTrue();
+
+    evictOriginRefreshLock();
+    expect($lock->tryAcquireSlot('job', 60))->toBeTrue();
+
+    expect($lock->renewOwned())->toBeFalse()
+        ->and($lock->renewOwned())->toBeNull();
+});
+
+it('measures the hard cap on the monotonic clock, not the application clock', function (): void {
+    $monotonic = 0;
+    OriginRefreshLock::reset(function () use (&$monotonic): int {
+        return $monotonic;
+    });
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect($lock->tryAcquireExclusive('deploy', 120, 100))->toBeTrue();
+
+    // The application clock moves backwards; real elapsed time keeps counting.
+    $this->travel(-60)->seconds();
+    $monotonic = 101 * 1_000_000_000;
+
+    expect($lock->renew('deploy', 120))->toBeFalse();
+});
+
+it('still queues a visitor refresh while an ordinary job holds the lock', function (): void {
+    $row = queuedOriginStaleRow();
+    queuedOriginRoute('/stale', static fn (): Response => response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']));
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->tryAcquireSlot('job:other-url', 120))->toBeTrue();
+
+    queuedOriginCacheHit($row->url);
+
+    // That job refreshes one other URL; this one still needs its own job, which defers until the lock frees.
+    Queue::assertPushed(RefreshOriginStaleCachedUrlJob::class);
+    expect($lock->isRefresherHeld())->toBeFalse();
+});
+
+it('keeps a deferred refresh queued for longer than a deployment refresher can hold the lock', function (): void {
+    config()->set('capell-html-cache.origin_stale_while_revalidate.refresher_hard_cap_seconds', 1200);
+
+    $job = new RefreshOriginStaleCachedUrlJob('https://example.test/stale');
+
+    expect($job->retryUntil()->getTimestamp())->toBeGreaterThan(now()->addSeconds(1200)->getTimestamp());
+});
+
+it('does not render from the process-stale action while another holder owns the lock, and renders once it is free', function (): void {
+    $row = queuedOriginStaleRow();
+    queuedOriginRoute('/stale', static fn (): Response => response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']));
+    $lock = resolve(OriginRefreshLock::class);
+    // Another process holds the lock exclusively: this one has no lease of its own.
+    Cache::lock('capell-html-cache:origin-refresh:gate', 120, 'deploy-elsewhere')->get();
+
+    $blocked = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($blocked->attempted)->toBe(0)
+        ->and($blocked->deferred)->toBe(1)
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING);
+
+    Cache::lock('capell-html-cache:origin-refresh:gate')->forceRelease();
+
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
+        ->and($lock->tryAcquireSlot('next', 60))->toBeTrue();
+});
+
+it('retries a lost refresher lease only under fresh admission, so the retry cannot render alongside others', function (): void {
+    $row = queuedOriginStaleRow();
+    queuedOriginRoute('/stale', static fn (): Response => response('Refreshed public HTML', 200, ['Content-Type' => 'text/html']));
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->tryAcquireExclusive('deploy', 120, 600))->toBeTrue();
+
+    evictOriginRefreshLock();
+    expect($lock->tryAcquireSlot('job:rendering', 120))->toBeTrue();
+    foreach (range(2, $lock->slotCount()) as $n) {
+        expect($lock->tryAcquireSlot('job:rendering-' . $n, 120))->toBeTrue();
+    }
+
+    expect(fn () => ProcessStaleHtmlCacheAction::make()->asJob(1))->toThrow(RuntimeException::class);
+
+    // The retry has no lease of its own: it asks for admission and is refused while the job renders.
+    expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(0)
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PENDING);
+});
+
+it('keeps a refresh job inside its lock lifetime and its uniqueness as long as it can wait', function (): void {
+    config()->set('capell-html-cache.origin_stale_while_revalidate.refresher_hard_cap_seconds', 1200);
+    $job = new RefreshOriginStaleCachedUrlJob('https://example.test/stale');
+
+    expect($job->timeout)->toBeLessThan(120)
+        ->and($job->uniqueFor())->toBeGreaterThanOrEqual(1200 + 300);
+});
+
+it('backs off for longer while a deployment refresher holds the lock', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+    $others = [];
+    $ordinary = new RefreshOriginStaleCachedUrlJob('https://example.test/stale');
+    $ordinary->withFakeQueueInteractions();
+    $refreshing = new RefreshOriginStaleCachedUrlJob('https://example.test/stale');
+    $refreshing->withFakeQueueInteractions();
+
+    // Every slot is rendering: the job defers behind them, not behind a deployment.
+    foreach (range(1, $lock->slotCount()) as $n) {
+        expect($lock->tryAcquireSlot('job:other-' . $n, 120))->toBeTrue();
+        $others[] = 'job:other-' . $n;
+    }
+    $ordinary->handle();
+    array_map($lock->release(...), $others);
+
+    expect($lock->tryAcquireExclusive('deploy', 120, 1200))->toBeTrue();
+    $refreshing->handle();
+
+    $ordinary->assertReleased(5);
+    $refreshing->assertReleased(30);
+});
+
+it('holds a capped lock for its whole cap on a store whose locks cannot be refreshed', function (): void {
+    Cache::extend('norefresh', fn () => Cache::repository(new class extends ArrayStore
+    {
+        public function lock($name, $seconds = 0, $owner = null): Lock
+        {
+            return new CacheLock($this, $name, $seconds, $owner);
+        }
+    }));
+    config()->set('cache.stores.norefresh', ['driver' => 'norefresh']);
+    config()->set('cache.default', 'norefresh');
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect($lock->tryAcquireExclusive('deploy', 60, 600))->toBeTrue();
+
+    // The store cannot extend a lock, so it was taken for the whole cap and renewal only confirms ownership.
+    $this->travel(300)->seconds();
+
+    expect($lock->tryAcquireSlot('intruder', 60))->toBeFalse()
+        ->and($lock->renew('deploy', 20))->toBeTrue()
+        ->and($lock->release('deploy'))->toBeTrue();
+});
+
+it('lets concurrent ordinary refreshes render side by side up to the slot count and frees a slot on release', function (): void {
+    config()->set('capell-html-cache.origin_stale_while_revalidate.refresh_slots', 3);
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect($lock->tryAcquireSlot('job:site-a', 120))->toBeTrue()
+        ->and($lock->tryAcquireSlot('job:site-b', 120))->toBeTrue()
+        ->and($lock->tryAcquireSlot('job:site-c', 120))->toBeTrue()
+        ->and($lock->tryAcquireSlot('job:site-d', 120))->toBeFalse()
+        ->and($lock->release('job:site-b'))->toBeTrue()
+        ->and($lock->tryAcquireSlot('job:site-d', 120))->toBeTrue();
+});
+
+it('runs two queued refresh jobs for different urls concurrently', function (): void {
+    $b = new RefreshOriginStaleCachedUrlJob('https://example.test/b');
+    $b->withFakeQueueInteractions();
+    $lock = resolve(OriginRefreshLock::class);
+
+    // The first job is mid-render (it holds its slot) while the second is picked up.
+    expect($lock->tryAcquireSlot('job:in-flight', 120))->toBeTrue();
+    $b->handle();
+
+    $b->assertNotReleased();
+    expect($lock->release('job:in-flight'))->toBeTrue();
+});
+
+it('gives the whole lock to exclusive work: it waits for nothing when idle, refuses new slots while it runs, and frees them after', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+
+    $seen = $lock->exclusive('expiry:test', 60, 0, null, fn (): array => [
+        $lock->isExclusiveHeld(),
+        $lock->tryAcquireSlot('job:late', 60),
+        $lock->isRefresherHeld(),
+    ]);
+
+    expect($seen)->toBe([true, false, false])
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->tryAcquireSlot('job:after', 60))->toBeTrue();
+});
+
+it('cannot take the whole lock while an ordinary slot is rendering, and rolls back so jobs are not left deferred', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->tryAcquireSlot('job:rendering', 120))->toBeTrue();
+
+    expect($lock->tryAcquireExclusive('expiry:test', 60))->toBeFalse()
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->tryAcquireSlot('job:next', 60))->toBeTrue();
+});
+
+it('forgets a capped lease when the scoped call ends, even when the work throws', function (): void {
+    $lock = resolve(OriginRefreshLock::class);
+
+    expect(fn () => $lock->exclusive('deploy', 120, 0, 1200, function (): never {
+        throw new RuntimeException('render failed');
+    }))->toThrow(RuntimeException::class);
+
+    expect($lock->renewOwned())->toBeNull()
+        ->and($lock->isExclusiveHeld())->toBeFalse()
+        ->and($lock->tryAcquireSlot('job:next', 60))->toBeTrue();
+});
+
+it('rejects a capped lease whose TTL a single slow render could outlast', function (): void {
+    expect(fn () => resolve(OriginRefreshLock::class)->tryAcquireExclusive('deploy', 20, 1200))->toThrow(InvalidArgumentException::class);
+});
+
+/** A store whose every lock lookup lets a callback move time, as a long wait would. */
+function tickingLockStore(Closure $tick): void
+{
+    Cache::extend('ticking', fn () => Cache::repository(new class($tick) extends ArrayStore
+    {
+        public function __construct(private readonly Closure $tick)
+        {
+            parent::__construct();
+        }
+
+        public function lock($name, $seconds = 0, $owner = null): Lock
+        {
+            ($this->tick)();
+
+            /** @var Lock $lock */
+            $lock = parent::lock($name, $seconds, $owner);
+
+            return $lock;
+        }
+    }));
+    config()->set('cache.stores.ticking', ['driver' => 'ticking']);
+    config()->set('cache.default', 'ticking');
+}
+
+it('keeps the gate and its slots alive while exclusive work waits for a long render, so it is not starved', function (): void {
+    $state = new stdClass;
+    $state->busy = false;
+    $state->armed = false;
+    $state->until = 0;
+    $state->stolen = false;
+    $state->ticks = 0;
+    tickingLockStore(function () use ($state): void {
+        if ($state->busy) {
+            return;
+        }
+
+        $state->busy = true;
+        $state->ticks++;
+        $this->travel(3)->seconds();
+        // Once the waiting work holds the gate, a lapse would let anyone take it; a heartbeat keeps refreshing it.
+        /** @var Lock $gate */
+        $gate = Cache::lock(OriginRefreshLock::KEY);
+        $state->armed = $state->armed || $gate->isOwnedBy('expiry:test');
+
+        // Only while the wait is still running: giving up releases the gate on purpose.
+        $state->stolen = $state->stolen || ($state->armed && hrtime(true) < $state->until && Cache::lock(OriginRefreshLock::KEY, 60, 'thief')->get());
+        $state->busy = false;
+    });
+    $lock = resolve(OriginRefreshLock::class);
+    $state->busy = true;
+    expect($lock->tryAcquireSlot('job:long-render', 6000))->toBeTrue();
+    $state->busy = false;
+    $state->until = hrtime(true) + 3_600_000_000;
+
+    expect($lock->acquireExclusive('expiry:test', 60, 4))->toBeFalse()
+        ->and($state->ticks)->toBeGreaterThan(5)
+        ->and($state->stolen)->toBeFalse();
+});
+
+it('is blocked by an abandoned admission for no longer than the lock wait the expiry sweep allows', function (): void {
+    $state = new stdClass;
+    $state->busy = false;
+    tickingLockStore(function () use ($state): void {
+        if (! $state->busy) {
+            $state->busy = true;
+            $this->travel(4)->seconds();
+            $state->busy = false;
+        }
+    });
+    $lock = resolve(OriginRefreshLock::class);
+    $state->busy = true;
+    // A process-stale run killed mid-render: its admission is never released.
+    expect($lock->tryAcquireSlot('process:abandoned', OriginRefreshLock::MAX_SLOT_TTL_SECONDS))->toBeTrue();
+    $state->busy = false;
+
+    expect($lock->acquireExclusive('expiry:test', 60, 5))->toBeTrue()
+        ->and($lock->isExclusiveHeld())->toBeTrue();
+});
+
+it('stops waiting as soon as a lease it holds is lost, rather than counting what it thinks it owns', function (): void {
+    $ticks = 0;
+    tickingLockStore(function () use (&$ticks): void {
+        // The gate disappears from the store partway through the wait.
+        if (++$ticks === 12) {
+            Cache::lock(OriginRefreshLock::KEY)->forceRelease();
+        }
+    });
+    $lock = resolve(OriginRefreshLock::class);
+    expect($lock->tryAcquireSlot('job:render', 6000))->toBeTrue();
+
+    $started = hrtime(true);
+
+    expect($lock->acquireExclusive('expiry:test', 60, 20))->toBeFalse()
+        ->and((hrtime(true) - $started) / 1_000_000_000)->toBeLessThan(10);
 });

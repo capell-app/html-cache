@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\Telemetry;
 
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Data\HtmlCacheRequestMetricsData;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
@@ -34,14 +35,14 @@ final readonly class HtmlCacheRequestObservationStore
 
     public function record(string $urlHash, int $siteId, int $languageId, ?float $renderMilliseconds, int $sampleWeight): void
     {
-        if (! Schema::hasTable(self::TABLE)) {
+        if (! Schema::hasTable(TableName::resolve(self::TABLE))) {
             return;
         }
 
         $observedAt = now();
         // These rows are telemetry, never rendering dependencies. Updating them
         // must not trigger model observers that invalidate the public HTML.
-        DB::table(self::TABLE)->insertOrIgnore([
+        DB::table(TableName::resolve(self::TABLE))->insertOrIgnore([
             'url_hash' => $urlHash,
             'site_id' => $siteId,
             'language_id' => $languageId,
@@ -62,7 +63,7 @@ final readonly class HtmlCacheRequestObservationStore
 
     public function read(string $urlHash, int $siteId, int $languageId): ?HtmlCacheRequestMetricsData
     {
-        if (! Schema::hasTable(self::TABLE)) {
+        if (! Schema::hasTable(TableName::resolve(self::TABLE))) {
             return null;
         }
 
@@ -85,7 +86,7 @@ final readonly class HtmlCacheRequestObservationStore
 
     private function query(string $urlHash, int $siteId, int $languageId): Builder
     {
-        return DB::table(self::TABLE)->where('url_hash', $urlHash)
+        return DB::table(TableName::resolve(self::TABLE))->where('url_hash', $urlHash)
             ->where('site_id', $siteId)->where('language_id', $languageId);
     }
 }

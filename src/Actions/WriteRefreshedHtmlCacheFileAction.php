@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
 use Capell\Frontend\Contracts\HtmlMinifier;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCacheFilesystem;
@@ -59,10 +60,11 @@ final class WriteRefreshedHtmlCacheFileAction
         $path = $disk->path($safeCachePath);
         HtmlCacheFilesystem::assertContainedPath($path, $disk->path(''));
 
-        return $publication->publish($token, function () use ($staleCachedUrl, $path, $content, $response, $disk, $safeCachePath): bool {
+        return $publication->publish($token, function (PublicArtefactPermit $permit) use ($publication, $staleCachedUrl, $path, $content, $response, $disk, $safeCachePath): bool {
+            $permit->assertActiveFor($publication);
             HtmlCacheFilesystem::assertContainedPath($path, $disk->path(''));
             File::ensureDirectoryExists(dirname($path), 0775, true);
-            $replaced = $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrl, $path, $content);
+            $replaced = $this->replaceCacheFileForCurrentStaleClaim($permit, $staleCachedUrl, $path, $content);
 
             if ($replaced && $response->getStatusCode() !== Response::HTTP_NOT_FOUND) {
                 HtmlCacheFilesystem::assertContainedPath($disk->path($safeCachePath . PageCache::FRAGMENT_METADATA_EXTENSION), $disk->path(''));
@@ -70,11 +72,12 @@ final class WriteRefreshedHtmlCacheFileAction
             }
 
             return $replaced;
-        });
+        }, HtmlCachePublicationGuard::renderedModelKeys($request));
     }
 
-    private function replaceCacheFileForCurrentStaleClaim(StaleCachedUrl $staleCachedUrl, string $path, string $content): bool
+    private function replaceCacheFileForCurrentStaleClaim(PublicArtefactPermit $permit, StaleCachedUrl $staleCachedUrl, string $path, string $content): bool
     {
+        $permit->assertActiveFor(resolve(HtmlCachePublicationGuard::class));
         $claimToken = $staleCachedUrl->claim_token;
 
         if (! is_string($claimToken) || $claimToken === '') {

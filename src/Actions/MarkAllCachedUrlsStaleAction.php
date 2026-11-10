@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Data\Database\SqlFragment;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -37,16 +38,17 @@ final class MarkAllCachedUrlsStaleAction
 
         CachedModelUrl::query()
             ->with('siteDomain')
-            ->select('cached_model_urls.*')
-            ->join(DB::raw('(select min(id) as selected_id from cached_model_urls group by url_hash, site_id, site_domain_id, path) as unique_cached_urls'), 'cached_model_urls.id', '=', 'unique_cached_urls.selected_id')
-            ->orderBy('cached_model_urls.id')
-            ->lazyById(column: 'cached_model_urls.id', alias: 'id')
+            ->select(TableName::resolve('cached_model_urls') . '.*')
+            ->join(SqlFragment::raw('(select min(id) as selected_id from ' . TableName::resolve('cached_model_urls') . ' group by url_hash, site_id, site_domain_id, path) as unique_cached_urls')->expression(), TableName::resolve('cached_model_urls') . '.id', '=', 'unique_cached_urls.selected_id')
+            ->orderBy(TableName::resolve('cached_model_urls') . '.id')
+            ->lazyById(column: TableName::resolve('cached_model_urls') . '.id', alias: 'id')
             ->each(function (CachedModelUrl $cachedModelUrl) use (&$marked, &$rows, &$hasUnsafeUrl, $reason, $cachePathSiteDomain, $pathResolver): void {
                 if (! $pathResolver->hasSafeKey($cachedModelUrl->url)) {
                     $hasUnsafeUrl = true;
 
                     return;
                 }
+
                 if (resolve(ConfiguredHtmlCacheBypassRules::class)->shouldBypassUrl($cachedModelUrl->url)) {
                     return;
                 }

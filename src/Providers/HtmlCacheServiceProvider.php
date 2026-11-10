@@ -16,6 +16,7 @@ use Capell\Admin\Contracts\Extenders\SiteHeaderActionExtender;
 use Capell\Admin\Enums\DashboardEnum;
 use Capell\Admin\Facades\CapellAdmin;
 use Capell\Core\Actions\Install\RegisterProviderCommandsInCurrentProcessAction;
+use Capell\Core\Data\PublicModelWithdrawalData;
 use Capell\Core\Events\FrontendSurrogateKeysInvalidated;
 use Capell\Core\Events\SiteSpecPrivacyRepaired;
 use Capell\Core\Exceptions\UrlMissingSiteDomainException;
@@ -27,6 +28,7 @@ use Capell\Core\Octane\Resettable;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Core\Support\Extensions\ExtensionContributionReceiptRegistry;
 use Capell\Core\Support\Packages\AbstractPackageServiceProvider;
+use Capell\Core\Support\PublicRead\PublicReadWithdrawalSteps;
 use Capell\Frontend\Contracts\FrontendOutputCacheInvalidator;
 use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\Frontend\Contracts\StaticErrorPageStore;
@@ -41,6 +43,9 @@ use Capell\HtmlCache\Actions\ExpireOverdueStaleCachedUrlsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\PlanEditorHtmlCacheConsequencesAction;
+use Capell\HtmlCache\Actions\PruneHtmlCacheMetadataAction;
+use Capell\HtmlCache\Actions\WithdrawCachedHtmlForOpenedAccessAreasAction;
+use Capell\HtmlCache\Actions\WithdrawCachedUrlsForModelAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
@@ -64,6 +69,7 @@ use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Observers\HtmlCacheModelInvalidationObserver;
 use Capell\HtmlCache\Policies\CachedModelUrlPolicy;
+use Capell\HtmlCache\PublicRead\HtmlCachePublicReadWithdrawalStep;
 use Capell\HtmlCache\Support\AccessGate\ActiveAccessGateAreaResolver;
 use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
@@ -72,6 +78,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
 use Capell\HtmlCache\Support\Cache\HtmlCacheFilesystem;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
@@ -132,7 +139,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             ->hasMigration('2026_05_14_000001_create_stale_cached_urls_table')
             ->hasMigration('2026_06_07_000001_add_telemetry_to_cached_model_urls_table')
             ->hasMigration('2026_07_18_000001_create_html_cache_generation_runs_table')
-            ->hasMigration('2026_10_12_000001_create_html_cache_request_observations_table');
+            ->hasMigration('2026_10_12_000001_create_html_cache_request_observations_table')
+            ->hasMigration('2026_11_02_000001_create_html_cache_model_withdrawals_table')
+            ->hasMigration('2026_11_02_000002_create_html_cache_dependency_tracking_epochs_table');
     }
 
     #[Override]
@@ -169,9 +178,16 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             Event::listen(SiteSpecPrivacyRepaired::class, [RemediatePrivateSiteSpecHtmlCache::class, 'handle']);
         }
 
+        $this->callAfterResolving(PublicReadWithdrawalSteps::class, static function (PublicReadWithdrawalSteps $steps): void {
+            $steps->register(HtmlCachePublicReadWithdrawalStep::KEY, static fn () => resolve(HtmlCachePublicReadWithdrawalStep::class)());
+        });
+
         $this->app->singleton(ModelEventRegistrar::class);
         $this->app->singleton(HtmlCacheModelInvalidationObserver::class);
         $this->app->tag([HtmlCacheModelInvalidationObserver::class], Resettable::TAG);
+        // Scoped so one request reuses the guard's table-installed check; the
+        // lock bookkeeping that must span instances is static.
+        $this->app->scoped(HtmlCachePublicationGuard::class);
         $this->app->scoped(RetrievedModelStore::class, fn (): RetrievedModelStore => new RetrievedModelStore);
         $this->app->scoped(RenderedModelTracker::class, fn (): RenderedModelTracker => $this->app->make(RetrievedModelStore::class));
 
@@ -266,7 +282,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerMaintenanceStorage(): self
     {
-        $this->app->singleton(HtmlCacheStaticMaintenancePageStore::class);
+        $this->app->singleton(HtmlCacheStaticMaintenancePageStore::class, fn (): HtmlCacheStaticMaintenancePageStore => new HtmlCacheStaticMaintenancePageStore(
+            $this->app->make(HtmlCacheStore::class),
+            $this->app->make(HtmlCachePublicationGuard::class),
+        ));
         $this->app->singleton(
             StaticMaintenancePageStore::class,
             fn (): HtmlCacheStaticMaintenancePageStore => $this->app->make(HtmlCacheStaticMaintenancePageStore::class),
@@ -277,7 +296,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerErrorPageStorage(): self
     {
-        $this->app->singleton(HtmlCacheStaticErrorPageStore::class);
+        $this->app->singleton(HtmlCacheStaticErrorPageStore::class, fn (): HtmlCacheStaticErrorPageStore => new HtmlCacheStaticErrorPageStore(
+            $this->app->make(HtmlCacheStore::class),
+            $this->app->make(HtmlCachePublicationGuard::class),
+        ));
         $this->app->singleton(
             StaticErrorPageStore::class,
             fn (): HtmlCacheStaticErrorPageStore => $this->app->make(HtmlCacheStaticErrorPageStore::class),
@@ -403,8 +425,22 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             });
             $modelClass::deleted(function (Model $model): mixed {
                 // Withdrawal: a stale-marked file stays readable by the web
-                // server until the sweep runs, so deletion always hard-clears.
-                $this->dispatchClearAllHtmlCacheImmediately();
+                // server until the sweep runs, so deletion hard-withdraws the
+                // page's URLs and every cached URL that renders it.
+                if ($model instanceof Page && $model->isForceDeleting() && $model->getOriginal($model->getDeletedAtColumn()) !== null) {
+                    // Its URLs were withdrawn when it was moved to the trash.
+                    return null;
+                }
+
+                $modelKey = $model->getKey();
+
+                if (! is_numeric($modelKey)) {
+                    $this->dispatchClearAllHtmlCacheImmediately();
+
+                    return null;
+                }
+
+                WithdrawCachedUrlsForModelAction::dispatch($model->getMorphClass(), (int) $modelKey)->afterCommit();
 
                 return null;
             });
@@ -465,6 +501,14 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
         Event::listen('eloquent.updated: *', [HtmlCacheModelInvalidationObserver::class, 'updatedFromEvent']);
         Event::listen('eloquent.deleted: *', [HtmlCacheModelInvalidationObserver::class, 'deletedFromEvent']);
         Event::listen(FrontendSurrogateKeysInvalidated::class, function (FrontendSurrogateKeysInvalidated $event): void {
+            // A model leaving public view (a page whose scheduled expiry passed) withdraws
+            // only the URLs that render it; its site key would clear every page on the site.
+            if ($event->withdrawal instanceof PublicModelWithdrawalData) {
+                WithdrawCachedUrlsForModelAction::dispatch($event->withdrawal->morphClass, $event->withdrawal->modelKey)->afterCommit();
+
+                return;
+            }
+
             $this->dispatchClearSurrogateKeyCache($event->surrogateKeys);
         });
 
@@ -582,6 +626,23 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 ->call(static fn (): int => ExpireOverdueStaleCachedUrlsAction::run())
                 ->name('capell-html-cache:expire-overdue-stale')
                 ->everyFiveMinutes()
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            // Every mode records model withdrawals; process-stale only prunes in scheduled mode.
+            $schedule
+                ->call(static fn (): int => PruneHtmlCacheMetadataAction::run())
+                ->name('capell-html-cache:prune-metadata')
+                ->hourly()
+                ->withoutOverlapping()
+                ->onOneServer();
+        });
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $schedule
+                ->call(static fn (): int => WithdrawCachedHtmlForOpenedAccessAreasAction::run())
+                ->name('capell-html-cache:withdraw-opened-access-areas')
+                ->everyMinute()
                 ->withoutOverlapping()
                 ->onOneServer();
         });

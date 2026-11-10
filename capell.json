@@ -8,7 +8,7 @@
     "version": "1.0.0",
     "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
     "product": {
-        "group": "Capell Foundation",
+        "group": "Capell Essentials",
         "tier": "free",
         "bundle": "foundation"
     },
@@ -25,7 +25,9 @@
         "conflicts": []
     },
     "providers": {
-        "metadata": [],
+        "metadata": [
+            "Capell\\HtmlCache\\Providers\\MigrationMetadataServiceProvider"
+        ],
         "install": [],
         "runtime": ["Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider"],
         "admin": [],
@@ -114,7 +116,9 @@
         "settings": false,
         "requiredTables": [
             "cached_model_urls",
+            "html_cache_dependency_tracking_epochs",
             "html_cache_generation_runs",
+            "html_cache_model_withdrawals",
             "html_cache_request_observations",
             "stale_cached_urls"
         ]
@@ -161,17 +165,20 @@
             ]
         },
         "publicOutput": {
-            "cacheSafe": true,
             "forbidAuthoringSurface": true,
             "forbidSecrets": true,
-            "forbidPublicBladeQueries": true
+            "forbidPublicBladeQueries": true,
+            "cacheSafe": true
         },
         "externalHttpClients": {
             "requiresTimeouts": true,
             "requiresSecretRedaction": true,
             "clients": [
+                "Capell\\HtmlCache\\Data\\EdgePurgeResponseData",
+                "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider",
                 "Capell\\HtmlCache\\Support\\Cache\\Purgers\\CloudflareCachePurger",
-                "Capell\\HtmlCache\\Support\\Cache\\Purgers\\HttpSurrogateKeyCachePurger"
+                "Capell\\HtmlCache\\Support\\Cache\\Purgers\\HttpSurrogateKeyCachePurger",
+                "Capell\\HtmlCache\\Support\\StaticSite\\StaticSiteRequestObserver"
             ]
         },
         "adminSurface": {
@@ -237,6 +244,22 @@
     },
     "marketplace": {
         "summary": "Serve Capell pages as static HTML for sub-millisecond responses, with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
+        "problem": "Repeated public page requests can leave a site rendering the same output again and again.",
+        "outcome": "A site has cached public HTML with dependencies tracked for invalidation.",
+        "faq": [
+            {
+                "question": "What happens when cached content changes?",
+                "answer": "The cache indexes model dependencies and supports immediate or scheduled stale regeneration."
+            },
+            {
+                "question": "Can administrators inspect cached pages?",
+                "answer": "Yes. They can inspect coverage, dependency maps and stale work, then clear, warm or regenerate pages."
+            },
+            {
+                "question": "Do cached responses contain authoring controls?",
+                "answer": "Anonymous visitors receive cached public HTML without authoring markers or session cookies."
+            }
+        ],
         "screenshots": [
             {
                 "path": "docs/screenshots/html-cache-maintenance-cache-page.png",

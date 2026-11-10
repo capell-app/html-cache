@@ -98,12 +98,13 @@ final class RetireCachedUrlAction
         // Retirement observes a policy the origin already reports; the data change
         // behind it carried its own invalidation. Advancing the generation for a
         // URL that held nothing would only reject unrelated concurrent publishes.
+        $includeVariants = $request === null || ! $request->headers->has(StatelessPaginationRequest::FRAGMENT_HEADER);
         DeleteCachedUrlArtefactsAction::run(
             $request ?? Request::create($url),
             $domain,
             [$cachePath, $errorCachePath],
             $storedPaths,
-            includeVariants: $request === null || ! $request->headers->has(StatelessPaginationRequest::FRAGMENT_HEADER),
+            includeVariants: $includeVariants,
             rotateWhenUnchanged: false,
             guard: $guard,
         );
@@ -112,7 +113,11 @@ final class RetireCachedUrlAction
             $query->delete();
         }
         if (! $suppressInlineEdgePurge) {
-            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(urls: [$url]));
+            // The URL tag reaches the query variants whose origin copies were just deleted.
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(
+                tags: $includeVariants ? [ResolveEdgeCacheTagsAction::urlTag($url)] : [],
+                urls: [$url],
+            ), urlScopedTags: true);
         }
     }
 }

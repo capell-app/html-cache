@@ -38,6 +38,7 @@ enum HtmlCacheEligibilityReason: string
     case MissingSiteDomain = 'missing_site_domain';
     case RedirectUrl = 'redirect_url';
     case UnpublishedPage = 'unpublished_page';
+    case PublicReadTimeBounded = 'public_read_time_bounded';
 
     public static function acceptsRefreshStatus(int $responseStatus): bool
     {

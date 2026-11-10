@@ -68,6 +68,7 @@ final class RenderWithinHtmlCacheBudgetAction
 
         while (true) {
             for ($slot = 0; $slot < $slots; $slot++) {
+                // capell-security-scan: local-stream reads a render budget slot lock file in application storage
                 $handle = fopen($prefix . $slot, 'c+b');
 
                 if ($handle === false) {

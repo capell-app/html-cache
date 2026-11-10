@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Support\AccessGate;
 
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Support\Database\RuntimeSchemaState;
+use Capell\Core\Support\TableName;
 use Closure;
 use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Illuminate\Http\Request;
@@ -67,8 +68,8 @@ final class ActiveAccessGateAreaResolver
         }
 
         $query = $connectionName !== null
-            ? DB::connection($connectionName)->table('access_gate_areas')
-            : DB::table('access_gate_areas');
+            ? DB::connection($connectionName)->table(TableName::resolve('access_gate_areas'))
+            : DB::table(TableName::resolve('access_gate_areas'));
 
         if (CapellCore::isPackageAvailable('capell-app/access-gate') && app()->bound('capell.access-gate.area-lookup')) {
             $lookup = app()->make('capell.access-gate.area-lookup');
@@ -88,12 +89,12 @@ final class ActiveAccessGateAreaResolver
         // The default connection shares the request's schema probe with every other
         // consumer of this table; a dedicated connection keeps its own builder.
         if ($connectionName === null) {
-            return resolve(RuntimeSchemaState::class)->hasTable('access_gate_areas');
+            return resolve(RuntimeSchemaState::class)->hasTable(TableName::resolve('access_gate_areas'));
         }
 
         $schema = Schema::connection($connectionName);
 
-        return $schema instanceof SchemaBuilder && $schema->hasTable('access_gate_areas');
+        return $schema instanceof SchemaBuilder && $schema->hasTable(TableName::resolve('access_gate_areas'));
     }
 
     private function connectionName(): ?string

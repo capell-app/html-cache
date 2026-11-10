@@ -15,6 +15,7 @@ use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Theme;
 use Capell\Core\Octane\Resettable;
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
@@ -44,6 +45,7 @@ use Capell\HtmlCache\Support\Admin\HtmlCacheAdminCacheCleaner;
 use Capell\HtmlCache\Support\Admin\HtmlCacheSiteHealthReportExtender;
 use Capell\HtmlCache\Support\Admin\HtmlCacheStaticSiteGenerationDispatcher;
 use Capell\HtmlCache\Support\Admin\MaintenanceAdminTool;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\HtmlFrontendOutputCacheInvalidator;
 use Capell\HtmlCache\Support\Cache\PageCache;
@@ -53,6 +55,8 @@ use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\HtmlCache\Tests\Support\PublishesHtmlCacheArtefacts;
+use Capell\HtmlCache\Tests\Support\PublishesStaticPages;
 use Capell\Tests\Support\Filament\AdminSurfaceAssertions;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
@@ -325,6 +329,7 @@ it('fails internal static generation when a public URL does not render successfu
 it('rejects invalid extension static urls instead of dispatching them', function (): void {
     $kernel = Mockery::mock(HttpKernel::class);
     $kernel->shouldNotReceive('handle');
+
     app()->instance(HttpKernel::class, $kernel);
 
     expect(function (): void {
@@ -628,6 +633,9 @@ it('flushes the invalidation model memo between Octane operations', function ():
     $observer = resolve(HtmlCacheModelInvalidationObserver::class);
     $model = new class extends Model
     {
+        /** @use HasFactory<Factory<static>> */
+        use HasFactory;
+
         #[Override]
         public function getMorphClass(): string
         {
@@ -635,6 +643,7 @@ it('flushes the invalidation model memo between Octane operations', function ():
         }
     };
     $model->forceFill(['id' => 904]);
+
     $url = 'https://octane-reset.test/late-registered';
     CachedModelUrl::query()->create([
         'url' => $url, 'url_hash' => CachedModelUrl::hashUrl($url), 'path' => '/late-registered',
@@ -649,6 +658,7 @@ it('flushes the invalidation model memo between Octane operations', function ():
 
     $observer->flushOctaneState();
     $observer->createdFromEvent('eloquent.created: ' . $model::class, [$model]);
+
     expect(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
 });
 
@@ -836,12 +846,14 @@ it('wraps html cache storage and maintenance page storage operations', function 
     Storage::fake('page_cache');
 
     $store = resolve(HtmlCacheStore::class);
-    $maintenanceStore = new HtmlCacheStaticMaintenancePageStore($store);
+    $maintenanceStore = new HtmlCacheStaticMaintenancePageStore($store, resolve(HtmlCachePublicationGuard::class));
 
-    $store->put('../index.html', 'home');
-    $store->replace('nested/page.html', 'page');
+    PublishesHtmlCacheArtefacts::write(static function (PublicArtefactPermit $permit) use ($store): void {
+        $store->put($permit, '../index.html', 'home');
+        $store->replace($permit, 'nested/page.html', 'page');
+    });
 
-    $maintenanceStore->put('maintenance/index.html', 'down');
+    PublishesStaticPages::put($maintenanceStore, 'maintenance/index.html', 'down');
 
     expect($store->exists('index.html'))->toBeTrue()
         ->and($store->lastModified('index.html'))->toBeInt()
@@ -865,7 +877,7 @@ it('returns null for missing html cache storage metadata and sanitizes deletes',
 
     $store = resolve(HtmlCacheStore::class);
 
-    $store->put('folder/keep.html', 'cached');
+    PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => $store->put($permit, 'folder/keep.html', 'cached'));
 
     expect($store->lastModified('missing.html'))->toBeNull()
         ->and($store->path('missing.html'))->toBeNull()
@@ -1263,6 +1275,7 @@ function generateResidualStaticUrls(array $urls): void
 {
     $registry = resolve(StaticSiteExtensionRegistry::class);
     $registry->clear();
+
     $domain = htmlCacheResidualCoverageSiteDomain('example.test');
     config(['capell-html-cache.static_generation.internal_requests' => true]);
     $registry->register('request-contract', function (Site $site, SiteDomain $siteDomain, Closure $visit) use ($urls): void {

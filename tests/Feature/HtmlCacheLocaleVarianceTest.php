@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Support\Locale\FrontendLocaleScope;
+use Capell\HtmlCache\Actions\DeleteCachedUrlArtefactsAction;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Carbon\CarbonImmutable;
@@ -163,8 +165,8 @@ it('bypasses same host and path locale variants negotiated by configured headers
     expect($frenchResponse->getContent())->toBe('french about page')
         ->and($frenchResponse->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $frenchResponse->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->exists('https.example.test/about.html'))->toBeTrue()
-        ->and(Storage::disk('page_cache')->get('https.example.test/about.html'))->toBe('english about page');
+        ->and(Storage::disk('page_cache')->exists(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://example.test/about')))->toBeTrue()
+        ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://example.test/about')))->toBe('english about page');
 });
 
 it('serves a distinct cached file per host so distinct-host locales do not collide', function (): void {
@@ -189,10 +191,10 @@ it('serves a distinct cached file per host so distinct-host locales do not colli
     app()->instance('request', $frenchRequest);
     resolve(PageCache::class)->cache($this->beginCacheRender($frenchRequest), response('french about page', 200, ['Content-Type' => 'text/html']));
 
-    expect(Storage::disk('page_cache')->exists('https.en.example.test/about.html'))->toBeTrue()
-        ->and(Storage::disk('page_cache')->exists('https.fr.example.test/about.html'))->toBeTrue()
-        ->and(Storage::disk('page_cache')->get('https.en.example.test/about.html'))->toBe('english about page')
-        ->and(Storage::disk('page_cache')->get('https.fr.example.test/about.html'))->toBe('french about page');
+    expect(Storage::disk('page_cache')->exists(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://en.example.test/about')))->toBeTrue()
+        ->and(Storage::disk('page_cache')->exists(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')))->toBeTrue()
+        ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://en.example.test/about')))->toBe('english about page')
+        ->and(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')))->toBe('french about page');
 });
 
 it('replays a non default language page from the cache byte for byte', function (): void {
@@ -289,8 +291,8 @@ it('keeps two language sites in separate cache entries and replays each in its o
     expect((string) $frenchHit->getContent())->toBe($frenchMiss);
     expect((string) $englishHit->getContent())->toBe($englishMiss);
     expect($frenchMiss)->not->toBe($englishMiss);
-    expect(Storage::disk('page_cache')->get('https.fr.example.test/about.html'))->toBe($frenchMiss);
-    expect(Storage::disk('page_cache')->get('https.en.example.test/about.html'))->toBe($englishMiss);
+    expect(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')))->toBe($frenchMiss);
+    expect(Storage::disk('page_cache')->get(resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://en.example.test/about')))->toBe($englishMiss);
 })->skip(fn (): bool => ! localeVarianceTranslationsAvailable(), 'Frontend locale scope is not present in the resolved capell-app/frontend.');
 
 it('ignores accept language entirely for the cache key and the cached bytes', function (): void {
@@ -321,5 +323,28 @@ it('ignores accept language entirely for the cache key and the cached bytes', fu
         expect((string) $hitResponse->headers->get('Vary'))->not->toContain('Accept-Language');
     }
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe(['https.fr.example.test/about.html']);
+    expect(Storage::disk('page_cache')->allFiles())->toBe([resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')]);
 })->skip(fn (): bool => ! localeVarianceTranslationsAvailable(), 'Frontend locale scope is not present in the resolved capell-app/frontend.');
+
+it('separates configured vary headers and invalidates every language variant', function (): void {
+    useIsolatedLocaleVariancePageCacheDisk();
+    config()->set('capell-html-cache.cache_vary_headers', ['Accept-Language']);
+    $domain = localeVarianceSiteDomain('vary.example.test');
+    $url = 'https://vary.example.test/about';
+    $english = localeVarianceHandle($url, fn (): Response => response('English content', 200, ['Content-Type' => 'text/html', 'Vary' => 'Accept-Language']), ['Accept-Language' => 'en']);
+    $french = localeVarianceHandle($url, fn (): Response => response('French content', 200, ['Content-Type' => 'text/html', 'Vary' => 'Accept-Language']), ['Accept-Language' => 'fr']);
+    $cachedEnglish = localeVarianceHandle($url, fn (): Response => response('unexpected miss'), ['Accept-Language' => 'en']);
+    $cachedFrench = localeVarianceHandle($url, fn (): Response => response('unexpected miss'), ['Accept-Language' => 'fr']);
+
+    expect($english->getContent())->toContain('English content')->not->toContain('French content')
+        ->and($french->getContent())->toContain('French content')->not->toContain('English content')
+        ->and($cachedEnglish->getContent())->toContain('English content')->not->toContain('French content')
+        ->and($cachedFrench->getContent())->toContain('French content')->not->toContain('English content');
+
+    $request = Request::create($url);
+    expect(DeleteCachedUrlArtefactsAction::run($request, $domain, includeVariants: true))->toBeTrue();
+    $afterEnglish = localeVarianceHandle($url, fn (): Response => response('New English', 200, ['Content-Type' => 'text/html', 'Vary' => 'Accept-Language']), ['Accept-Language' => 'en']);
+    $afterFrench = localeVarianceHandle($url, fn (): Response => response('New French', 200, ['Content-Type' => 'text/html', 'Vary' => 'Accept-Language']), ['Accept-Language' => 'fr']);
+    expect($afterEnglish->getContent())->toContain('New English')->not->toContain('English content')
+        ->and($afterFrench->getContent())->toContain('New French')->not->toContain('French content');
+});

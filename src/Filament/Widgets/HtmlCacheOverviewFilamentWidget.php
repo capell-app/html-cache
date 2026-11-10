@@ -9,6 +9,7 @@ use Capell\Admin\Filament\Concerns\GatedByRoleAndSettings;
 use Capell\HtmlCache\Actions\Dashboard\BuildHtmlCacheDashboardStatsAction;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Illuminate\Support\Number;
 use Override;
 
 final class HtmlCacheOverviewFilamentWidget extends StatsOverviewWidget implements CapellFilamentWidgetContract
@@ -31,16 +32,16 @@ final class HtmlCacheOverviewFilamentWidget extends StatsOverviewWidget implemen
         $stats = BuildHtmlCacheDashboardStatsAction::run();
 
         return [
-            Stat::make(__('capell-html-cache::dashboard.cache_coverage'), number_format($stats->coverageRate, 1) . '%')
+            Stat::make(__('capell-html-cache::dashboard.cache_coverage'), (string) Number::format($stats->coverageRate, precision: 1, locale: app()->getLocale()) . '%')
                 ->description(__('capell-html-cache::dashboard.cache_coverage_description', [
-                    'cached' => number_format($stats->cachedPageUrls),
-                    'total' => number_format($stats->pageUrls),
+                    'cached' => (string) Number::format($stats->cachedPageUrls, precision: 0, locale: app()->getLocale()),
+                    'total' => (string) Number::format($stats->pageUrls, precision: 0, locale: app()->getLocale()),
                 ])),
-            Stat::make(__('capell-html-cache::dashboard.uncached_urls'), number_format($stats->uncachedPageUrls)),
-            Stat::make(__('capell-html-cache::dashboard.tracked_cached_urls'), number_format($stats->trackedCachedUrls)),
-            Stat::make(__('capell-html-cache::dashboard.cached_traffic_coverage'), number_format($stats->cachedTrafficCoverageRate, 1) . '%'),
-            Stat::make(__('capell-html-cache::dashboard.pending_regeneration'), number_format($stats->stalePending)),
-            Stat::make(__('capell-html-cache::dashboard.failed_regeneration'), number_format($stats->staleFailed)),
+            Stat::make(__('capell-html-cache::dashboard.uncached_urls'), (string) Number::format($stats->uncachedPageUrls, precision: 0, locale: app()->getLocale())),
+            Stat::make(__('capell-html-cache::dashboard.tracked_cached_urls'), (string) Number::format($stats->trackedCachedUrls, precision: 0, locale: app()->getLocale())),
+            Stat::make(__('capell-html-cache::dashboard.cached_traffic_coverage'), (string) Number::format($stats->cachedTrafficCoverageRate, precision: 1, locale: app()->getLocale()) . '%'),
+            Stat::make(__('capell-html-cache::dashboard.pending_regeneration'), (string) Number::format($stats->stalePending, precision: 0, locale: app()->getLocale())),
+            Stat::make(__('capell-html-cache::dashboard.failed_regeneration'), (string) Number::format($stats->staleFailed, precision: 0, locale: app()->getLocale())),
         ];
     }
 }

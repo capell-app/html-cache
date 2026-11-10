@@ -6,11 +6,13 @@ namespace Capell\HtmlCache\Actions\Dashboard;
 
 use Capell\Admin\Support\SiteScope;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Number;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
 
@@ -89,7 +91,7 @@ final class BuildHtmlCacheUrlRowsAction
             'state' => (string) __('capell-html-cache::dashboard.uncached'),
             'url' => $pageUrl->url,
             'site' => $pageUrl->site->name ?? (string) __('capell-html-cache::dashboard.not_available'),
-            'hits' => number_format($pageUrl->hit_count),
+            'hits' => (string) Number::format($pageUrl->hit_count, precision: 0, locale: app()->getLocale()),
             'last_hit' => $pageUrl->last_hit_at?->diffForHumans() ?? (string) __('capell-html-cache::dashboard.never'),
             'cached_at' => (string) __('capell-html-cache::dashboard.not_cached'),
             'last_seen' => $pageUrl->last_hit_at?->diffForHumans() ?? (string) __('capell-html-cache::dashboard.never'),
@@ -106,7 +108,7 @@ final class BuildHtmlCacheUrlRowsAction
             'state' => (string) __('capell-html-cache::dashboard.cached'),
             'url' => $cachedUrl->url,
             'site' => (string) ($cachedUrl->site->name ?? __('capell-html-cache::dashboard.not_available')),
-            'hits' => number_format($this->integerValue($cachedUrl->getAttribute('hit_count'))),
+            'hits' => (string) Number::format($this->integerValue($cachedUrl->getAttribute('hit_count')), precision: 0, locale: app()->getLocale()),
             'last_hit' => $this->dateForHumans($cachedUrl->getAttribute('last_hit_at')),
             'cached_at' => $this->dateForHumans($cachedUrl->getAttribute('cached_at')),
             'last_seen' => $this->dateForHumans($cachedUrl->getAttribute('last_seen_at')),
@@ -129,10 +131,10 @@ final class BuildHtmlCacheUrlRowsAction
     private function cachedUrlExists(\Illuminate\Database\Query\Builder $query): void
     {
         $query->selectRaw('1')
-            ->from('cached_model_urls')
-            ->whereColumn('cached_model_urls.site_id', 'page_urls.site_id')
-            ->whereColumn('cached_model_urls.language_id', 'page_urls.language_id')
-            ->whereColumn('cached_model_urls.path', 'page_urls.url');
+            ->from(TableName::resolve('cached_model_urls'))
+            ->whereColumn(TableName::resolve('cached_model_urls') . '.site_id', TableName::resolve('page_urls') . '.site_id')
+            ->whereColumn(TableName::resolve('cached_model_urls') . '.language_id', TableName::resolve('page_urls') . '.language_id')
+            ->whereColumn(TableName::resolve('cached_model_urls') . '.path', TableName::resolve('page_urls') . '.url');
     }
 
     private function dateForHumans(mixed $value): string

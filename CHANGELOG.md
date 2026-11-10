@@ -4,6 +4,11 @@ All notable changes to `capell-app/html-cache` will be documented in this file.
 
 ## Unreleased
 
+- Required shared origin storage for multi-node page caches: the topology guard and the "cache clearing configured for every server" health check no longer accept an `http` or `cloudflare` purge driver in place of shared `page_cache` storage, because a clear job only deletes files on its own node and an edge miss could serve withdrawn HTML from another origin. The edge driver still purges on top of shared storage; single-node installations are unchanged.
+- Separate cached responses by request headers listed in the new `cache_vary_headers` option (empty by default, so stored names are unchanged) and invalidate their variants together.
+
+- Paced queued Cloudflare and HTTP edge purges: purges are coalesced per zone into deduplicated provider-sized batches, sent through a token bucket shared by every queue worker, and slowed automatically on 429 or Retry-After responses with the learned rate remembered across restarts. An overdue or oversized backlog escalates to one full-zone purge when allowed, throttled drain jobs re-dispatch themselves instead of failing, a batch the provider refuses as a bad request is split down to the offending entry, which is dropped after repeated refusals with an error log and a Site Health warning that clears once the entry is purged again or a full-zone purge succeeds, or expires, and Site Health reports the learned rate and backlog.
+- Stopped emitting the `Surrogate-Key` header on public responses by default (it carried page and site IDs and internal markers to visitors); `Cache-Tag` is unchanged and purges are unaffected. Set `CAPELL_HTML_CACHE_EXPOSE_SURROGATE_KEY=true` where a proxy strips it.
 - Fixed stale refreshes of cached 404 pages whose refreshed response is declined without a recorded policy change: the stale 404 is now evicted and the row finishes as not applicable instead of failing the queued job on every retry.
 - Added fail-closed required edge-purge configuration, non-mutating deployment readiness verification, and complete Cloudflare URL-plus-tag invalidation.
 - Added a filesystem TTL backstop and a configurable per-host cap that prunes the oldest cached 404 files before accepting new entries.

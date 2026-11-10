@@ -6,6 +6,7 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
@@ -79,14 +80,14 @@ final class MarkCachedUrlStaleAction
 
         return CachedModelUrl::query()
             ->with('siteDomain')
-            ->select('cached_model_urls.*')
+            ->select(TableName::resolve('cached_model_urls') . '.*')
             ->joinSub(
                 CachedModelUrl::query()
                     ->selectRaw('min(id) as selected_id')
                     ->where('url_hash', $urlHash)
                     ->groupBy('url_hash', 'site_id', 'site_domain_id', 'path'),
                 'unique_cached_urls',
-                'cached_model_urls.id',
+                TableName::resolve('cached_model_urls') . '.id',
                 '=',
                 'unique_cached_urls.selected_id',
             )

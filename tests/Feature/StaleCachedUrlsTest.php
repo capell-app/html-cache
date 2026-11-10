@@ -98,7 +98,7 @@ it('processes the stale queue only when explicitly requested', function (): void
 
     capell_artisan('capell:html-cache:clear', ['--process' => true])
         ->expectsOutput('Marked 0 URL(s) stale. Nothing has been regenerated yet; the old HTML is still being served.')
-        ->expectsOutput('Refreshed 0 stale HTML cache URL(s); 0 failed, 0 deferred, 0 not applicable (0 attempted).')
+        ->expectsOutput(__('capell-html-cache::cache.refresh_summary', ['succeeded' => 0, 'failed' => 0, 'deferred' => 0, 'not_applicable' => 0, 'attempted' => 0]))
         ->doesntExpectOutput('Run capell:html-cache:process-stale (or pass --process) to regenerate them.')
         ->assertSuccessful();
 });
@@ -1636,7 +1636,7 @@ it('processes stale cache command with the requested limit and optional edge pur
     }
 
     $this->artisan('capell:html-cache:process-stale', $options)
-        ->expectsOutput('Refreshed 1 stale HTML cache URL(s); 0 failed, 0 deferred, 0 not applicable (1 attempted).')
+        ->expectsOutput(__('capell-html-cache::cache.refresh_summary', ['succeeded' => 1, 'failed' => 0, 'deferred' => 0, 'not_applicable' => 0, 'attempted' => 1]))
         ->assertSuccessful();
 
     expect(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_PROCESSED)->count())->toBe(1)

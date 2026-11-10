@@ -49,7 +49,7 @@
                         @endif
                     </td>
                     <td class="px-3 py-3">
-                        {{ $page->lastRenderMilliseconds !== null ? number_format($page->lastRenderMilliseconds, 2) : '' }}
+                        {{ $page->lastRenderMilliseconds !== null ? \Illuminate\Support\Number::format($page->lastRenderMilliseconds, precision: 2, locale: app()->getLocale()) : '' }}
                     </td>
                     <td class="px-3 py-3">
                         @if ($page->lastCachedAt !== null)
@@ -62,7 +62,7 @@
                     <td class="px-3 py-3">
                         @if ($page->hitRate !== null)
                             <span
-                                >{{ number_format($page->hitRate, 2) . '%' }}</span
+                                >{{ \Illuminate\Support\Number::format($page->hitRate, precision: 2, locale: app()->getLocale()) . '%' }}</span
                             >
                             @if ($page->metricsObservedSince !== null)
                                 <small class="block">
@@ -75,7 +75,7 @@
                         @endif
                     </td>
                     <td class="px-3 py-3">
-                        {{ number_format($page->cachedHits) }}
+                        {{ \Illuminate\Support\Number::format($page->cachedHits, precision: 0, locale: app()->getLocale()) }}
                     </td>
                 </tr>
             @empty

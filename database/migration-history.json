@@ -1,0 +1,61 @@
+{
+    "create_cached_model_urls_table": {
+        "names": [
+            "2026_05_09_000001_create_cached_model_urls_table",
+            "2026_05_10_190854_01_create_cached_model_urls_table"
+        ],
+        "sha256": [
+            "2ec5aede06b7e7f731998baf13470b161cc82f92aa3f809dc8268790a9891d42",
+            "33568deb8c107e6a96f1a3f36808c31cc48b1799e2998dfc25175b80cb788602",
+            "47393ea42749da5f3d37d5f2367fe11521b5d03f6d9a4514f1c58755c728bed7",
+            "720b1d455cb7299f3be54ee46d2c51384afda044d04e8c7b2fe9ed787ebc42ad",
+            "b6c77859f8298006fda4dd47c8200bd9a3d40e128032a231618d89fd370b4739"
+        ]
+    },
+    "create_html_cache_dependency_tracking_epochs_table": {
+        "names": [
+            "2026_11_02_000002_create_html_cache_dependency_tracking_epochs_table"
+        ],
+        "sha256": [
+            "84d223f3bafdbe834993209289c161cbacf6f194c4f17df2f42ce3c64cd74c0d",
+            "ec340455f9124deed9053a0d251bbc1a40b74583f89f686903f055c4a668e8dd"
+        ]
+    },
+    "create_html_cache_generation_runs_table": {
+        "names": [
+            "2026_07_18_000001_create_html_cache_generation_runs_table"
+        ],
+        "sha256": [
+            "121bf0a2611f92b33f43c9e46d192c752ee8ffc8764f72a4697ca047758abb0a",
+            "702f440f0b255ab56e7b79fb84aacc9e36af609e78250126a3604b5af53931a6"
+        ]
+    },
+    "create_html_cache_model_withdrawals_table": {
+        "names": [
+            "2026_11_02_000001_create_html_cache_model_withdrawals_table"
+        ],
+        "sha256": [
+            "084a34739bff57377f3f23ea009db2f6fef1fed9be1e2cd6dbe354705e9d0d10",
+            "d9968e351617c030fbf770bb192f68c39738ae5f5f35781f0887de7a47282d0b"
+        ]
+    },
+    "create_html_cache_request_observations_table": {
+        "names": [
+            "2026_10_12_000001_create_html_cache_request_observations_table"
+        ],
+        "sha256": [
+            "b9407e80e0215fe2897b2d9326c8f308675ea5d8e45b9f5957b32a4d0775bf3d",
+            "d0ec6539576092e701fcf535ccddfbbaedcba342fe6ee0e8a1fa759aeeba1883"
+        ]
+    },
+    "create_stale_cached_urls_table": {
+        "names": [
+            "2026_05_14_000001_create_stale_cached_urls_table"
+        ],
+        "sha256": [
+            "38672faa4179afae86407d196a200e8f3bc4fe8635a004054d922ef3e2ed778e",
+            "da7fedbace4d42107193d598c4b38b107bd2300b7847020c7a2dd8e3d55d69f9",
+            "f72da091b2c30398227d884e2e785a847e11d684005fc43f5d4b17453451489c"
+        ]
+    }
+}

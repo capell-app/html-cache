@@ -20,26 +20,17 @@ final class AssertHtmlCacheInvalidationTopologyAction
 
     public function handle(): void
     {
-        if ($this->hasCrossNodeInvalidation()) {
+        // An edge purge driver empties the CDN, not the peer origins: a clear job
+        // deletes files on the node that runs it only, so the next edge miss can
+        // still be served withdrawn HTML from another node's local cache. Only
+        // shared origin storage makes multi-node invalidation complete.
+        if (config('capell-html-cache.deployment.shared_page_cache', false) === true) {
             return;
         }
 
         $this->topologyGuard->assertFilesystemDiskIsShared(
             disk: 'page_cache',
             operation: 'HTML page cache invalidation',
-        );
-    }
-
-    private function hasCrossNodeInvalidation(): bool
-    {
-        if (config('capell-html-cache.deployment.shared_page_cache', false) === true) {
-            return true;
-        }
-
-        return in_array(
-            config('capell-html-cache.purge.driver', 'null'),
-            ['cloudflare', 'http'],
-            true,
         );
     }
 }

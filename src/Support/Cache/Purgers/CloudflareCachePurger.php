@@ -5,38 +5,56 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\Cache\Purgers;
 
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
-use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Actions\ForgetCoveredEdgePurgeDropsAction;
+use Capell\HtmlCache\Contracts\ReportsEdgePurgeResponses;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
+use Capell\HtmlCache\Data\EdgePurgeResponseData;
+use Capell\HtmlCache\Data\EdgePurgeThrottleSettingsData;
+use Capell\HtmlCache\Support\Cache\EdgePurge\EdgePurgeLogger;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Throwable;
 
-final class CloudflareCachePurger implements CachePurger
+final class CloudflareCachePurger implements ReportsEdgePurgeResponses
 {
-    private const int MAX_OPERATIONS_PER_REQUEST = 100;
-
     public function __construct(private readonly HttpFactory $http) {}
 
     public function purge(EdgeCachePurgeData $purge): bool
     {
-        $zoneId = config('capell-html-cache.purge.cloudflare.zone_id');
-        $token = config('capell-html-cache.purge.token');
+        $response = $this->sendPurge($purge);
 
-        if (! is_string($zoneId) || ! is_string($token)) {
+        if (! $response->isSuccessful()) {
+            EdgePurgeLogger::directPurgeRejected($this->edgePurgeZone(), $purge, $response);
+
             return false;
         }
 
-        $zoneId = trim($zoneId);
-        $token = trim($token);
+        ForgetCoveredEdgePurgeDropsAction::run($this->edgePurgeZone(), $purge);
 
-        if (preg_match('/^[a-f0-9]{32}$/i', $zoneId) !== 1 || $token === '') {
-            return false;
+        return true;
+    }
+
+    public function edgePurgeZone(): ?string
+    {
+        $credentials = $this->credentials();
+
+        return $credentials === null ? null : 'cloudflare:' . strtolower($credentials['zone_id']);
+    }
+
+    public function sendPurge(EdgeCachePurgeData $purge): EdgePurgeResponseData
+    {
+        $credentials = $this->credentials();
+
+        if ($credentials === null) {
+            return EdgePurgeResponseData::failed('Cloudflare edge purge is not configured.');
         }
 
         $payloads = $this->payloads($purge);
 
         if ($payloads === []) {
-            return false;
+            return EdgePurgeResponseData::failed('The purge contained no valid URLs or tags.');
         }
+
+        $result = EdgePurgeResponseData::succeeded();
 
         try {
             foreach ($payloads as $payload) {
@@ -45,18 +63,43 @@ final class CloudflareCachePurger implements CachePurger
                     ->timeout($this->timeoutSeconds())
                     ->acceptJson()
                     ->asJson()
-                    ->withToken($token)
-                    ->post(sprintf('https://api.cloudflare.com/client/v4/zones/%s/purge_cache', $zoneId), $payload);
+                    ->withToken($credentials['token'])
+                    ->post(sprintf('https://api.cloudflare.com/client/v4/zones/%s/purge_cache', $credentials['zone_id']), $payload);
 
-                if (! $response->successful() || $response->json('success') !== true) {
-                    return false;
+                $result = EdgePurgeResponseData::fromResponse(
+                    $response,
+                    accepted: $response->successful() && $response->json('success') === true,
+                );
+
+                if (! $result->isSuccessful()) {
+                    return $result;
                 }
             }
 
-            return true;
-        } catch (Throwable) {
-            return false;
+            return $result;
+        } catch (Throwable $exception) {
+            return EdgePurgeResponseData::fromException($exception);
         }
+    }
+
+    /** @return array{zone_id: string, token: string}|null */
+    private function credentials(): ?array
+    {
+        $zoneId = config('capell-html-cache.purge.cloudflare.zone_id');
+        $token = config('capell-html-cache.purge.token');
+
+        if (! is_string($zoneId) || ! is_string($token)) {
+            return null;
+        }
+
+        $zoneId = trim($zoneId);
+        $token = trim($token);
+
+        if (preg_match('/^[a-f0-9]{32}$/i', $zoneId) !== 1 || $token === '') {
+            return null;
+        }
+
+        return ['zone_id' => $zoneId, 'token' => $token];
     }
 
     /** @return list<array<string, bool|list<string>>> */
@@ -74,11 +117,13 @@ final class CloudflareCachePurger implements CachePurger
         $tags = array_values(SurrogateKeyNormalizer::normalize($purge->tags));
         $payloads = [];
 
-        foreach (array_chunk($urls, self::MAX_OPERATIONS_PER_REQUEST) as $urlBatch) {
+        $settings = EdgePurgeThrottleSettingsData::fromConfig();
+
+        foreach (array_chunk($urls, max(1, $settings->maxUrlsPerRequest)) as $urlBatch) {
             $payloads[] = ['files' => $urlBatch];
         }
 
-        foreach (array_chunk($tags, self::MAX_OPERATIONS_PER_REQUEST) as $tagBatch) {
+        foreach (array_chunk($tags, max(1, $settings->maxTagsPerRequest)) as $tagBatch) {
             $payloads[] = ['tags' => $tagBatch];
         }
 

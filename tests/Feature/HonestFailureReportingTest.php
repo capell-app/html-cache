@@ -358,7 +358,7 @@ it('fails stale refresh commands when any attempted URL fails', function (string
     MarkAllCachedUrlsStaleAction::run();
 
     capell_artisan($command, $command === 'capell:html-cache:clear' ? ['--process' => true] : [])
-        ->expectsOutputToContain(sprintf('Refreshed %d stale HTML cache URL(s); 1 failed', $mixed ? 1 : 0))
+        ->expectsOutputToContain(__('capell-html-cache::cache.refresh_summary', ['succeeded' => $mixed ? 1 : 0, 'failed' => 1, 'deferred' => 0, 'not_applicable' => 0, 'attempted' => $mixed ? 2 : 1]))
         ->assertFailed();
 
     expect(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_FAILED)->count())->toBe(1)

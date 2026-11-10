@@ -244,7 +244,7 @@ it('rejects directory clears that could escape the current domain scope', functi
         ->and(Storage::disk('page_cache')->get('https.neighbour.test/page.html'))->toBe('neighbour output');
 })->with(['../https.neighbour.test', '%2e%2e/https.neighbour.test', '%252e%252e/https.neighbour.test']);
 
-it('prunes rendered URL dependencies only within the exact current ownership', function (): void {
+it('adds rendered URL dependencies within the exact current ownership and keeps earlier links', function (): void {
     $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
     $neighbour = SiteDomain::factory()->create();
     $url = 'https://example.test/index';
@@ -254,7 +254,8 @@ it('prunes rendered URL dependencies only within the exact current ownership', f
 
     RecordCachedModelUrlsAction::run($url, [$page->getMorphClass() => [$page->id]]);
 
-    expect($obsolete->fresh())->toBeNull()
+    // A render need not retrieve everything its page shows, so earlier links stay.
+    expect($obsolete->fresh())->not->toBeNull()
         ->and($foreign->fresh())->not->toBeNull()
         ->and(CachedModelUrl::query()->where('cacheable_type', $page->getMorphClass())->where('cacheable_id', $page->id)->where('site_id', $domain->site_id)->where('site_domain_id', $domain->id)->exists())->toBeTrue();
 });

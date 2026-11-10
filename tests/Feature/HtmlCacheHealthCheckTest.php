@@ -21,7 +21,7 @@ it('passes all diagnostics when the cache is fully wired', function (): void {
 
     $results = HtmlCacheHealthCheck::runDiagnostics();
 
-    expect($results)->toHaveCount(7)
+    expect($results)->toHaveCount(8)
         ->and($results->every(static fn (DoctorCheckResultData $result): bool => $result->passed))->toBeTrue()
         ->and(HtmlCacheHealthCheck::passed())->toBeTrue();
 });
@@ -65,7 +65,7 @@ it('accepts an acknowledged shared page cache for multiple web nodes', function 
         ->and($result->remediation)->toBeNull();
 });
 
-it('accepts a configured edge purge driver for multiple web nodes', function (): void {
+it('warns when an edge purge driver is configured over node-local storage for multiple web nodes', function (): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.deployment.web_node_count', 4);
     config()->set('capell-html-cache.deployment.shared_page_cache', false);
@@ -73,10 +73,12 @@ it('accepts a configured edge purge driver for multiple web nodes', function ():
 
     $result = (new HtmlCacheHealthCheck)->multiNodePurgeSafetyCheck();
 
-    expect($result->passed)->toBeTrue()
+    expect($result->passed)->toBeFalse()
         ->and($result->message)->toContain('4 web nodes')
         ->and($result->message)->toContain('cloudflare')
-        ->and($result->remediation)->toBeNull();
+        ->and($result->message)->toContain('withdrawn HTML')
+        ->and($result->remediation)->toContain('does not replace')
+        ->and(HtmlCacheHealthCheck::passed())->toBeFalse();
 });
 
 it('reports the disk writable, middleware wired, and tables present checks individually', function (): void {

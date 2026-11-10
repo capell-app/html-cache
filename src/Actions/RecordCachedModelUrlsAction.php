@@ -8,6 +8,7 @@ use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
+use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -36,6 +37,12 @@ final class RecordCachedModelUrlsAction
 {
     use AsFake;
     use AsObject;
+
+    /**
+     * Tolerance between the web host that rendered and the host that recorded
+     * a withdrawal when both share one cache.
+     */
+    private const int WITHDRAWAL_CLOCK_SKEW_SECONDS = 5;
 
     /**
      * @param  array<string, array<int, int|string>>  $models
@@ -91,26 +98,34 @@ final class RecordCachedModelUrlsAction
                 );
             }
 
-            $seenKeys = array_fill_keys(array_map($this->recordKey(...), $records), true);
-            $staleIds = CachedModelUrl::query()
-                ->where('url_hash', $urlHash)
-                ->where('site_id', $siteDomain?->site_id)
-                ->where('site_domain_id', $siteDomain?->id)
-                ->where('last_seen_at', '<=', $now)
-                ->get(['id', 'cacheable_type', 'cacheable_id'])
-                ->reject(fn (CachedModelUrl $cachedModelUrl): bool => isset($seenKeys[$this->cachedModelUrlKey($cachedModelUrl)]))
-                ->modelKeys();
-
-            if ($staleIds !== []) {
-                CachedModelUrl::query()
-                    ->where('url_hash', $urlHash)
-                    ->where('site_id', $siteDomain?->site_id)
-                    ->where('site_domain_id', $siteDomain?->id)
-                    ->where('last_seen_at', '<=', $now)
-                    ->whereKey($staleIds)
-                    ->delete();
-            }
+            // Merge, never replace. A render served from cached render data or a
+            // cached model does not retrieve everything the page shows, so a
+            // dependency missing from this render is not evidence it is gone.
+            // Rows leave the index only when the URL itself is cleared.
         }, attempts: 5);
+
+        $this->withdrawIfRenderedWithdrawnModels($url, $models, $now);
+    }
+
+    /**
+     * A page is published before its dependencies are recorded. When one of
+     * its models was withdrawn after it rendered, that withdrawal could not
+     * find this URL in the index, so withdraw it now that it is recorded.
+     *
+     * @param  array<string, array<int, int|string>>  $models
+     */
+    private function withdrawIfRenderedWithdrawnModels(string $url, array $models, CarbonImmutable $renderedAt): void
+    {
+        $modelKeys = [];
+        foreach ($models as $modelType => $modelIds) {
+            foreach ($modelIds as $modelId) {
+                $modelKeys[] = HtmlCachePublicationGuard::modelKey($modelType, $modelId);
+            }
+        }
+
+        if (resolve(HtmlCachePublicationGuard::class)->anyWithdrawnSince($modelKeys, $renderedAt->subSeconds(self::WITHDRAWAL_CLOCK_SKEW_SECONDS))) {
+            WithdrawCachedUrlsAction::run([$url]);
+        }
     }
 
     /**

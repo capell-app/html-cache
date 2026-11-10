@@ -150,6 +150,7 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
                 }
 
                 $inspected++;
+                // capell-security-scan: local-stream reads a cached HTML file on the local page-cache disk
                 $detection = $inspector->detectAuthoringSurface((string) file_get_contents($path));
 
                 if ($detection === null) {
@@ -205,6 +206,7 @@ final class BuildHtmlCachePublicOutputSafetyDiagnosticsAction
             }
 
             $inspected++;
+            // capell-security-scan: local-stream reads a cached HTML file on the local page-cache disk
             $detection = $inspector->detectAuthoringSurface((string) file_get_contents($path));
 
             if ($detection === null) {

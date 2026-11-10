@@ -102,13 +102,11 @@ it('adds cacheable extension tags to the surrogate key header', function (): voi
         fn (): Response => response('extension missing html', 404, ['Content-Type' => 'text/html']),
     );
 
-    $surrogateKey = (string) $response->headers->get('Surrogate-Key');
     $cacheTag = (string) $response->headers->get('Cache-Tag');
 
     expect($response->headers->get('X-Frontend-Cache'))->toBe('MISS')
         ->and(resolve(PageCache::class)->getCacheErrorPage($request))->toBe('extension missing html')
-        ->and($surrogateKey)->toContain('extension-editorial-tools')
-        ->and($surrogateKey)->toContain('content-article')
+        ->and($response->headers->has('Surrogate-Key'))->toBeFalse()
         ->and($cacheTag)->toContain('extension-editorial-tools')
         ->and($cacheTag)->toContain('content-article');
 });

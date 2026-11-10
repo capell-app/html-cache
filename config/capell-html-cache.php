@@ -10,6 +10,12 @@ $integerEnv = static function (string $key, int $default): int {
     return is_numeric($value) ? (int) $value : $default;
 };
 
+$floatEnv = static function (string $key, float $default): float {
+    $value = Env::get($key, $default);
+
+    return is_numeric($value) ? (float) $value : $default;
+};
+
 return [
     'enabled' => Env::get('CAPELL_HTML_CACHE', true),
     'write_enabled' => Env::get('CAPELL_WRITE_HTML_CACHE', true),
@@ -59,6 +65,16 @@ return [
         // A stale copy still waiting for a refresh after this long is cleared
         // instead of served (not applied in scheduled invalidation mode).
         'max_stale_age_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_SWR_MAX_STALE_AGE_SECONDS', 900),
+        // How many background origin refreshes may render at once. Refreshes for
+        // different URLs and sites share these slots; a deployment refresher and
+        // the overdue-stale expiry take all of them. A changed value takes full
+        // effect once the queues have drained.
+        'refresh_slots' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_REFRESH_SLOTS', 3),
+        // A deployment refresher holds the whole origin refresh lock while it
+        // renews it, but never past this absolute limit from when it took it.
+        // Beyond it the lock lapses, background refreshes resume and
+        // maximum-age enforcement clears whatever is still stale.
+        'refresher_hard_cap_seconds' => $integerEnv('CAPELL_HTML_CACHE_ORIGIN_REFRESHER_HARD_CAP_SECONDS', 1200),
     ],
     'request_coalescing' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_REQUEST_COALESCING', true),
@@ -90,7 +106,14 @@ return [
         ),
         'wait_seconds' => $integerEnv('CAPELL_HTML_CACHE_RENDER_BUDGET_WAIT_SECONDS', 2),
     ],
-    'cache_vary_headers' => ['Accept-Encoding'],
+    /*
+    | Public responses always carry Cache-Tag, which Cloudflare consumes and strips
+    | at the edge. Surrogate-Key is not stripped by most CDNs and would expose
+    | page and site IDs and internal markers to visitors, so it is only emitted
+    | when the proxy in front of the origin removes it before the client.
+    | Purge requests are unaffected: they build their keys independently.
+    */
+    'expose_surrogate_key_header' => Env::get('CAPELL_HTML_CACHE_EXPOSE_SURROGATE_KEY', false),
     'stateless_pagination' => [
         /*
         |--------------------------------------------------------------------------
@@ -142,6 +165,55 @@ return [
         'timeout_seconds' => (int) Env::get('CAPELL_HTML_CACHE_PURGE_TIMEOUT_SECONDS', 5),
         'cloudflare' => [
             'zone_id' => Env::get('CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID'),
+        ],
+        /*
+        |--------------------------------------------------------------------------
+        | Queued edge purge throttling
+        |--------------------------------------------------------------------------
+        |
+        | Queued purges are coalesced per edge zone for a short window, sent in
+        | provider-sized batches and paced by a token bucket shared through the
+        | cache store, so parallel queue workers cannot burst together. The
+        | rate is a ceiling: a 429, a Retry-After or an exhausted rate-limit
+        | header halves the learned rate, and sustained success raises it
+        | again. The learned rate is kept in the cache so restarts start from
+        | what the provider last accepted. The store must support atomic locks
+        | and be shared by every queue worker (redis in production).
+        */
+        'throttle' => [
+            'enabled' => Env::get('CAPELL_HTML_CACHE_PURGE_THROTTLE', true),
+            'store' => Env::get('CAPELL_HTML_CACHE_PURGE_THROTTLE_STORE'),
+            'log_channel' => Env::get('CAPELL_HTML_CACHE_PURGE_LOG_CHANNEL'),
+            'coalesce_window_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_COALESCE_SECONDS', 2),
+            // Cloudflare accepts up to 100 URLs or tags per purge request on every plan.
+            'max_urls_per_request' => $integerEnv('CAPELL_HTML_CACHE_PURGE_MAX_URLS_PER_REQUEST', 100),
+            'max_tags_per_request' => $integerEnv('CAPELL_HTML_CACHE_PURGE_MAX_TAGS_PER_REQUEST', 100),
+            'requests_per_second' => $floatEnv('CAPELL_HTML_CACHE_PURGE_REQUESTS_PER_SECOND', 2.0),
+            'burst' => $integerEnv('CAPELL_HTML_CACHE_PURGE_BURST', 5),
+            'min_requests_per_second' => $floatEnv('CAPELL_HTML_CACHE_PURGE_MIN_REQUESTS_PER_SECOND', 0.05),
+            'decrease_factor' => $floatEnv('CAPELL_HTML_CACHE_PURGE_DECREASE_FACTOR', 0.5),
+            'increase_step' => $floatEnv('CAPELL_HTML_CACHE_PURGE_INCREASE_STEP', 0.1),
+            'increase_after_successes' => $integerEnv('CAPELL_HTML_CACHE_PURGE_INCREASE_AFTER_SUCCESSES', 10),
+            'learned_rate_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_LEARNED_RATE_TTL_SECONDS', 604800),
+            'default_retry_after_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_DEFAULT_RETRY_AFTER_SECONDS', 30),
+            'max_retry_after_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_MAX_RETRY_AFTER_SECONDS', 900),
+            'failure_backoff_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_FAILURE_BACKOFF_SECONDS', 30),
+            'max_batches_per_drain' => $integerEnv('CAPELL_HTML_CACHE_PURGE_MAX_BATCHES_PER_DRAIN', 50),
+            // A batch the provider refuses (not rate limiting) moves behind the
+            // other pending purges, and is dropped with a log entry after this
+            // many refusals so it cannot block the zone.
+            'max_batch_failures' => $integerEnv('CAPELL_HTML_CACHE_PURGE_MAX_BATCH_FAILURES', 5),
+            // How long Site Health keeps warning about dropped purges when no
+            // later purge covers them, e.g. after a purge in the provider dashboard.
+            'dropped_record_ttl_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_DROPPED_RECORD_TTL_SECONDS', 604800),
+            'drain_retry_until_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_DRAIN_RETRY_UNTIL_SECONDS', 7200),
+            // Replace the pending purges with one full-zone purge when sending
+            // them would take more than this many provider requests, or the
+            // oldest has waited too long. Tag purges are the scarce allowance
+            // (Cloudflare Free: 5 a minute), so count requests, not items.
+            'escalate_to_full_purge' => Env::get('CAPELL_HTML_CACHE_PURGE_ESCALATE', true),
+            'escalate_pending_threshold' => $integerEnv('CAPELL_HTML_CACHE_PURGE_ESCALATE_PENDING_THRESHOLD', 50),
+            'escalate_after_seconds' => $integerEnv('CAPELL_HTML_CACHE_PURGE_ESCALATE_AFTER_SECONDS', 900),
         ],
     ],
     'deployment' => [
@@ -236,4 +308,18 @@ return [
         'capell-authoring',
         'capell-editor',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Vary request headers
+    |--------------------------------------------------------------------------
+    |
+    | Request headers whose values separate stored responses for the same URL,
+    | such as 'Accept-Language' for sites that negotiate the language from the
+    | request. Leave empty (the default) so each URL stores one file that a web
+    | server can serve directly; a configured header appends a variant suffix to
+    | the stored name and every variant is invalidated together.
+    |
+    */
+    'cache_vary_headers' => [],
 ];

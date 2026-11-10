@@ -19,7 +19,7 @@ final class HtmlCachePathResolver
      * The stored key is shared by publication, reads and every URL invalidation.
      * Laravel decodes path segments and aliases index; raw URL paths are not keys.
      */
-    public function relativePathForRequest(Request $request, string $extension = '.html'): ?string
+    public function relativePathForRequest(Request $request, string $extension = '.html', bool $vary = true): ?string
     {
         if ($request->query->count() > 0 && ! StatelessPaginationRequest::hasStoredVariantKey($request)) {
             return null;
@@ -34,10 +34,12 @@ final class HtmlCachePathResolver
         $filename = array_pop($segments);
         $filename = in_array($filename, [null, '', 'index'], true) ? 'pc__index__pc' : $filename;
 
-        return implode('/', [...$segments, $filename . StatelessPaginationRequest::cacheKeySuffix($request) . $extension]);
+        $filename .= StatelessPaginationRequest::cacheKeySuffix($request) . ($vary ? $this->varySuffix($request) : '') . $extension;
+
+        return strlen($filename) <= self::MAX_PATH_SEGMENT_LENGTH ? implode('/', [...$segments, $filename]) : null;
     }
 
-    public function pathForRequestUrl(string|Request $url, ?SiteDomain $siteDomain = null, bool $error = false): string
+    public function pathForRequestUrl(string|Request $url, ?SiteDomain $siteDomain = null, bool $error = false, bool $vary = true): string
     {
         $request = $url instanceof Request ? $url : Request::create($url);
 
@@ -46,7 +48,7 @@ final class HtmlCachePathResolver
             throw new InvalidArgumentException('Unsupported query parameters have no HTML cache path.');
         }
 
-        $path = $this->relativePathForRequest($request, $error ? PageCache::ERROR_EXTENSION : '.html');
+        $path = $this->relativePathForRequest($request, $error ? PageCache::ERROR_EXTENSION : '.html', $vary);
 
         if ($path === null) {
             throw new InvalidArgumentException('Unsafe URL for cache path.');
@@ -143,6 +145,24 @@ final class HtmlCachePathResolver
         $path = parse_url($url, PHP_URL_PATH);
 
         return is_string($path) && $path !== '' ? $path : '/';
+    }
+
+    private function varySuffix(Request $request): string
+    {
+        $configured = config('capell-html-cache.cache_vary_headers', []);
+        $headers = is_array($configured) ? array_filter($configured, is_string(...)) : [];
+        $names = array_values(array_unique(array_filter(array_map(static fn (string $name): string => strtolower(trim($name)), $headers))));
+        sort($names);
+        if ($names === []) {
+            return '';
+        }
+
+        $values = [];
+        foreach ($names as $name) {
+            $values[$name] = $request->headers->all($name);
+        }
+
+        return '~v' . hash('sha256', json_encode($values, JSON_THROW_ON_ERROR));
     }
 
     private function originForSiteDomain(SiteDomain $siteDomain): string

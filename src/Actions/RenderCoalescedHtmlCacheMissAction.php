@@ -28,6 +28,7 @@ final class RenderCoalescedHtmlCacheMissAction
         try {
             $path = resolve(HtmlCachePublicationGuard::class)->lockPath()
                 . '.render-' . hash('sha256', $request->fullUrl());
+            // capell-security-scan: local-stream reads a render lock file in application storage
             $handle = fopen($path, 'c+b');
 
             if ($handle === false) {

@@ -7,7 +7,6 @@ namespace Capell\HtmlCache\Actions;
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
 use Capell\Core\Contracts\Pageable;
-use Capell\Core\Models\Language;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
@@ -16,6 +15,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -23,7 +23,7 @@ use Lorisleiva\Actions\Concerns\AsJob;
 use Lorisleiva\Actions\Concerns\AsObject;
 
 /**
- * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false)
+ * @method static bool run(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false, bool $prefenced = false)
  */
 final class ClearCachedUrlAction
 {
@@ -31,7 +31,10 @@ final class ClearCachedUrlAction
     use AsJob;
     use AsObject;
 
-    public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false): bool
+    /**
+     * @param  bool  $prefenced  true only from a targeted withdrawal that already fenced this URL; see HtmlCachePublicationGuard::fence()
+     */
+    public function handle(string|CachedModelUrl $url, ?SiteDomain $siteDomain = null, bool $refresh = false, bool $allPorts = false, bool $prefenced = false): bool
     {
         $domainProvided = $siteDomain instanceof SiteDomain;
         if ($url instanceof CachedModelUrl) {
@@ -92,7 +95,7 @@ final class ClearCachedUrlAction
 
         $unresolvedHistoricalOwner = $cachedModelUrls->contains(static fn (CachedModelUrl $row): bool => ! $row->siteDomain instanceof SiteDomain && ($row->site_id !== null || $row->site_domain_id !== null));
         if (! $domainProvided && ($unresolvedHistoricalOwner || ! $siteDomain instanceof SiteDomain)) {
-            $this->purgeEdgeCache($cachedModelUrls, $urlString);
+            $this->purgeEdgeCache($cachedModelUrls, $urlString, $prefenced);
             $cachedModelUrls->each->delete();
 
             return false;
@@ -101,7 +104,7 @@ final class ClearCachedUrlAction
         $fileSiteDomain = $selectedCachedModelUrl instanceof CachedModelUrl && $selectedCachedModelUrl->site_domain_id === null
             ? null
             : $siteDomain;
-        DeleteCachedUrlArtefactsAction::run($request, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true);
+        DeleteCachedUrlArtefactsAction::run($request, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true, prefenced: $prefenced);
 
         if ($allPorts) {
             $paths = resolve(HtmlCachePathResolver::class);
@@ -124,11 +127,11 @@ final class ClearCachedUrlAction
                     continue;
                 }
 
-                DeleteCachedUrlArtefactsAction::run($copy, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true);
+                DeleteCachedUrlArtefactsAction::run($copy, $fileSiteDomain, storedPaths: array_values($cachedModelUrls->map(static fn (CachedModelUrl $row): string => $row->path)->all()), includeVariants: true, prefenced: $prefenced);
             }
         }
 
-        $this->purgeEdgeCache($cachedModelUrls, $urlString);
+        $this->purgeEdgeCache($cachedModelUrls, $urlString, $prefenced);
         $cachedModelUrls->each->delete();
 
         $domainResolved = $siteDomain instanceof SiteDomain && filled($siteDomain->domain);
@@ -159,29 +162,44 @@ final class ClearCachedUrlAction
     /**
      * @param  Collection<int, CachedModelUrl>  $cachedModelUrls
      */
-    private function purgeEdgeCache(Collection $cachedModelUrls, string $url): void
+    private function purgeEdgeCache(Collection $cachedModelUrls, string $url, bool $withdrawal): void
     {
+        // Every public response carries site- and lang- tags, so purging either
+        // flushes the whole site and spends the provider's scarce tag-purge
+        // allowance. The URL tag covers this address's query variants; the
+        // page tag covers the page's other addresses.
+        $validUrl = filter_var($url, FILTER_VALIDATE_URL) !== false;
+
+        if ($withdrawal) {
+            // A withdrawal purges this URL and its query variants and nothing else.
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(
+                tags: $validUrl ? [ResolveEdgeCacheTagsAction::urlTag($url)] : [],
+                urls: $validUrl ? [$url] : [],
+            ), urlScopedTags: $validUrl);
+
+            return;
+        }
+
         $keys = [];
 
         foreach ($cachedModelUrls as $cachedModelUrl) {
-            if ($cachedModelUrl->site_id !== null) {
-                $keys[] = 'site-' . $cachedModelUrl->site_id;
-            }
+            // Recorded rows hold the morph alias (e.g. "page"), not the class name.
+            $cacheableClass = Relation::getMorphedModel($cachedModelUrl->cacheable_type) ?? $cachedModelUrl->cacheable_type;
 
-            if ($cachedModelUrl->language instanceof Language) {
-                $keys[] = 'lang-' . $cachedModelUrl->language->code;
-            }
-
-            if (is_a($cachedModelUrl->cacheable_type, Pageable::class, true)) {
+            if (is_a($cacheableClass, Pageable::class, true)) {
                 $keys[] = 'page-' . $cachedModelUrl->cacheable_id;
             }
+        }
+
+        if ($validUrl) {
+            $keys[] = ResolveEdgeCacheTagsAction::urlTag($url);
         }
 
         $keys = array_values(SurrogateKeyNormalizer::normalize($keys));
 
         PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(
             tags: $keys,
-            urls: filter_var($url, FILTER_VALIDATE_URL) !== false ? [$url] : [],
-        ));
+            urls: $validUrl ? [$url] : [],
+        ), urlScopedTags: $validUrl);
     }
 }

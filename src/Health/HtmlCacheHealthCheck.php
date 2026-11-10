@@ -6,16 +6,23 @@ namespace Capell\HtmlCache\Health;
 
 use Capell\Core\Contracts\Extensions\ChecksExtensionHealth;
 use Capell\Core\Data\Diagnostics\DoctorCheckResultData;
+use Capell\Core\Enums\Diagnostics\DoctorCheckSeverity;
 use Capell\Core\Support\Filesystem\AbsolutePath;
+use Capell\Core\Support\TableName;
 use Capell\Frontend\Support\Routing\FrontendRouteMiddlewareRegistry;
+use Capell\HtmlCache\Actions\InspectEdgeCachePurgeThrottleAction;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
+use Capell\HtmlCache\Data\EdgePurgeZoneRateData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterval;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Number;
 use Override;
 use Throwable;
 
@@ -57,6 +64,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
             $check->storageTablesCheck(),
             $check->staleProcessingCommandRegisteredCheck(),
             $check->exhaustedStaleUrlsCheck(),
+            $check->edgePurgeThrottleCheck(),
         ]);
     }
 
@@ -81,6 +89,93 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
                 : (string) __('capell-html-cache::health.exhausted.failed', ['count' => $count]),
             remediation: $count === 0 ? null : (string) __('capell-html-cache::health.exhausted.remediation'),
             id: 'legacy.html.cache.exhausted.refreshes',
+        );
+    }
+
+    /**
+     * Reports the edge zone's learned purge rate and pending backlog, and
+     * fails when queued purges cannot be paced or have waited too long.
+     */
+    public function edgePurgeThrottleCheck(): DoctorCheckResultData
+    {
+        try {
+            $status = InspectEdgeCachePurgeThrottleAction::run();
+        } catch (Throwable) {
+            return new DoctorCheckResultData(
+                label: (string) __('capell-html-cache::health.edge_purge_throttle.label'),
+                passed: false,
+                message: (string) __('capell-html-cache::health.edge_purge_throttle.unavailable'),
+                remediation: (string) __('capell-html-cache::health.edge_purge_throttle.no_locks_remediation'),
+                id: 'legacy.html.cache.edge.purge.throttle',
+            );
+        }
+
+        $now = CarbonImmutable::now()->getTimestamp();
+
+        if (! $status->settings->enabled || $status->zone === null) {
+            return new DoctorCheckResultData(
+                label: (string) __('capell-html-cache::health.edge_purge_throttle.label'),
+                passed: true,
+                message: (string) __('capell-html-cache::health.edge_purge_throttle.inactive'),
+                id: 'legacy.html.cache.edge.purge.throttle',
+            );
+        }
+
+        if (! $status->locksAvailable) {
+            return new DoctorCheckResultData(
+                label: (string) __('capell-html-cache::health.edge_purge_throttle.label'),
+                passed: false,
+                message: (string) __('capell-html-cache::health.edge_purge_throttle.no_locks'),
+                remediation: (string) __('capell-html-cache::health.edge_purge_throttle.no_locks_remediation'),
+                id: 'legacy.html.cache.edge.purge.throttle',
+            );
+        }
+
+        $backlogged = $status->isBacklogged($now);
+        $rate = $status->rate;
+        $blockedFor = $rate?->blockedUntil !== null ? max(0, $rate->blockedUntil - $now) : 0;
+
+        if (! $backlogged && $status->dropped->count > 0) {
+            return new DoctorCheckResultData(
+                label: (string) __('capell-html-cache::health.edge_purge_throttle.label'),
+                passed: false,
+                message: (string) __('capell-html-cache::health.edge_purge_throttle.dropped', [
+                    'zone' => (string) $status->zone,
+                    'count' => $status->dropped->count,
+                    'status' => $status->dropped->lastStatus ?? '-',
+                    'when' => $status->dropped->lastDroppedAt === null ? '-' : CarbonImmutable::createFromTimestamp($status->dropped->lastDroppedAt)->toIso8601String(),
+                    'sample' => implode(', ', $status->dropped->sample),
+                ]),
+                remediation: (string) __('capell-html-cache::health.edge_purge_throttle.dropped_remediation', [
+                    'lifetime' => CarbonInterval::seconds($status->settings->droppedRecordTtlSeconds)->cascade()->forHumans(),
+                ]),
+                id: 'legacy.html.cache.edge.purge.throttle',
+                severity: DoctorCheckSeverity::Warning,
+            );
+        }
+
+        $replacements = [
+            'zone' => (string) $status->zone,
+            'rate' => (string) Number::format($rate instanceof EdgePurgeZoneRateData ? $rate->requestsPerSecond : $status->settings->requestsPerSecond, precision: 2, locale: app()->getLocale()),
+            'ceiling' => (string) Number::format($status->settings->requestsPerSecond, precision: 2, locale: app()->getLocale()),
+            'pending' => $status->pending->count,
+            'age' => $status->pending->oldestAgeSeconds($now) ?? 0,
+            'status' => $rate instanceof EdgePurgeZoneRateData && $rate->lastStatus !== null ? $rate->lastStatus : '-',
+            'waiting' => $blockedFor,
+        ];
+
+        return new DoctorCheckResultData(
+            label: (string) __('capell-html-cache::health.edge_purge_throttle.label'),
+            passed: ! $backlogged,
+            message: (string) match (true) {
+                $backlogged => __('capell-html-cache::health.edge_purge_throttle.backlogged', $replacements),
+                $blockedFor > 0 => __('capell-html-cache::health.edge_purge_throttle.paused', $replacements),
+                default => __('capell-html-cache::health.edge_purge_throttle.passed', $replacements),
+            },
+            remediation: $backlogged
+                ? (string) __('capell-html-cache::health.edge_purge_throttle.backlogged_remediation')
+                : null,
+            id: 'legacy.html.cache.edge.purge.throttle',
         );
     }
 
@@ -133,10 +228,11 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         $usesLocalPageCacheDisk = $pageCacheDriver === 'local';
         $usesSharedPageCacheDisk = config('capell-html-cache.deployment.shared_page_cache', false) === true;
         $hasEdgePurgeDriver = in_array($purgeDriver, ['cloudflare', 'http'], true);
+        // An edge purge driver does not make node-local origins safe: the purge
+        // reaches the CDN while the peer nodes keep their own stale files.
         $passed = ! $usesMultipleWebNodes
             || ! $usesLocalPageCacheDisk
-            || $usesSharedPageCacheDisk
-            || $hasEdgePurgeDriver;
+            || $usesSharedPageCacheDisk;
 
         return new DoctorCheckResultData(
             label: (string) __('capell-html-cache::health.multi_node_purge.label'),
@@ -221,12 +317,12 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
     public function missingTables(): array
     {
         try {
-            return array_values(collect(self::REQUIRED_TABLES)
+            return array_values(collect(array_map(TableName::resolve(...), self::REQUIRED_TABLES))
                 ->reject(static fn (string $tableName): bool => Schema::hasTable($tableName))
                 ->values()
                 ->all());
         } catch (Throwable) {
-            return self::REQUIRED_TABLES;
+            return array_map(TableName::resolve(...), self::REQUIRED_TABLES);
         }
     }
 
@@ -359,7 +455,7 @@ final class HtmlCacheHealthCheck implements ChecksExtensionHealth
         }
 
         if ($hasEdgePurgeDriver) {
-            return (string) __('capell-html-cache::health.multi_node_purge.edge_driver', [
+            return (string) __('capell-html-cache::health.multi_node_purge.edge_driver_node_local', [
                 'nodes' => $webNodeCount,
                 'driver' => $purgeDriver,
             ]);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
+use Capell\HtmlCache\Models\HtmlCacheModelWithdrawal;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Carbon\CarbonImmutable;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -15,6 +16,12 @@ final class PruneHtmlCacheMetadataAction
 {
     use AsFake;
     use AsObject;
+
+    /**
+     * A withdrawal only matters to renders still being published or indexed;
+     * a day covers delayed queues and retries.
+     */
+    private const int MODEL_WITHDRAWAL_RETENTION_HOURS = 24;
 
     public function handle(): int
     {
@@ -31,8 +38,13 @@ final class PruneHtmlCacheMetadataAction
             ->where('finished_at', '<', CarbonImmutable::now()->subDays($generationRetentionDays))
             ->delete();
 
+        $withdrawalsDeleted = HtmlCacheModelWithdrawal::query()
+            ->where('withdrawn_at', '<', CarbonImmutable::now()->subHours(self::MODEL_WITHDRAWAL_RETENTION_HOURS))
+            ->delete();
+
         return (is_int($staleDeleted) ? $staleDeleted : 0)
-            + (is_int($runsDeleted) ? $runsDeleted : 0);
+            + (is_int($runsDeleted) ? $runsDeleted : 0)
+            + (is_int($withdrawalsDeleted) ? $withdrawalsDeleted : 0);
     }
 
     private function retentionDays(string $key, int $default): int

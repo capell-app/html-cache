@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Jobs;
 
 use Capell\HtmlCache\Actions\RecordCachedModelUrlsAction;
+use Capell\HtmlCache\Actions\WithdrawCachedUrlsAction;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Bus\Queueable;
@@ -12,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 final class RegisterCachedModelUrlsJob implements ShouldQueue
 {
@@ -31,9 +33,28 @@ final class RegisterCachedModelUrlsJob implements ShouldQueue
         private readonly ?CarbonInterface $seenAt = null,
     ) {}
 
+    /**
+     * The page is already cached without its dependency index, so a later
+     * withdrawal could not find it. Withdraw it instead; the next request
+     * renders and records it again.
+     */
+    public static function withdrawUnrecordedUrl(string $url): void
+    {
+        try {
+            WithdrawCachedUrlsAction::run([$url]);
+        } catch (Throwable $throwable) {
+            report($throwable);
+        }
+    }
+
     public function handle(): void
     {
         RecordCachedModelUrlsAction::run($this->url, $this->models, $this->seenAt ?? CarbonImmutable::now());
+    }
+
+    public function failed(?Throwable $exception = null): void
+    {
+        self::withdrawUnrecordedUrl($this->url);
     }
 
     /**

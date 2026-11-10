@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Actions;
 use Capell\HtmlCache\Data\StaleHtmlCacheProcessResultData;
 use Capell\HtmlCache\Exceptions\StaleCachedUrlNotApplicableException;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\OriginRefreshLock;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsFake;
@@ -27,6 +28,13 @@ final class ProcessStaleHtmlCacheAction
     public function asJob(?int $limit = null, bool $suppressInlineEdgePurge = false): void
     {
         $result = $this->handle($limit, $suppressInlineEdgePurge);
+
+        if ($result->leaseLost) {
+            throw new RuntimeException(sprintf(
+                'The origin refresh lock was lost or reached its hard cap after %d HTML cache URLs; the refresh stopped so it cannot render alongside other refreshes.',
+                $result->attempted,
+            ));
+        }
 
         if (! $result->successful()) {
             throw new RuntimeException(sprintf(
@@ -60,15 +68,47 @@ final class ProcessStaleHtmlCacheAction
                     continue;
                 }
 
-                if (! ClaimStaleCachedUrlAction::run($staleCachedUrl)) {
-                    $deferredIds[$staleCachedUrl->id] = true;
-                    $result->deferred++;
+                // A caller that holds the origin refresh lock keeps it alive while it
+                // works through a long list, and stops the moment it no longer owns it.
+                // Any other caller must be admitted for each render like a queued job.
+                $lock = resolve(OriginRefreshLock::class);
+                $renewed = $lock->renewOwned();
 
-                    continue;
+                if ($renewed === false) {
+                    $result->leaseLost = true;
+
+                    break 2;
                 }
 
-                $result->attempted++;
-                $this->processStaleCachedUrl($staleCachedUrl, $suppressInlineEdgePurge, $result);
+                $admission = null;
+
+                if ($renewed === null) {
+                    $admission = 'process:' . Str::uuid();
+
+                    if (! $lock->tryAcquireSlot($admission, $this->admissionTtlSeconds())) {
+                        // Busy now; later URLs may find a free slot, and this one stays pending.
+                        $deferredIds[$staleCachedUrl->id] = true;
+                        $result->deferred++;
+
+                        continue;
+                    }
+                }
+
+                try {
+                    if (! ClaimStaleCachedUrlAction::run($staleCachedUrl)) {
+                        $deferredIds[$staleCachedUrl->id] = true;
+                        $result->deferred++;
+
+                        continue;
+                    }
+
+                    $result->attempted++;
+                    $this->processStaleCachedUrl($staleCachedUrl, $suppressInlineEdgePurge, $result);
+                } finally {
+                    if ($admission !== null) {
+                        $lock->release($admission);
+                    }
+                }
             }
 
             if ($result->attempted === $attemptedBefore) {
@@ -77,6 +117,16 @@ final class ProcessStaleHtmlCacheAction
         }
 
         return $result;
+    }
+
+    /**
+     * A render is one synchronous call that cannot be renewed part-way, so the slot is short:
+     * a process killed mid-render must not hold it for the whole claim timeout and starve
+     * expiry, which waits longer than this.
+     */
+    private function admissionTtlSeconds(): int
+    {
+        return OriginRefreshLock::MAX_SLOT_TTL_SECONDS;
     }
 
     private function configuredBatchSize(mixed $configuredLimit): int

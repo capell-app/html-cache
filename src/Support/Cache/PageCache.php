@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
 use Capell\Frontend\Contracts\HtmlMinifier;
@@ -133,7 +134,7 @@ final class PageCache
             $content = resolve(HtmlMinifier::class)->minify($content);
         }
 
-        $write = function () use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
+        $write = function (PublicArtefactPermit $permit) use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
             $this->assertContainedPath($path);
             if ($response->getStatusCode() === SymfonyResponse::HTTP_NOT_FOUND) {
                 $errorPath = $this->join([$path, $filename . self::ERROR_EXTENSION]);
@@ -146,6 +147,7 @@ final class PageCache
 
                 $this->files->makeDirectory($path, 0775, true, true);
                 if (! $this->writeCacheFile(
+                    $permit,
                     $laravelRequest,
                     $errorPath,
                     $content,
@@ -159,7 +161,7 @@ final class PageCache
                 if ($fragmentCache instanceof RenderHookFragmentCacheData) {
                     $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
-                    if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
+                    if (! $this->writeCacheFile($permit, $laravelRequest, $fragmentMetadataPath, $metadata)) {
                         throw new RuntimeException('Unable to publish render hook fragment metadata for the cached 404 page.');
                     }
 
@@ -182,6 +184,7 @@ final class PageCache
             }
 
             if (! $this->writeCacheFile(
+                $permit,
                 $laravelRequest,
                 $targetPath,
                 $content,
@@ -195,7 +198,7 @@ final class PageCache
             if ($fragmentCache instanceof RenderHookFragmentCacheData) {
                 $metadata = json_encode($fragmentCache->metadata(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
-                if (! $this->writeCacheFile($laravelRequest, $fragmentMetadataPath, $metadata)) {
+                if (! $this->writeCacheFile($permit, $laravelRequest, $fragmentMetadataPath, $metadata)) {
                     throw new RuntimeException('Unable to publish render hook fragment metadata for the cached page.');
                 }
 
@@ -206,16 +209,16 @@ final class PageCache
 
             return true;
         };
-        $published = $publication->publish($token, function () use ($write, $laravelRequest): bool {
+        $published = $publication->publish($token, function (PublicArtefactPermit $permit) use ($write, $laravelRequest): bool {
             try {
-                return $write();
+                return $write($permit);
             } catch (Throwable $throwable) {
                 // The guard reports and swallows this; remember it was the write, not the generation.
                 $laravelRequest->attributes->set(self::WRITE_DECLINED_ATTRIBUTE, true);
 
                 throw $throwable;
             }
-        });
+        }, HtmlCachePublicationGuard::renderedModelKeys($laravelRequest));
 
         if (! $published) {
             $laravelRequest->attributes->set(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE, true);
@@ -365,7 +368,11 @@ final class PageCache
             return $htmlReason;
         }
 
-        return $request->headers->has('x-livewire') ? HtmlCacheEligibilityReason::LivewireRequest : null;
+        if ($request->headers->has('x-livewire')) {
+            return HtmlCacheEligibilityReason::LivewireRequest;
+        }
+
+        return PublicReadDiskCopyPolicy::rejectionReason(PublicReadDiskCopyPolicy::stamp());
     }
 
     public function forget(string $slug): bool
@@ -714,8 +721,13 @@ final class PageCache
             && $request->attributes->get(AssertPublicHtmlContainsNoAuthoringSurfaceAction::SAFE_INSPECTION_HASH_ATTRIBUTE) === hash('xxh128', $content);
     }
 
-    private function writeCacheFile(Request $request, string $path, string $content): bool
+    /**
+     * Disk copies are served without Laravel, so a write needs the permit
+     * Core's PublishPublicArtefactAction issues under the publication guard.
+     */
+    private function writeCacheFile(PublicArtefactPermit $permit, Request $request, string $path, string $content): bool
     {
+        $permit->assertActiveFor(resolve(HtmlCachePublicationGuard::class));
         $this->assertContainedPath($path);
         $staleCachedUrlId = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_ID_ATTRIBUTE);
         $claimToken = $request->attributes->get(HtmlCacheMiddleware::STALE_CACHE_CLAIM_TOKEN_ATTRIBUTE);
@@ -726,11 +738,12 @@ final class PageCache
             return true;
         }
 
-        return $this->replaceCacheFileForCurrentStaleClaim($staleCachedUrlId, $claimToken, $path, $content);
+        return $this->replaceCacheFileForCurrentStaleClaim($permit, $staleCachedUrlId, $claimToken, $path, $content);
     }
 
-    private function replaceCacheFileForCurrentStaleClaim(mixed $staleCachedUrlId, mixed $claimToken, string $path, string $content): bool
+    private function replaceCacheFileForCurrentStaleClaim(PublicArtefactPermit $permit, mixed $staleCachedUrlId, mixed $claimToken, string $path, string $content): bool
     {
+        $permit->assertActiveFor(resolve(HtmlCachePublicationGuard::class));
         if (! is_numeric($staleCachedUrlId) || ! is_string($claimToken) || $claimToken === '') {
             return false;
         }

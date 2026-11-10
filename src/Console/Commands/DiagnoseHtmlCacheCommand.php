@@ -14,6 +14,7 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
+use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\Response;
 
 final class DiagnoseHtmlCacheCommand extends Command
@@ -62,8 +63,8 @@ final class DiagnoseHtmlCacheCommand extends Command
             ['Cache state', $report->cacheState],
             ['Stale', $report->stale ? 'yes' : 'no'],
             ['Last cached at', $report->lastCachedAt ?? 'never'],
-            ['Last sampled render (ms)', $report->requestMetrics?->lastRenderMilliseconds !== null ? number_format($report->requestMetrics->lastRenderMilliseconds, 2) : 'not observed'],
-            ['Estimated origin hit rate', $report->requestMetrics?->hitRate !== null ? number_format($report->requestMetrics->hitRate, 2) . '%' : 'not observed'],
+            ['Last sampled render (ms)', $report->requestMetrics?->lastRenderMilliseconds !== null ? (string) Number::format($report->requestMetrics->lastRenderMilliseconds, precision: 2, locale: app()->getLocale()) : 'not observed'],
+            ['Estimated origin hit rate', $report->requestMetrics?->hitRate !== null ? (string) Number::format($report->requestMetrics->hitRate, precision: 2, locale: app()->getLocale()) . '%' : 'not observed'],
             ['Observations since', $report->requestMetrics === null ? 'not observed' : $report->requestMetrics->observedSince],
         ];
 
@@ -120,7 +121,8 @@ final class DiagnoseHtmlCacheCommand extends Command
             'cache_control' => (string) $response->headers->get('Cache-Control'),
             'vary' => (string) $response->headers->get('Vary'),
             'set_cookie_count' => count($response->headers->getCookies()),
-            'surrogate_key' => (string) $response->headers->get('Surrogate-Key'),
+            'surrogate_key' => (string) ($response->headers->get('Surrogate-Key')
+                ?? str_replace(',', ' ', (string) $response->headers->get('Cache-Tag'))),
             'cache_tag' => (string) $response->headers->get('Cache-Tag'),
         ];
     }

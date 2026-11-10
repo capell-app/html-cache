@@ -674,7 +674,21 @@ it('uses configured public cache-control ages for cached responses', function ()
         ->toContain('max-age=120')
         ->toContain('stale-while-revalidate=3600')
         ->and((string) $response->headers->get('Cache-Tag'))->toContain('host-example-test')
-        ->and((string) $response->headers->get('Surrogate-Key'))->toContain('host-example-test');
+        ->and($response->headers->has('Surrogate-Key'))->toBeFalse();
+});
+
+it('exposes Surrogate-Key only when the deployment opts in', function (): void {
+    config(['capell-html-cache.expose_surrogate_key_header' => true]);
+    $request = Request::create('https://example.test/opt-in', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    expect((string) $response->headers->get('Surrogate-Key'))->toContain('host-example-test')
+        ->and((string) $response->headers->get('Cache-Tag'))->toContain('host-example-test');
 });
 
 it('refuses to read or write cache files for hostile request path segments', function (string $url): void {

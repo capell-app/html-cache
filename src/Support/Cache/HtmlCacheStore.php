@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Support\Cache;
 
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
 use Capell\HtmlCache\Data\HtmlCacheClearResult;
 use Closure;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -83,8 +84,9 @@ final class HtmlCacheStore
      * @param  bool  $rotateWhenUnchanged  false for retirements that only observe origin policy; see HtmlCachePublicationGuard::withdraw()
      * @param  string|null  $fenceUrlKey  when not rotating, the URL whose in-flight renders a no-op withdrawal rejects
      * @param  Closure(Closure(): bool): bool|null  $guard  runs the deletion inside the publication lock so the caller can add its own precondition (a claim lock) in the same order as the publish path; it must call the closure it is given to delete
+     * @param  bool  $prefenced  true when the caller already fenced this URL and the models it withdraws; see HtmlCachePublicationGuard::fence()
      */
-    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = [], bool $rotateWhenUnchanged = true, ?string $fenceUrlKey = null, ?Closure $guard = null): bool
+    public function deletePagesInDomain(array $files, array $variantBases, string $domainDirectory, array $unattributableLegacyBases = [], array $recordedFiles = [], array $preserve = [], bool $rotateWhenUnchanged = true, ?string $fenceUrlKey = null, ?Closure $guard = null, bool $prefenced = false): bool
     {
         $publication = resolve(HtmlCachePublicationGuard::class);
         $delete = function () use ($files, $variantBases, $domainDirectory, $unattributableLegacyBases, $recordedFiles, $preserve): bool {
@@ -99,7 +101,7 @@ final class HtmlCacheStore
                     continue;
                 }
 
-                $pattern = '/^' . preg_quote($stem, '/') . '(?:~f[a-f0-9]{16})?(?:\.404)?\.(?:html|json|xml)(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
+                $pattern = '/^' . preg_quote($stem, '/') . '(?:~f[a-f0-9]{16})?(?:~v[a-f0-9]{64})?(?:\.404)?\.(?:html|json|xml)(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
                 foreach ($this->pageFilesInDomain(dirname($base), $domainDirectory) as $file) {
                     if (preg_match($pattern, $file) === 1) {
                         $files[] = $file;
@@ -129,7 +131,7 @@ final class HtmlCacheStore
                 // unattributable artefacts on this page path in this domain;
                 // regeneration is safer than retaining stale bytes. The required
                 // hash excludes the canonical no-query entry from this sweep.
-                $pattern = '/^(' . preg_quote($stem, '/') . '~[a-f0-9]{16})(?:\.404)?\.html(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
+                $pattern = '/^(' . preg_quote($stem, '/') . '~[a-f0-9]{16})(?:~v[a-f0-9]{64})?(?:\.404)?\.html(?:' . preg_quote(PageCache::FRAGMENT_METADATA_EXTENSION, '/') . ')?$/';
                 foreach ($this->pageFilesInDomain(dirname($base), $domainDirectory) as $file) {
                     if (preg_match($pattern, $file, $matches) === 1 && ! isset($recordedStems[$matches[1]])) {
                         $files[] = $file;
@@ -157,7 +159,11 @@ final class HtmlCacheStore
 
         $operation = $guard instanceof Closure ? static fn (): bool => $guard($delete) : $delete;
 
-        return $rotateWhenUnchanged ? $publication->invalidate($operation) : $publication->withdraw($fenceUrlKey, $operation);
+        return match (true) {
+            $prefenced => $publication->withdrawFenced($operation),
+            $rotateWhenUnchanged => $publication->invalidate($operation),
+            default => $publication->withdraw($fenceUrlKey, $operation),
+        };
     }
 
     public function isSafePagePath(string $file, string $domainDirectory): bool
@@ -203,15 +209,22 @@ final class HtmlCacheStore
         return true;
     }
 
-    public function put(string $file, string $contents): void
+    /**
+     * Static error and maintenance pages are served without Laravel, so a
+     * write needs the permit PublishPublicArtefactAction issues under the
+     * publication guard.
+     */
+    public function put(PublicArtefactPermit $permit, string $file, string $contents): void
     {
+        $permit->assertActiveFor(resolve(HtmlCachePublicationGuard::class));
         $file = str_replace(['../', '..\\'], '', $file);
         HtmlCacheFilesystem::assertContainedPath($this->diskPath($file), $this->root());
         $this->disk->put($file, $contents);
     }
 
-    public function replace(string $file, string $contents): void
+    public function replace(PublicArtefactPermit $permit, string $file, string $contents): void
     {
+        $permit->assertActiveFor(resolve(HtmlCachePublicationGuard::class));
         $safeFile = str_replace(['../', '..\\'], '', $file);
         $path = $this->diskPath($safeFile);
         HtmlCacheFilesystem::assertContainedPath($path, $this->root());

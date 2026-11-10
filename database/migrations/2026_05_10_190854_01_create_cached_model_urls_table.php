@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\Core\Data\Database\DatabaseIndexDefinition;
 use Capell\Core\Facades\CapellDatabase;
+use Capell\Core\Support\TableName;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -13,32 +14,32 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('cached_model_urls', function (Blueprint $table): void {
+        Schema::create(TableName::resolve('cached_model_urls'), function (Blueprint $table): void {
             $table->id();
             $table->string('url', 2048);
             $table->char('url_hash', 64);
             $table->string('path', 2048);
-            $table->foreignId('site_id')->nullable()->constrained('sites')->nullOnDelete();
-            $table->foreignId('site_domain_id')->nullable()->constrained('site_domains')->nullOnDelete();
-            $table->foreignId('language_id')->nullable()->constrained('languages')->nullOnDelete();
+            $table->foreignId('site_id')->nullable()->constrained(TableName::resolve('sites'))->nullOnDelete();
+            $table->foreignId('site_domain_id')->nullable()->constrained(TableName::resolve('site_domains'))->nullOnDelete();
+            $table->foreignId('language_id')->nullable()->constrained(TableName::resolve('languages'))->nullOnDelete();
             $table->morphs('cacheable');
             $table->timestamp('cached_at')->nullable();
             $table->timestamp('last_seen_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['url_hash', 'cacheable_type', 'cacheable_id'], 'cached_model_urls_unique_url_model');
+            $table->unique(['url_hash', 'cacheable_type', 'cacheable_id'], TableName::namedIndex('cached_model_urls', 'cached_model_urls_unique_url_model'));
             $table->index('url_hash');
-            $table->index(['cacheable_type', 'cacheable_id'], 'cached_model_urls_model_index');
-            $table->index(['site_id', 'language_id'], 'cached_model_urls_site_language_index');
-            $table->index(['site_id', 'last_seen_at'], 'cached_model_urls_site_last_seen_index');
+            $table->index(['cacheable_type', 'cacheable_id'], TableName::namedIndex('cached_model_urls', 'cached_model_urls_model_index'));
+            $table->index(['site_id', 'language_id'], TableName::namedIndex('cached_model_urls', 'cached_model_urls_site_language_index'));
+            $table->index(['site_id', 'last_seen_at'], TableName::namedIndex('cached_model_urls', 'cached_model_urls_site_last_seen_index'));
             $table->index('site_domain_id');
-            $table->index('last_seen_at', 'cached_model_urls_last_seen_index');
+            $table->index('last_seen_at', TableName::namedIndex('cached_model_urls', 'cached_model_urls_last_seen_index'));
         });
 
         $connection = Schema::getConnection();
         $index = CapellDatabase::for($connection)->schemaDialect()->prefixedIndex(
             new DatabaseIndexDefinition(
-                table: 'cached_model_urls',
+                table: TableName::resolve('cached_model_urls'),
                 name: 'cached_model_urls_site_language_path_index',
                 columns: ['site_id', 'language_id', 'path'],
                 prefixLengths: ['path' => 191],
@@ -50,6 +51,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('cached_model_urls');
+        Schema::dropIfExists(TableName::resolve('cached_model_urls'));
     }
 };

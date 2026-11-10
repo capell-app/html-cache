@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions\Dashboard;
 
 use Capell\Admin\Support\SiteScope;
+use Capell\Core\Data\Database\SqlFragment;
 use Capell\Core\Models\PageUrl;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Data\Dashboard\HtmlCacheDashboardStatsData;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
@@ -26,22 +28,22 @@ final class BuildHtmlCacheDashboardStatsAction
     {
         $pageUrlQuery = $this->cacheablePageUrlQuery();
         $pageUrlStats = (clone $pageUrlQuery)
-            ->selectRaw('COUNT(*) as page_url_count')
-            ->selectRaw('COALESCE(SUM(hit_count), 0) as total_hit_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN EXISTS (
+            ->addSelect(SqlFragment::raw('COUNT(*) as page_url_count')->expression())
+            ->addSelect(SqlFragment::raw('COALESCE(SUM(hit_count), 0) as total_hit_count')->expression())
+            ->addSelect(SqlFragment::raw('COALESCE(SUM(CASE WHEN EXISTS (
                 SELECT 1
-                FROM cached_model_urls
-                WHERE cached_model_urls.site_id = page_urls.site_id
-                AND cached_model_urls.language_id = page_urls.language_id
-                AND cached_model_urls.path = page_urls.url
-            ) THEN 1 ELSE 0 END), 0) as cached_page_url_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN EXISTS (
+                FROM ' . TableName::resolve('cached_model_urls') . '
+                WHERE ' . TableName::resolve('cached_model_urls') . '.site_id = ' . TableName::resolve('page_urls') . '.site_id
+                AND ' . TableName::resolve('cached_model_urls') . '.language_id = ' . TableName::resolve('page_urls') . '.language_id
+                AND ' . TableName::resolve('cached_model_urls') . '.path = ' . TableName::resolve('page_urls') . '.url
+            ) THEN 1 ELSE 0 END), 0) as cached_page_url_count')->expression())
+            ->addSelect(SqlFragment::raw('COALESCE(SUM(CASE WHEN EXISTS (
                 SELECT 1
-                FROM cached_model_urls
-                WHERE cached_model_urls.site_id = page_urls.site_id
-                AND cached_model_urls.language_id = page_urls.language_id
-                AND cached_model_urls.path = page_urls.url
-            ) THEN hit_count ELSE 0 END), 0) as cached_hit_count')
+                FROM ' . TableName::resolve('cached_model_urls') . '
+                WHERE ' . TableName::resolve('cached_model_urls') . '.site_id = ' . TableName::resolve('page_urls') . '.site_id
+                AND ' . TableName::resolve('cached_model_urls') . '.language_id = ' . TableName::resolve('page_urls') . '.language_id
+                AND ' . TableName::resolve('cached_model_urls') . '.path = ' . TableName::resolve('page_urls') . '.url
+            ) THEN hit_count ELSE 0 END), 0) as cached_hit_count')->expression())
             ->first();
 
         $pageUrls = (int) ($pageUrlStats?->getAttribute('page_url_count') ?? 0);

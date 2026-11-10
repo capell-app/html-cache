@@ -12,6 +12,7 @@ use Capell\HtmlCache\Filament\Extenders\Site\MaintenanceSiteHeaderActionExtender
 use Capell\HtmlCache\Filament\Pages\MaintenanceCachePage;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\HtmlCache\Tests\Support\PublishesStaticPages;
 use Capell\Tests\Fixtures\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
@@ -23,7 +24,7 @@ it('registers the frontend static maintenance page store against the page cache 
     Storage::fake('page_cache');
 
     $store = resolve(StaticMaintenancePageStore::class);
-    $store->put('maintenance/https.example.test/index.html', '<h1>Maintenance</h1>');
+    PublishesStaticPages::put($store, 'maintenance/https.example.test/index.html', '<h1>Maintenance</h1>');
 
     expect($store)->toBeInstanceOf(HtmlCacheStaticMaintenancePageStore::class)
         ->and(Storage::disk('page_cache')->get('maintenance/https.example.test/index.html'))->toBe('<h1>Maintenance</h1>');

@@ -13,6 +13,7 @@ use Capell\Core\Models\Media;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
 use Illuminate\Database\Eloquent\Model;
@@ -32,7 +33,7 @@ final class PlanEditorHtmlCacheConsequencesAction implements EditorImpactConsequ
 
         if (! CapellCore::isPackageInstalled('capell-app/html-cache')
             || config('capell-html-cache.enabled', true) !== true
-            || ! Schema::hasTable('cached_model_urls')) {
+            || ! Schema::hasTable(TableName::resolve('cached_model_urls'))) {
             return [];
         }
 
@@ -59,7 +60,7 @@ final class PlanEditorHtmlCacheConsequencesAction implements EditorImpactConsequ
         $estimate = null;
         $basis = __('capell-html-cache::editor-impact.estimate_unavailable');
         $affectedSiteIds = CachedModelUrl::query()->whereIn('url', $urls)->whereIn('site_id', $siteIds)->distinct()->pluck('site_id')->filter(static fn (mixed $id): bool => is_int($id) || (is_string($id) && is_numeric($id)))->map(static fn (int|string $id): int => (int) $id)->all();
-        $run = Schema::hasColumn('html_cache_generation_runs', 'site_ids') ? HtmlCacheGenerationRun::query()->where('status', HtmlCacheGenerationRun::STATUS_COMPLETED)
+        $run = Schema::hasColumn(TableName::resolve('html_cache_generation_runs'), 'site_ids') ? HtmlCacheGenerationRun::query()->where('status', HtmlCacheGenerationRun::STATUS_COMPLETED)
             ->where('failed_sites', 0)->whereNotNull('started_at')->whereNotNull('finished_at')
             ->latest('finished_at')->limit(20)->get()
             ->first(static fn (HtmlCacheGenerationRun $run): bool => $affectedSiteIds !== []

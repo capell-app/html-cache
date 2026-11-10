@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\PublicRead\PublicArtefactPermit;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForSurrogateKeysAction;
@@ -15,6 +16,7 @@ use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
 use Capell\HtmlCache\Support\Cache\PageCache;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\HtmlCache\Tests\Support\PublishesHtmlCacheArtefacts;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
@@ -139,7 +141,7 @@ it('refuses cache operations through a symlinked port directory', function (stri
         } elseif ($operation === 'publish') {
             expect(fn (): PageCache => resolve(PageCache::class))->toThrow(RuntimeException::class);
         } elseif (in_array($operation, ['put', 'replace'], true)) {
-            expect(fn () => resolve(HtmlCacheStore::class)->{$operation}($relative, 'escaped'))->toThrow(RuntimeException::class);
+            expect(fn () => PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => resolve(HtmlCacheStore::class)->{$operation}($permit, $relative, 'escaped')))->toThrow(RuntimeException::class);
         } else {
             File::ensureDirectoryExists($outside . '/nested');
             File::put($outside . '/nested/page.html', 'keep');
@@ -345,15 +347,15 @@ it('clears port copies when the disk root is reached through a symlink', functio
     app()->instance('request', $request);
     try {
         $store = resolve(HtmlCacheStore::class);
-        $store->put('~port-8080/http.linked.test/page.html', 'first');
+        PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => $store->put($permit, '~port-8080/http.linked.test/page.html', 'first'));
         expect(resolve(PageCache::class)->getCachePage($request))->toBe('first');
-        $store->replace('~port-8080/http.linked.test/page.html', 'replacement');
+        PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => $store->replace($permit, '~port-8080/http.linked.test/page.html', 'replacement'));
         expect(resolve(PageCache::class)->getCachePage($request))->toBe('replacement');
         expect(resolve(PageCache::class)->cache($this->beginCacheRender($request), response('old', headers: ['Content-Type' => 'text/html'])))->toBeTrue();
         expect(CachedModelUrl::query()->count())->toBe(0)
             ->and(ClearCachedUrlsForSurrogateKeysAction::run(['site-' . $domain->site_id]))->toBe(1)
             ->and(resolve(PageCache::class)->getCachePage($request))->toBeFalse();
-        $store->put('~port-8080/http.linked.test/page.html', 'delete me');
+        PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => $store->put($permit, '~port-8080/http.linked.test/page.html', 'delete me'));
         expect($store->deletePage('~port-8080/http.linked.test/page.html', '~port-8080/http.linked.test'))->toBeTrue()
             ->and(resolve(PageCache::class)->getCachePage($request))->toBeFalse();
 
@@ -361,7 +363,7 @@ it('clears port copies when the disk root is reached through a symlink', functio
         File::put($base . '/outside/page.html', 'keep');
         $link = Storage::disk('page_cache')->path('~port-8081');
         expect(symlink($base . '/outside', $link))->toBeTrue();
-        expect(fn () => $store->put('~port-8081/page.html', 'escaped'))->toThrow(RuntimeException::class);
+        expect(fn () => PublishesHtmlCacheArtefacts::write(static fn (PublicArtefactPermit $permit) => $store->put($permit, '~port-8081/page.html', 'escaped')))->toThrow(RuntimeException::class);
         expect(fn () => $store->delete('~port-8081/page.html'))->toThrow(RuntimeException::class);
         expect(fn () => $store->deleteDirectory('~port-8081'))->toThrow(RuntimeException::class);
         expect($store->portDirectories('http.linked.test'))->not->toContain('~port-8081/http.linked.test')

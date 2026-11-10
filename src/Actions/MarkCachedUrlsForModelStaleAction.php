@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Capell\HtmlCache\Actions;
 
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\StaleCachedUrl;
 use Capell\HtmlCache\Support\Cache\ConfiguredHtmlCacheBypassRules;
@@ -31,11 +32,11 @@ final class MarkCachedUrlsForModelStaleAction
 
         $cachedModelUrls = CachedModelUrl::query()
             ->with('siteDomain')
-            ->select('cached_model_urls.*')
+            ->select(TableName::resolve('cached_model_urls') . '.*')
             ->where('cacheable_type', $morphClass)
             ->where('cacheable_id', $key)
-            ->orderBy('cached_model_urls.id')
-            ->lazyById(column: 'cached_model_urls.id', alias: 'id');
+            ->orderBy(TableName::resolve('cached_model_urls') . '.id')
+            ->lazyById(column: TableName::resolve('cached_model_urls') . '.id', alias: 'id');
 
         $marked = 0;
         $rows = [];

@@ -55,7 +55,12 @@ regardless of perceived scheme or whether the port is an integer or string:
 nginx reads these files directly using a configured scheme/host root, for example
 `set $capell_page_cache_root /page-cache/https.capell.app`, followed by
 `try_files $capell_page_cache_root/pc__index__pc.html` or
-`$capell_page_cache_root$uri.html` before falling back to PHP.
+`$capell_page_cache_root$uri.html` before falling back to PHP. The maintained
+web-server rules for this layout (the per-origin root, the bypass list, the keys only
+PHP can compute, and the fact that a file served from disk skips the
+`filesystem_ttl_seconds` check) live in Core's
+[Web server configuration](https://github.com/capell-app/capell/blob/main/docs/operations/web-server.md#serving-the-static-html-cache);
+this guide describes the layout and does not repeat those rules.
 
 Only other ports add a separate top-level component, for example
 `~port-8080/http.example.test/form.html` or `~port-8443/https.example.test/form.html`.
@@ -209,13 +214,12 @@ Both resolvers only read the current dependency index and page routes. They do n
 
 ## Deployment Topology And Purge Reach
 
-HTML Cache supports three production topologies:
+HTML Cache supports two production topologies:
 
 1. One web node with a local `page_cache` disk.
 2. Multiple web or queue nodes mounting the same shared POSIX `page_cache` directory.
-3. Multiple web nodes with a configured `http` or `cloudflare` purge driver and public traffic delivered through that cache layer.
 
-Multiple web nodes with separate node-local `page_cache` directories and the default `null` purge driver are unsupported. A clear job deletes files only from the node that runs it, so another node can continue serving stale HTML.
+An `http` or `cloudflare` purge driver adds edge purging to either topology; it does not replace shared origin storage. Multiple web nodes with separate node-local `page_cache` directories are unsupported whatever the purge driver: a clear job deletes files only from the node that runs it, and the edge purge then empties the CDN, so the next edge miss can be answered from another node's stale copy of the withdrawn page.
 
 Declare the topology so Diagnostics can detect this unsafe combination:
 
@@ -224,7 +228,7 @@ CAPELL_HTML_CACHE_WEB_NODE_COUNT=2
 CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=false
 ```
 
-Set `CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true` only when every web and queue node mounts the same POSIX directory. Otherwise configure the HTTP or Cloudflare purge driver. The **HTML Cache: cache clearing configured for every server** health check fails when more than one web node is declared while `page_cache` is local, shared storage is not acknowledged, and `purge.driver` is `null`.
+Set `CAPELL_HTML_CACHE_SHARED_PAGE_CACHE=true` only when every web and queue node mounts the same POSIX directory. The **HTML Cache: cache clearing configured for every server** health check fails when more than one web node is declared while `page_cache` is local and shared storage is not acknowledged, and it says so explicitly when an edge purge driver is configured on top of node-local storage. With `CAPELL_MULTI_NODE=true` the package also refuses to boot in that state instead of leaving unpurgeable cached pages behind.
 
 The `stale_cached_urls` table is not a cross-node purge journal. Scheduled invalidation runs `capell:html-cache:process-stale` with `onOneServer()`, and each row has one global claim and processed state. It safely regenerates one shared cache entry, but it cannot make every node consume the same deletion. A correct per-node journal would require stable node identities, membership and retirement rules, per-node acknowledgements, and bounded retention; do not treat scheduled mode as a workaround for node-local multi-node storage.
 
@@ -244,7 +248,7 @@ Use only the rules your application needs. A header rule bypasses caching whenev
 
 ## Cloudflare
 
-Cloudflare does not cache HTML by default. Configure a Cloudflare Cache Rule that makes the intended anonymous public routes cache eligible, while bypassing admin, account, preview, signed, personalised, and cookie-varying routes. Capell emits `Cache-Control`, `Cache-Tag`, and `Surrogate-Key` headers on cacheable responses.
+Cloudflare does not cache HTML by default. Configure a Cloudflare Cache Rule that makes the intended anonymous public routes cache eligible, while bypassing admin, account, preview, signed, personalised, and cookie-varying routes. Capell emits `Cache-Control` and `Cache-Tag` headers on cacheable responses. `Surrogate-Key` is withheld from public responses unless `CAPELL_HTML_CACHE_EXPOSE_SURROGATE_KEY` is true, because most CDNs forward it to visitors; purges are unaffected.
 
 ### Production cache rule
 
@@ -285,7 +289,29 @@ CAPELL_HTML_CACHE_PURGE_TOKEN=your-zone-cache-purge-token
 CAPELL_HTML_CACHE_CLOUDFLARE_ZONE_ID=your-32-character-zone-id
 ```
 
-The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. When an invalidation contains both, the adapter sends both operations and treats either failure as a failed job. Run `capell:html-cache:edge-purge:verify --driver=cloudflare` during deployment to validate the selected driver and credential presence without transmitting the token or purging content. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
+The API token requires Cache Purge permission for the configured zone. URL purges are the precise baseline for page invalidation; cache tags are used for broader site, language, page, and extension invalidation. Every cached response also carries a `url-` tag shared by its query variants, so clearing one URL purges that URL, its `url-` tag and, for a page, its `page-` tag. It never purges the `site-` or `lang-` tags every response carries; a site or language invalidation sends those once for the whole site.
+
+Edge objects cached before the `url-` tag existed do not carry it, so a URL clear cannot reach their query variants until they are refetched. Rolling this out therefore requires one full edge purge after the deploy; the site deploy's final edge-purge step performs it. After that purge every edge object carries the new tags.
+
+URL clears and retirements send their `url-` and `page-` tags only when tag purges can be paced: a configured throttle, a shared store with atomic locks and a queue worker. Without pacing (the sync queue or an unshared store) they are sent as URL-only purges, which use the provider's much larger URL allowance, and one warning per hour records that their tags were skipped. Explicit site, language and maintenance tag purges are still sent. When an invalidation contains both, the adapter sends both operations and treats either failure as a failed purge. Run `capell:html-cache:edge-purge:verify --driver=cloudflare` during deployment to validate the selected driver and credential presence without transmitting the token or purging content. Do not configure Cloudflare to cache responses marked `private`, `no-store`, or `no-cache`, or responses that set personalised cookies.
+
+### Pacing queued edge purges
+
+Queued purges for the Cloudflare and HTTP drivers do not call the provider one job at a time. Each purge joins its zone's pending set, deduplicated, and a single drain job per zone sends the set after `coalesce_window_seconds`, in batches of at most `max_urls_per_request` URLs or `max_tags_per_request` tags. A token bucket shared through the cache store caps the requests for the whole zone at `requests_per_second` with a `burst`, so parallel queue workers cannot burst together.
+
+The configured rate is a ceiling. A 429, a 503 with `Retry-After`, or a response reporting no remaining rate limit halves the learned rate (`decrease_factor`) and pauses the zone for the provider's `Retry-After` or rate-limit reset (`default_retry_after_seconds` when it gives none, capped at `max_retry_after_seconds`). Every `increase_after_successes` successful requests raise it by `increase_step` until it reaches the ceiling again. The learned rate is kept in the cache for `learned_rate_ttl_seconds`, so restarts and deploys start from the rate the provider last accepted. A throttled or failed drain job finishes and dispatches its successor for that wait, so a burst does not fill `failed_jobs` and waiting never runs into a retry deadline. A batch the provider refuses as a bad request (400, 413, 414 or 422) is split in half until the offending URL or tag is isolated, so its batch-mates are still purged; that single entry moves behind the other pending purges and is dropped after `max_batch_failures` refusals, with an error-level log entry and a warning in Site Health. The warning clears when that URL or tag is purged successfully, after any successful full-zone purge (queued or direct, such as `capell:html-cache:clear`), or `dropped_record_ttl_seconds` after the last drop. Refused credentials (401 or 403), outages and network errors never drop anything: the drain backs off and logs an error for credentials. A drain job that really fails gives up its claim so the next purge starts a new drainer.
+
+When sending the pending set would take more than `escalate_pending_threshold` provider requests (default 50; each request carries up to `max_urls_per_request` URLs or `max_tags_per_request` tags, both 100 by default, Cloudflare's per-request limit), or the oldest has waited `escalate_after_seconds`, the pending set is replaced by one full-zone purge if `escalate_to_full_purge` allows it. Provider status, the learned rate, and escalations are written as structured log entries on `log_channel`, and the Site Health check "HTML Cache: edge purge pacing" reports the learned rate, the pending backlog and any provider pause.
+
+```dotenv
+CAPELL_HTML_CACHE_PURGE_THROTTLE=true
+CAPELL_HTML_CACHE_PURGE_THROTTLE_STORE=redis
+CAPELL_HTML_CACHE_PURGE_REQUESTS_PER_SECOND=2
+CAPELL_HTML_CACHE_PURGE_BURST=5
+CAPELL_HTML_CACHE_PURGE_ESCALATE_PENDING_THRESHOLD=50
+```
+
+The pacing store must support atomic locks and be shared by every queue worker. With the array or null store, the sync queue or a queue driver built on it (deferred, background), or a driver without a rate-limited zone, queued purges are sent directly as before. Synchronous purges, such as a deployment's awaited full-zone purge, are always sent directly.
 
 The `page_cache` disk must expose local filesystem paths because refreshes use atomic file replacement. Use a local disk for a single web node or a shared POSIX filesystem mounted by every web and queue node. Object-storage disks are not supported. Site Health reports an error when the disk cannot provide local paths; the deployment-topology check separately reports unsafe multi-node purge configuration.
 

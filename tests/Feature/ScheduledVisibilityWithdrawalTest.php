@@ -6,6 +6,9 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
+use Capell\HtmlCache\Actions\WithdrawCachedHtmlForOpenedAccessAreasAction;
+use Capell\HtmlCache\Contracts\CachePurger;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
@@ -14,6 +17,8 @@ use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -28,12 +33,15 @@ it('withdraws scheduled-cache files and fences in-flight renders when a page bec
     [$domain, $page] = Model::withoutEvents(function (): array {
         $domain = SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'withdrawal.example.test', 'path' => null]);
         $page = Page::factory()->recycle($domain->site)->withTranslations()->create(['visible_from' => now()->subDay(), 'visible_until' => null]);
+        PageUrl::factory()->page($page)->site($domain->site)->language($domain->language)->create(['url' => '/withdrawn']);
 
         return [$domain, $page];
     });
     $url = 'https://withdrawal.example.test/withdrawn';
     $path = resolve(HtmlCachePathResolver::class)->pathForUrl('/withdrawn', $domain);
+    $unrelatedPath = resolve(HtmlCachePathResolver::class)->pathForUrl('/unrelated', $domain);
     Storage::disk('page_cache')->put($path, 'Previously public content');
+    Storage::disk('page_cache')->put($unrelatedPath, 'Unrelated public content');
     if ($indexed) {
         CachedModelUrl::query()->create([
             'url' => $url,
@@ -60,7 +68,10 @@ it('withdraws scheduled-cache files and fences in-flight renders when a page bec
     }
 
     expect(Storage::disk('page_cache')->exists($path))->toBeFalse()
-        ->and($guard->publish($token, static fn (): bool => true))->toBeFalse();
+        ->and($guard->publish($token, static fn (): bool => true))->toBeFalse()
+        // Indexed: only the page's own URLs are withdrawn. Unindexed: its
+        // dependants are unknown, so the whole cache is cleared instead.
+        ->and(Storage::disk('page_cache')->exists($unrelatedPath))->toBe($indexed);
 })->with(['unpublished', 'deleted'])->with(['indexed' => true, 'unindexed' => false]);
 
 it('hard-clears origin files and fences renders when an access restriction is created or changed', function (string $change): void {
@@ -97,6 +108,43 @@ it('hard-clears origin files and fences renders when an access restriction is cr
     expect(Storage::disk('page_cache')->exists($path))->toBeFalse()
         ->and($guard->publish($token, static fn (): bool => true))->toBeFalse();
 })->with(['created', 'updated']);
+
+it('hard-clears origin files and fences renders when an access area is activated, changed or deleted', function (string $change, string $mode): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.invalidation.mode', $mode);
+    config()->set('queue.default', 'sync');
+
+    Schema::create('access_gate_areas', function (Blueprint $table): void {
+        $table->id();
+        $table->string('status')->default('draft');
+        $table->timestamps();
+    });
+    $area = new class extends Model
+    {
+        protected $table = 'access_gate_areas';
+
+        protected $guarded = [];
+    };
+
+    $domain = Model::withoutEvents(fn (): SiteDomain => SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'gated.example.test', 'path' => null]));
+    $path = resolve(HtmlCachePathResolver::class)->pathForUrl('/members', $domain);
+    Storage::disk('page_cache')->put($path, 'Previously public content');
+
+    $existing = Model::withoutEvents(fn (): Model => $area->newQuery()->create(['status' => 'paused']));
+    $guard = resolve(HtmlCachePublicationGuard::class);
+    $token = $guard->capture(Request::create('https://gated.example.test/members'));
+
+    if ($change === 'created') {
+        $area->newQuery()->create(['status' => 'active']);
+    } elseif ($change === 'updated') {
+        $existing->update(['status' => 'active']);
+    } else {
+        $existing->delete();
+    }
+
+    expect(Storage::disk('page_cache')->exists($path))->toBeFalse()
+        ->and($guard->publish($token, static fn (): bool => true))->toBeFalse();
+})->with(['created', 'updated', 'deleted'])->with(['scheduled', 'instant']);
 
 it('hard-clears origin files and fences renders when a site is disabled or deleted', function (string $change): void {
     Storage::fake('page_cache');
@@ -186,4 +234,121 @@ it('removes the cached copy of the previous URL when a page URL changes', functi
     $pageUrl->update(['url' => '/new-slug']);
 
     expect(Storage::disk('page_cache')->exists($oldPath))->toBeFalse();
+})->with(['scheduled', 'instant']);
+
+/** @return array{purges: ArrayObject<int, EdgeCachePurgeData>, path: string} */
+function accessAreaSweepFixture(string $mode): array
+{
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.invalidation.mode', $mode);
+    config()->set('queue.default', 'sync');
+    Carbon::setTestNow('2026-11-02 09:00:00');
+
+    /** @var ArrayObject<int, EdgeCachePurgeData> $purges */
+    $purges = new ArrayObject;
+    $purger = new readonly class($purges) implements CachePurger
+    {
+        /** @param ArrayObject<int, EdgeCachePurgeData> $purges */
+        public function __construct(private ArrayObject $purges) {}
+
+        public function purge(EdgeCachePurgeData $purge): bool
+        {
+            $this->purges->append($purge);
+
+            return true;
+        }
+    };
+    app()->instance(CachePurger::class, $purger);
+
+    Schema::create('access_gate_areas', function (Blueprint $table): void {
+        $table->id();
+        $table->string('status');
+        $table->timestamp('opens_at')->nullable();
+        $table->timestamp('closes_at')->nullable();
+        $table->timestamp('cache_withdrawn_for_opens_at')->nullable();
+        $table->timestamps();
+    });
+
+    $domain = Model::withoutEvents(fn (): SiteDomain => SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'opens.example.test', 'path' => null]));
+
+    return [
+        'purges' => $purges,
+        'path' => resolve(HtmlCachePathResolver::class)->pathForUrl('/members', $domain),
+    ];
+}
+
+/** @param array<string, mixed> $attributes */
+function insertAccessArea(array $attributes): int
+{
+    return DB::table('access_gate_areas')->insertGetId([...['status' => 'active', 'closes_at' => null, 'created_at' => now(), 'updated_at' => now()], ...$attributes]);
+}
+
+it('withdraws origin and edge copies once when an active access area reaches opens_at', function (string $mode): void {
+    $fixture = accessAreaSweepFixture($mode);
+    insertAccessArea(['opens_at' => '2026-11-02 10:00:00', 'closes_at' => '2026-11-02 12:00:00']);
+    // None of these gate at 10:00:30.
+    insertAccessArea(['status' => 'paused', 'opens_at' => '2026-11-02 10:00:00']);
+    insertAccessArea(['opens_at' => '2026-11-02 09:30:00', 'closes_at' => '2026-11-02 10:00:10']);
+    Storage::disk('page_cache')->put($fixture['path'], 'Public until the area opens');
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(0)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeTrue();
+
+    $guard = resolve(HtmlCachePublicationGuard::class);
+    $token = $guard->capture(Request::create('https://opens.example.test/members'));
+
+    Carbon::setTestNow('2026-11-02 10:00:30');
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeFalse()
+        ->and($guard->publish($token, static fn (): bool => true))->toBeFalse()
+        ->and($fixture['purges'])->toHaveCount(1)
+        ->and($fixture['purges']->getArrayCopy()[0]->purgeAll)->toBeTrue();
+
+    Storage::disk('page_cache')->put($fixture['path'], 'Cached again by an ungated page');
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(0)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeTrue()
+        ->and($fixture['purges'])->toHaveCount(1);
+
+    Carbon::setTestNow();
+})->with(['scheduled', 'instant']);
+
+it('still withdraws once when the area is edited after opens_at but before the sweep runs', function (string $mode): void {
+    $fixture = accessAreaSweepFixture($mode);
+    $id = insertAccessArea(['opens_at' => '2026-11-02 10:00:00']);
+    Storage::disk('page_cache')->put($fixture['path'], 'Public until the area opens');
+
+    Carbon::setTestNow('2026-11-02 10:00:20');
+    DB::table('access_gate_areas')->where('id', $id)->update(['updated_at' => now()]);
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeFalse()
+        ->and(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(0)
+        ->and($fixture['purges'])->toHaveCount(1);
+
+    Carbon::setTestNow();
+})->with(['scheduled', 'instant']);
+
+it('withdraws again at a rescheduled opens_at', function (string $mode): void {
+    $fixture = accessAreaSweepFixture($mode);
+    $id = insertAccessArea(['opens_at' => '2026-11-02 10:00:00']);
+
+    Carbon::setTestNow('2026-11-02 10:00:30');
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(1);
+
+    DB::table('access_gate_areas')->where('id', $id)->update(['opens_at' => '2026-11-02 14:00:00']);
+    Storage::disk('page_cache')->put($fixture['path'], 'Public again until the new opening');
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(0)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeTrue();
+
+    Carbon::setTestNow('2026-11-02 14:00:30');
+
+    expect(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(1)
+        ->and(Storage::disk('page_cache')->exists($fixture['path']))->toBeFalse()
+        ->and(WithdrawCachedHtmlForOpenedAccessAreasAction::run())->toBe(0)
+        ->and($fixture['purges'])->toHaveCount(2);
+
+    Carbon::setTestNow();
 })->with(['scheduled', 'instant']);

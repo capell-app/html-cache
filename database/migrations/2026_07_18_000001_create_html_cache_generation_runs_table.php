@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Support\TableName;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,7 +11,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('html_cache_generation_runs', function (Blueprint $table): void {
+        Schema::create(TableName::resolve('html_cache_generation_runs'), function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('status', 20)->default('pending')->index();
             $table->unsignedInteger('total_sites');
@@ -25,6 +26,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('html_cache_generation_runs');
+        Schema::dropIfExists(TableName::resolve('html_cache_generation_runs'));
     }
 };

@@ -6,6 +6,8 @@ namespace Capell\HtmlCache\Actions;
 
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
+use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
+use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
@@ -83,7 +85,28 @@ final class ClearCachedUrlsForSurrogateKeysAction
             }
         }
 
+        $this->purgeSiteWideEdgeTags($surrogateKeys);
+
         return $cleared;
+    }
+
+    /**
+     * URL clears never purge the site- or lang- tags every response carries,
+     * so a site or language invalidation sends them here, once. That also
+     * reaches edge copies of pages that never entered the URL index.
+     *
+     * @param  array<int, string>  $surrogateKeys
+     */
+    private function purgeSiteWideEdgeTags(array $surrogateKeys): void
+    {
+        $tags = array_values(array_filter(
+            SurrogateKeyNormalizer::normalize($surrogateKeys),
+            static fn (string $key): bool => preg_match('/^(?:site-\d+|lang-[A-Za-z0-9_-]+)$/', $key) === 1,
+        ));
+
+        if ($tags !== []) {
+            PurgeEdgeCacheAction::dispatchAfterCommit(new EdgeCachePurgeData(tags: $tags));
+        }
     }
 
     private function clearUnindexedStandardPages(SiteDomain $domain, HtmlCacheStore $store, HtmlCachePathResolver $paths): int

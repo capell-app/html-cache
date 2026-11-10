@@ -21,7 +21,7 @@ Viewing cached URL details requires `capell-html-cache.view`; clearing a URL req
 
 ## What can be cached
 
-The default path caches anonymous `GET` HTML responses. It bypasses authenticated or session requests, authorization headers, signed URLs, Livewire and Inertia requests, unapproved query strings, responses marked `no-store`, and packages that declare sensitive or non-cacheable output. It also rejects HTML containing authoring markers. Eligible `404` HTML can be cached with its original status.
+The default path caches anonymous `GET` HTML responses. It bypasses authenticated or session requests, authorisation headers, signed URLs, Livewire and Inertia requests, unapproved query strings, responses marked `no-store`, and packages that declare sensitive or non-cacheable output. It also rejects HTML containing authoring markers. Eligible `404` HTML can be cached with its original status.
 
 Cache files are public render output. Any page that varies by a custom cookie, request header, account, currency, locale selector, cart, or other visitor state must have the relevant path, cookie, or header in the configured bypass rules. Do not disable the authenticated/session bypass unless every affected response is demonstrably identical and public.
 

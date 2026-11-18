@@ -81,10 +81,10 @@ it('groups cached pages and maintenance beneath site health', function (): void 
     $user->assignRole('super_admin');
 
     test()->actingAs($user);
-    expect(MaintenanceCachePage::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
+    expect(MaintenanceCachePage::getNavigationGroup())->toBe(SiteHealthPage::getNavigationGroup())
         ->and(MaintenanceCachePage::getNavigationSort())->toBe(10)
         ->and(MaintenanceCachePage::getNavigationParentItem())->toBe(SiteHealthPage::getNavigationLabel())
-        ->and(CachedModelUrlResource::getNavigationGroup())->toBe((string) __('capell-admin::navigation.group_monitoring'))
+        ->and(CachedModelUrlResource::getNavigationGroup())->toBe(SiteHealthPage::getNavigationGroup())
         ->and(CachedModelUrlResource::getNavigationSort())->toBe(11)
         ->and(CachedModelUrlResource::getNavigationParentItem())->toBe(SiteHealthPage::getNavigationLabel())
         ->and(CachedModelUrlResource::getNavigationLabel())->toBe('Cached pages')

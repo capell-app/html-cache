@@ -475,7 +475,7 @@ it('rejects stale refresh cache paths outside the page cache disk root', functio
     expect(ProcessStaleHtmlCacheAction::run(1)->attempted)->toBe(1)
         ->and($renders)->toBe(0)
         ->and(resolve(HtmlCacheStore::class)->path('../outside.html'))->toBeNull()
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([])
+        ->and(htmlCachePageEntries())->toBe([])
         ->and($staleCachedUrl->refresh()->status)->toBe(StaleCachedUrl::STATUS_FAILED)
         ->and($staleCachedUrl->last_error)->toContain('cache path was invalid');
 })->with(['cache_path', 'error_cache_path'])->with([

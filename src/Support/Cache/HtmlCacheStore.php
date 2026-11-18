@@ -17,6 +17,18 @@ use Throwable;
 
 final class HtmlCacheStore
 {
+    /**
+     * Top-level trees owned by the Frontend static error and maintenance page
+     * manifests. Those manifests live outside the page cache and are rebuilt
+     * only when their pages change or a release generates them, so a full
+     * page-cache clear must leave these files in place: deleting them leaves a
+     * manifest that points at missing files, and every 404 then falls back to
+     * a full CMS render.
+     *
+     * @var list<string>
+     */
+    public const array STATIC_ARTEFACT_DIRECTORIES = ['error', 'maintenance'];
+
     private readonly Filesystem $disk;
 
     private ?NativeFilesystem $pageFilesystem = null;
@@ -28,6 +40,11 @@ final class HtmlCacheStore
     public function __construct(FilesystemManager $storage)
     {
         $this->disk = $storage->disk('page_cache');
+    }
+
+    public static function isStaticArtefactDirectory(string $directory): bool
+    {
+        return in_array(trim(str_replace('\\', '/', $directory), '/'), self::STATIC_ARTEFACT_DIRECTORIES, true);
     }
 
     public function usingPageFilesystem(NativeFilesystem $files, string $directory): self
@@ -422,6 +439,10 @@ final class HtmlCacheStore
         $failedFiles = [];
 
         foreach ($this->directories() as $directory) {
+            if (self::isStaticArtefactDirectory($directory)) {
+                continue;
+            }
+
             try {
                 HtmlCacheFilesystem::assertContainedPath($this->diskPath($directory), $this->root());
                 if ($this->disk->deleteDirectory($directory)) {

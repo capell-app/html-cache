@@ -7,6 +7,7 @@ namespace Capell\HtmlCache\Actions;
 use Capell\Core\Actions\LoadSiteDomainFromUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
 use Capell\Core\Contracts\Pageable;
+use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Frontend\Support\Cache\SurrogateKeyNormalizer;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
@@ -136,10 +137,25 @@ final class ClearCachedUrlAction
 
         $domainResolved = $siteDomain instanceof SiteDomain && filled($siteDomain->domain);
         if ($refresh && $domainResolved) {
-            VisitUrlAction::dispatch($urlString);
+            VisitUrlAction::dispatch($urlString, $this->pageIdFor($cachedModelUrls));
         }
 
         return $domainResolved;
+    }
+
+    /**
+     * The page a refresh visit belongs to, so a failed visit is recorded against it.
+     *
+     * @param  Collection<int, CachedModelUrl>  $cachedModelUrls
+     */
+    private function pageIdFor(Collection $cachedModelUrls): ?int
+    {
+        $pageIds = $cachedModelUrls
+            ->filter(static fn (CachedModelUrl $row): bool => (Relation::getMorphedModel($row->cacheable_type) ?? $row->cacheable_type) === Page::class)
+            ->map(static fn (CachedModelUrl $row): int => $row->cacheable_id)
+            ->unique();
+
+        return $pageIds->count() === 1 ? $pageIds->first() : null;
     }
 
     /**

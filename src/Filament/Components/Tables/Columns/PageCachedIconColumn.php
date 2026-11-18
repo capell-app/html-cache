@@ -6,10 +6,13 @@ namespace Capell\HtmlCache\Filament\Components\Tables\Columns;
 
 use Capell\Core\Contracts\Pageable;
 use Capell\Core\Models\PageUrl;
-use Capell\HtmlCache\Actions\DeletePageCacheAction;
+use Capell\HtmlCache\Jobs\ClearAuthorisedPageCacheJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Support\HtmlCacheAuthorization;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Date;
 
 final class PageCachedIconColumn extends IconColumn
@@ -19,6 +22,8 @@ final class PageCachedIconColumn extends IconColumn
         parent::setUp();
 
         $this->label(__('capell-admin::table.page_cached'))
+            ->visible(fn (): bool => HtmlCacheAuthorization::canView(auth()->user()) || HtmlCacheAuthorization::canClear(auth()->user()))
+            ->disabledClick(fn (Pageable|PageUrl $record): bool => ! HtmlCacheAuthorization::canClearPage(auth()->user(), $record))
             ->alignCenter()
             ->getStateUsing(fn (Pageable|PageUrl $record): ?CachedModelUrl => $this->getCachedPage($record))
             ->icon(fn (?CachedModelUrl $state): string => $state instanceof CachedModelUrl ? 'heroicon-c-check' : 'heroicon-c-x-mark')
@@ -40,7 +45,18 @@ final class PageCachedIconColumn extends IconColumn
 
     private function deleteCacheFile(Pageable|PageUrl $record): void
     {
-        DeletePageCacheAction::dispatch($record);
+        $actor = auth()->user();
+
+        if (! $actor instanceof Model || ! $actor instanceof Authenticatable || ! HtmlCacheAuthorization::canClearPage($actor, $record)) {
+            Notification::make('page-cache-clear-refused')
+                ->title(__('capell-html-cache::admin.clear_not_allowed'))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        ClearAuthorisedPageCacheJob::dispatch($actor, $record);
 
         $count = $record instanceof Pageable ? $record->pageUrls()->count() : 1;
 

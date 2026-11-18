@@ -8,6 +8,7 @@ use Capell\Core\Facades\CapellCore;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlAction;
 use Capell\HtmlCache\Actions\ClearCachedUrlsForModelAction;
+use Capell\HtmlCache\Support\HtmlCacheAuthorization;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -28,10 +29,24 @@ trait HasPageCacheNotification
     #[On('refresh-cache')]
     public function refreshPageCache(?array $urls = null): void
     {
+        $actor = auth()->user();
+        $targeted = $urls !== null && $urls !== [];
+        $targets = $targeted ? HtmlCacheAuthorization::clearableUrls($actor, $urls) : null;
+        $authorised = $targeted ? $targets !== null : HtmlCacheAuthorization::canClearAll($actor);
+
+        if (! $authorised) {
+            Notification::make('page-cache-refresh-refused')
+                ->title(__('capell-html-cache::admin.clear_not_allowed'))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
         try {
-            if ($urls !== null && $urls !== []) {
-                foreach ($urls as $url) {
-                    if (! is_string($url) || ! ClearCachedUrlAction::run($url)) {
+            if ($targets !== null) {
+                foreach ($targets as $target) {
+                    if (! ClearCachedUrlAction::run($target)) {
                         throw new RuntimeException('Unable to clear a requested HTML cache URL.');
                     }
                 }

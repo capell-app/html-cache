@@ -88,6 +88,7 @@ use Capell\HtmlCache\Support\Cache\Purgers\NullCachePurger;
 use Capell\HtmlCache\Support\Cache\RefreshWorkerHeartbeat;
 use Capell\HtmlCache\Support\Error\HtmlCacheStaticErrorPageStore;
 use Capell\HtmlCache\Support\Extensions\ExtensionCacheSafetyResolver;
+use Capell\HtmlCache\Support\HtmlCacheAuthorizationMemo;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\ModelEventRegistrar;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
@@ -369,6 +370,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
     {
         $this->app->bind(PageCachePageTableExtender::class);
         $this->app->bind(HtmlCacheAdminCacheCleaner::class);
+        $this->app->scoped(HtmlCacheAuthorizationMemo::class);
         $this->app->bind(HtmlCacheSiteHealthReportExtender::class);
         $this->app->bind(HtmlCacheSiteHealthWidget::class);
         $this->app->bind(MaintenanceAdminTool::class);
@@ -419,6 +421,14 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         foreach ($broadRouteModelClasses as $modelClass) {
             $modelClass::created(function (Model $model): mixed {
+                $this->dispatchClearAllHtmlCache();
+
+                return null;
+            });
+            $modelClass::restored(function (Model $model): mixed {
+                // A restored page serves again at URLs whose cached 404 page
+                // the model-recorded URL clear cannot reach, so it adds
+                // content exactly as a created page does.
                 $this->dispatchClearAllHtmlCache();
 
                 return null;

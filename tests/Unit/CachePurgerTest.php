@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Contracts\Security\ResolvesHostAddresses;
 use Capell\HtmlCache\Data\EdgeCachePurgeData;
 use Capell\HtmlCache\Support\Cache\Purgers\CloudflareCachePurger;
 use Capell\HtmlCache\Support\Cache\Purgers\HttpSurrogateKeyCachePurger;
@@ -61,6 +62,19 @@ it('does not send purge credentials to private or insecure endpoints', function 
     Http::assertNothingSent();
 });
 
+it('does not send purge credentials to internal addresses that PHP treats as public', function (string $endpoint): void {
+    Http::fake();
+    config()->set('capell-html-cache.purge.token', 'edge-token');
+    config()->set('capell-html-cache.purge.endpoint', $endpoint);
+
+    expect(resolve(HttpSurrogateKeyCachePurger::class)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeFalse();
+
+    Http::assertNothingSent();
+})->with([
+    'carrier-grade NAT' => 'https://100.64.0.10/purge',
+    'benchmarking range' => 'https://198.18.0.10/purge',
+]);
+
 it('requires both precise URL and related tag purges to succeed at Cloudflare', function (): void {
     Http::fake([
         'https://api.cloudflare.com/client/v4/zones/0123456789abcdef0123456789abcdef/purge_cache' => Http::response(['success' => true]),
@@ -115,4 +129,61 @@ it('supports Cloudflare tag and complete zone purges', function (): void {
     Http::assertSentCount(2);
     Http::assertSent(fn (Request $request): bool => $request->data() === ['tags' => ['site-2']]);
     Http::assertSent(fn (Request $request): bool => $request->data() === ['purge_everything' => true]);
+});
+
+it('resolves the purge endpoint through Core and refuses a host that resolves to an internal address', function (string $address, bool $sent): void {
+    app()->instance(ResolvesHostAddresses::class, new class($address) implements ResolvesHostAddresses
+    {
+        public function __construct(private readonly string $address) {}
+
+        public function resolve(string $host): array
+        {
+            return [$this->address];
+        }
+    });
+    Http::fake(['https://purge.example.com/*' => Http::response(['ok' => true])]);
+    config()->set('capell-html-cache.purge.token', 'edge-token');
+    config()->set('capell-html-cache.purge.endpoint', 'https://purge.example.com/purge');
+
+    expect(resolve(HttpSurrogateKeyCachePurger::class)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBe($sent);
+
+    $sent ? Http::assertSentCount(1) : Http::assertNothingSent();
+})->with([
+    'public address' => ['93.184.216.34', true],
+    'rebound to loopback' => ['127.0.0.1', false],
+    'rebound to metadata service' => ['169.254.169.254', false],
+]);
+
+it('refuses a purge endpoint carrying credentials or a fragment', function (string $endpoint): void {
+    Http::fake();
+    config()->set('capell-html-cache.purge.endpoint', $endpoint);
+
+    expect(resolve(HttpSurrogateKeyCachePurger::class)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeFalse();
+
+    Http::assertNothingSent();
+})->with([
+    'credentials' => 'https://user:secret@93.184.216.34/purge',
+    'fragment' => 'https://93.184.216.34/purge#x',
+]);
+
+it('sends the purge to a custom endpoint port without the token reaching a refused host', function (): void {
+    app()->instance(ResolvesHostAddresses::class, new class implements ResolvesHostAddresses
+    {
+        public function resolve(string $host): array
+        {
+            return $host === 'purge.example.com' ? ['93.184.216.34'] : ['10.0.0.5'];
+        }
+    });
+    Http::fake(['*' => Http::response(['ok' => true])]);
+    config()->set('capell-html-cache.purge.token', 'edge-token');
+
+    config()->set('capell-html-cache.purge.endpoint', 'https://purge.example.com:8443/purge');
+    expect(resolve(HttpSurrogateKeyCachePurger::class)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeTrue();
+
+    config()->set('capell-html-cache.purge.endpoint', 'https://internal.example.com/purge');
+    expect(resolve(HttpSurrogateKeyCachePurger::class)->purge(new EdgeCachePurgeData(tags: ['page-1'])))->toBeFalse();
+
+    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'https://purge.example.com:8443/purge'
+        && $request->hasHeader('Authorization', 'Bearer edge-token'));
 });

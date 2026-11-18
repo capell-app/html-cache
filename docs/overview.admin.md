@@ -17,7 +17,7 @@ For Cloudflare, follow the production rule, purge-token, and `CF-Cache-Status` c
 - The Pages table can show whether a page is cached.
 - **Monitoring > Maintenance cache** generates and activates static maintenance pages separately from the normal page cache.
 
-Viewing cached URL details requires `capell-html-cache.view`; clearing a URL requires `capell-html-cache.clear`. Maintenance controls require `capell-html-cache.maintenance.manage` or global access. Records and site maintenance actions are limited to the operator's assigned sites; only a global operator can toggle global maintenance mode.
+Viewing cached URL details requires `capell-html-cache.view`; clearing a URL, from the cache map, the Pages list column or the prompt shown after saving, requires `capell-html-cache.clear` on that URL's site. Clearing every stored page from the admin needs global access. Where the built-in `editor` and `admin` roles already exist, a package migration gives them the view and clear permissions once, and later changes to those roles are kept. Anywhere else, grant the permissions from **Roles**. Maintenance controls require `capell-html-cache.maintenance.manage` or global access. Records and site maintenance actions are limited to the operator's assigned sites; only a global operator can toggle global maintenance mode.
 
 ## What can be cached
 

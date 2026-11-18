@@ -26,19 +26,20 @@ use Symfony\Component\HttpFoundation\Response;
 
 uses(HtmlCacheTestCase::class);
 
-function staticExtensionUrlDomain(): SiteDomain
+function staticExtensionUrlDomain(?int $port = 8443): SiteDomain
 {
     return SiteDomain::factory()->create([
         'domain' => '8.8.8.8',
         'scheme' => 'https',
-        'port' => 8443,
+        'port' => $port,
         'path' => '/section',
         'status' => true,
     ]);
 }
 
 it('visits blog archive extension paths before counting them as generated', function (bool $internal): void {
-    $domain = staticExtensionUrlDomain();
+    // Outbound visits only reach the standard HTTP and HTTPS ports; an in-process render has no such limit.
+    $domain = staticExtensionUrlDomain($internal ? 8443 : null);
     $site = $domain->site;
     $site->setRelation('siteDomains', collect([$domain]));
     $archive = new Page;
@@ -65,7 +66,7 @@ it('visits blog archive extension paths before counting them as generated', func
     Event::listen(ResponseReceived::class, [$observer, 'record']);
     config(['capell-html-cache.static_generation.internal_requests' => $internal]);
     Http::fake(['*' => Http::response('Archive', 200)]);
-    $expectedUrl = 'https://8.8.8.8:8443/section/blog/archive/2026/07';
+    $expectedUrl = $internal ? 'https://8.8.8.8:8443/section/blog/archive/2026-07' : 'https://8.8.8.8/section/blog/archive/2026-07';
 
     $kernel = Mockery::mock(HttpKernel::class);
     if ($internal) {
@@ -142,3 +143,27 @@ it('rejects invalid extension destinations without counting or checkpointing the
     'missing host' => 'https:///archive',
     'network path' => '//outside.test/archive',
 ]);
+
+it('refuses to visit an extension path on a non-standard port over the network and visits nothing', function (): void {
+    $domain = staticExtensionUrlDomain(8443);
+    $site = $domain->site;
+    $site->setRelation('siteDomains', collect([$domain]));
+    $registry = new StaticSiteExtensionRegistry;
+    $registry->register('custom-port', function (Site $site, SiteDomain $domain, Closure $visit): void {
+        $visit('https://8.8.8.8:8443/section/archive');
+    });
+    app()->instance(StaticSiteExtensionRegistry::class, $registry);
+    config(['capell-html-cache.static_generation.internal_requests' => false]);
+    Http::fake();
+    $checkpoints = [];
+
+    $generate = function () use ($site, &$checkpoints): void {
+        (new StaticSiteGenerator($site))->process(checkpoint: function (string $visited) use (&$checkpoints): void {
+            $checkpoints[] = $visited;
+        });
+    };
+
+    expect($generate)->toThrow(UrlVisitFailedException::class, __('capell-core::message.visit_requires_standard_port'))
+        ->and($checkpoints)->toBe([]);
+    Http::assertNothingSent();
+});

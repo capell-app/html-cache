@@ -13,21 +13,22 @@ This guide is for owners and operators who manage how fast pages load. HTML Cach
 
 ### How to see cache state on the Pages list
 
-1. Go to **Pages** in the admin.
+1. Go to **Pages** in the admin and switch on the **Cached** column. It is hidden by default, and only people with the cache view or clear permission see it.
 2. Each row shows a small indicator for whether that page is currently saved in the cache.
 3. Use this to spot at a glance which pages are not yet cached, without leaving the page list.
+4. To clear a page's stored copy, click its indicator. This needs the cache clear permission for every site the page has an address on; otherwise the indicator is not clickable. The clear is queued, and is checked again when it runs, so it does nothing if your access was withdrawn in the meantime.
 
 ### How to find which URLs are cached and what they depend on
 
-1. In the admin sidebar, open the **Insights & health** group.
-2. Open **Site Health**, then **Cached pages** beneath it.
+1. In the admin sidebar, open the **Settings** group.
+2. Open **Site health**, then **Cached pages** beneath it.
 3. The **Cache map** lists each cached **URL** with its **Site**, **Language**, when it was **Cached at**, and when it was **Last seen**.
 4. The **Dependencies** show which content a page relies on, so you know which pages to clear when that content changes.
 5. Use **Resource search** to find the URLs tied to a specific item by its title, name, slug, or ID.
 
 ### How to diagnose uncached public pages
 
-Open **Insights & health > Site Health > Uncached public pages**. Access uses the
+Open **Settings > Site health > Uncached public pages**. Access uses the
 same cache-view permission and site scope as **Cached pages**. The list expands
 enabled CMS URLs with enabled, publicly accessible blueprints over their enabled
 site and language domains; it includes page-backed redirects and URLs without a
@@ -74,7 +75,7 @@ measured durations sort slowest first; unknown durations sort last.
 
 ### How to clear a cached page when a change is not showing
 
-1. Open **Insights & health > Site Health > Cached pages**.
+1. Open **Settings > Site health > Cached pages**.
 2. Find the **URL** whose saved copy is out of date.
 3. Use **Clear URL** on that row to remove its saved copy for that site and language. Other sites and languages are left alone.
 4. The page rebuilds its saved copy the next time a visitor loads it.
@@ -82,14 +83,14 @@ measured durations sort slowest first; unknown durations sort last.
 
 ### How to turn on maintenance mode while you work
 
-1. In the admin sidebar, open the **Insights & health** group, expand **Site Health**, and click **Maintenance cache**.
+1. In the admin sidebar, open the **Settings** group, expand **Site health**, and click **Maintenance cache**.
 2. To take every site offline for visitors, use **Prepare pages** if preparation is needed, then **Review and enable** and confirm. To bring them back, click **Exit maintenance**.
 3. To take a single site offline instead, use the per-site override controls and **Enable override** or **Disable override** for that site.
 4. While maintenance is on, visitors see a static maintenance page instead of the normal site.
 
 ### How to prepare the maintenance page in advance
 
-1. Open **Insights & health > Site Health > Maintenance cache**.
+1. Open **Settings > Site health > Maintenance cache**.
 2. Click **Prepare pages** to build the static maintenance page for every site, or use **Prepare** for a single site.
 3. Use **Edit maintenance page** to change what visitors see while a site is offline, and **Edit 404 page** to change the page shown when an address is not found.
 4. Preparation progress updates automatically while the run is active. **Refresh status** checks the same run without queuing it again. Counters are shown only when all sites in the run are accessible to you.
@@ -98,7 +99,7 @@ measured durations sort slowest first; unknown durations sort last.
 
 ### How to confirm caching is healthy and safe
 
-1. Go to **Site Health** in the admin.
+1. Go to **Site health** in the admin.
 2. Find the **HTML cache** section.
 3. It reports whether the cache storage is in place and whether the public output is safe, including the **Cached public HTML safety** check that confirms no authoring markers leaked into saved pages.
 4. A green result means saved pages are being served correctly and contain only public content.
@@ -112,4 +113,4 @@ measured durations sort slowest first; unknown durations sort last.
 | The **Regeneration queue** shows **Failed** rows       | A page could not rebuild its saved copy               | Note the **Reason** shown, then ask your developer to look into it                                  |
 | Visitors see the maintenance page when they should not | Maintenance mode is still on                          | Open **Maintenance cache** and click **Exit maintenance**, or turn off the per-site override        |
 | The maintenance page looks wrong or empty              | It was not generated, or its content needs updating   | Use **Edit maintenance page**, then **Prepare pages**                                               |
-| Site Health flags the **HTML cache** section           | The cache storage or safety check needs attention     | Read the message in **Site Health** and pass the remediation note to your developer                 |
+| Site health flags the **HTML cache** section           | The cache storage or safety check needs attention     | Read the message in **Site health** and pass the remediation note to your developer                 |

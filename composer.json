@@ -1,6 +1,6 @@
 {
     "name": "capell-app/html-cache",
-    "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
+    "description": "Serve stored copies of public Capell pages to anonymous visitors and refresh only the pages a change touches.",
     "type": "library",
     "license": "proprietary",
     "require": {

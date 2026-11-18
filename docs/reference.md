@@ -6,7 +6,7 @@ Developer reference for `capell-app/html-cache`. Start with the [README](../READ
 
 ## Package Details
 
-HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell Essentials** product group. It ships as `capell-app/html-cache` and extends these surfaces: admin, frontend.
+HTML Cache is an **Available** Capell package in the **Capell Essentials** product group. It ships as `capell-app/html-cache` and extends these surfaces: admin, frontend.
 
 - Status: Available
 - Tier: free
@@ -36,6 +36,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 - `packages/html-cache/database/migrations/2026_10_12_000001_create_html_cache_request_observations_table.php`
 - `packages/html-cache/database/migrations/2026_11_02_000001_create_html_cache_model_withdrawals_table.php`
 - `packages/html-cache/database/migrations/2026_11_02_000002_create_html_cache_dependency_tracking_epochs_table.php`
+- `packages/html-cache/database/migrations/2026_11_12_000001_grant_html_cache_permissions_to_default_roles.php`
 
 ### Models
 
@@ -113,6 +114,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 - `ForgetCoveredEdgePurgeDropsAction`
 - `GenerateStaticSiteAction`
 - `GenerateStaticSitesAction`
+- `GrantHtmlCacheDefaultRolePermissionsAction`
 - `InspectEdgeCachePurgeReadinessAction`
 - `InspectEdgeCachePurgeThrottleAction`
 - `ListCacheMapResourceOptionsAction`
@@ -182,6 +184,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 
 ### Jobs
 
+- `ClearAuthorisedPageCacheJob`
 - `FlushHtmlCacheHitBatchJob`
 - `GenerateMaintenancePagesJob`
 - `RefreshOriginStaleCachedUrlJob`
@@ -238,7 +241,7 @@ HTML Cache is an **Available**, **Schema-owning** Capell package in the **Capell
 - Required tables: `cached_model_urls`, `html_cache_dependency_tracking_epochs`, `html_cache_generation_runs`, `html_cache_model_withdrawals`, `html_cache_request_observations`, `stale_cached_urls`.
 - Models: `CachedModelUrl`, `HtmlCacheDependencyTrackingEpoch`, `HtmlCacheGenerationRun`, `HtmlCacheModelWithdrawal`, `StaleCachedUrl`.
 - Core record references in migrations: `sites via site_id`, `languages via language_id`, `site domains via site_domain_id`.
-- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`, `2026_10_12_000001_create_html_cache_request_observations_table.php`, `2026_11_02_000001_create_html_cache_model_withdrawals_table.php`, `2026_11_02_000002_create_html_cache_dependency_tracking_epochs_table.php`.
+- Migration files: `2026_05_10_190854_01_create_cached_model_urls_table.php`, `2026_05_14_000001_create_stale_cached_urls_table.php`, `2026_06_07_000001_add_telemetry_to_cached_model_urls_table.php`, `2026_07_18_000001_create_html_cache_generation_runs_table.php`, `2026_08_22_000001_add_scope_to_html_cache_generation_runs_table.php`, `2026_10_12_000001_create_html_cache_request_observations_table.php`, `2026_11_02_000001_create_html_cache_model_withdrawals_table.php`, `2026_11_02_000002_create_html_cache_dependency_tracking_epochs_table.php`, `2026_11_12_000001_grant_html_cache_permissions_to_default_roles.php`.
 - Migration impact: run host migrations through the package install flow before opening package surfaces.
 - Deletion/retention behaviour: migrations declare null-on-delete relationships; no timed pruning or retention schedule is declared in `capell.json`.
 

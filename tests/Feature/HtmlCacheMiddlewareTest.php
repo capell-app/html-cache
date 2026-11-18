@@ -114,7 +114,7 @@ it('does not populate the page cache from a cold HEAD and keeps the subsequent G
     );
 
     expect($headResponse->getContent())->toBe('')
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+        ->and(htmlCachePageEntries())->toBe([]);
 
     $getRequest = Request::create($url, Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $getRequest);
@@ -549,6 +549,40 @@ it('bypasses cached html for requests with a session cookie by default', functio
     capell_expect($response->getContent())->toBe('fresh html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('sends a client that explicitly accepts markdown to the application instead of the cached html', function (): void {
+    Storage::fake('page_cache');
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+    resolve(PageCache::class)->cache($this->beginCacheRender($request), response('cached html', 200, ['Content-Type' => 'text/html']));
+
+    $markdownRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_ACCEPT' => 'text/markdown']);
+    app()->instance('request', $markdownRequest);
+
+    $markdown = resolve(HtmlCacheMiddleware::class)->handle(
+        $markdownRequest,
+        fn (): Response => response('# Heading', 200, ['Content-Type' => 'text/markdown; charset=utf-8', 'Vary' => 'Accept']),
+    );
+
+    $browserRequest = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET, server: ['HTTP_ACCEPT' => 'text/html,application/xhtml+xml,*/*;q=0.8']);
+    app()->instance('request', $browserRequest);
+
+    $browser = resolve(HtmlCacheMiddleware::class)->handle(
+        $browserRequest,
+        fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
+    );
+
+    capell_expect($markdown->getContent())->toBe('# Heading')
+        ->and($markdown->headers->get('X-Frontend-Cache'))->toBeNull()
+        ->and($browser->getContent())->toBe('cached html')
+        ->and($browser->headers->get('X-Frontend-Cache'))->toBe('HIT');
 });
 
 it('can serve cached html for requests with a session cookie when configured', function (): void {
@@ -997,7 +1031,7 @@ it('does not write cached html when the response contains authoring markers', fu
 
     capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+        ->and(htmlCachePageEntries())->toBe([]);
 });
 
 it('does not write or publicly cache HTML containing a baked CSRF token', function (): void {
@@ -1018,7 +1052,7 @@ it('does not write or publicly cache HTML containing a baked CSRF token', functi
     capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('private')
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+        ->and(htmlCachePageEntries())->toBe([]);
 });
 
 it('does not fail public responses when a cache write fails', function (): void {
@@ -1250,7 +1284,7 @@ it('rescans middleware public html when the remembered safety inspection hash do
 
     capell_expect($response->headers->get('X-Frontend-Cache'))->toBe('BYPASS');
     capell_expect((string) $response->headers->get('Cache-Control'))->toContain('no-store');
-    capell_expect(Storage::disk('page_cache')->allFiles())->toBe([]);
+    capell_expect(htmlCachePageEntries())->toBe([]);
     capell_expect($inspector->calls)->toBe(1);
 });
 

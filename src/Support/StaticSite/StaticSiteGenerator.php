@@ -6,8 +6,10 @@ namespace Capell\HtmlCache\Support\StaticSite;
 
 use Capell\Core\Actions\SiteDomains\ResolveSiteDomainUrlAction;
 use Capell\Core\Actions\VisitUrlAction;
+use Capell\Core\Events\UrlVisitFailed;
 use Capell\Core\Exceptions\UrlVisitFailedException;
 use Capell\Core\Facades\CapellCore;
+use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
@@ -134,22 +136,23 @@ final class StaticSiteGenerator
                 $url = $pageUrl->full_url;
 
                 $this->refreshPageCache($pageUrl, $siteDomain);
-                $this->visitUrl($url);
+                $this->visitUrl($url, $pageUrl->pageable_type === (new Page)->getMorphClass() ? $pageUrl->pageable_id : null);
                 $checkpoint?->__invoke($url);
             });
     }
 
-    private function visitUrl(string $url): void
+    /** @param int|null $pageId the page the URL belongs to, so a failed visit is recorded against it */
+    private function visitUrl(string $url, ?int $pageId = null): void
     {
         if (config('capell-html-cache.static_generation.internal_requests', false) === true) {
-            $this->visitUrlInternally($url);
+            $this->visitUrlInternally($url, $pageId);
 
             return;
         }
 
         // The visitor can reject a destination without sending a request.
-        $status = resolve(StaticSiteRequestObserver::class)->statusFor($url, function () use ($url): void {
-            VisitUrlAction::run($url);
+        $status = resolve(StaticSiteRequestObserver::class)->statusFor($url, function () use ($url, $pageId): void {
+            VisitUrlAction::run($url, $pageId);
         });
 
         if ($status !== 200) {
@@ -178,7 +181,7 @@ final class StaticSiteGenerator
         );
     }
 
-    private function visitUrlInternally(string $url): void
+    private function visitUrlInternally(string $url, ?int $pageId = null): void
     {
         $components = parse_url($url);
 
@@ -229,6 +232,11 @@ final class StaticSiteGenerator
         }
 
         if (! $response->isSuccessful()) {
+            // Same event the HTTP visitor sends, so the Broken links report fills in both modes; only 4xx/5xx are broken links.
+            if ($response->isClientError() || $response->isServerError()) {
+                event(new UrlVisitFailed($url, $response->getStatusCode(), $pageId));
+            }
+
             throw new RuntimeException(sprintf(
                 'Static generation request [%s] returned HTTP %d.',
                 $url,

@@ -1,0 +1,100 @@
+[
+    {
+        "claim": "Visitors who are not signed in get a finished copy of each public page, kept on your server.",
+        "evidence": [
+            "src/Http/Middleware/HtmlCacheMiddleware.php",
+            "config/capell-html-cache.php"
+        ]
+    },
+    {
+        "claim": "A crowd arriving at once then does not make your site rebuild the same page again and again.",
+        "evidence": ["src/Http/Middleware/HtmlCacheMiddleware.php"]
+    },
+    {
+        "claim": "It needs the site's scheduled tasks and background jobs running, which your developer or host sets up.",
+        "evidence": [
+            "src/Providers/HtmlCacheServiceProvider.php",
+            "src/Observers/HtmlCacheModelInvalidationObserver.php",
+            "src/Filament/Components/Tables/Columns/PageCachedIconColumn.php"
+        ]
+    },
+    {
+        "claim": "Signed-in people always see the live page, so editors previewing a change never get a stale copy.",
+        "evidence": [
+            "src/Http/Middleware/HtmlCacheMiddleware.php",
+            "config/capell-html-cache.php"
+        ]
+    },
+    {
+        "claim": "Change the opening hours and only the pages that display hours are refreshed.",
+        "evidence": [
+            "src/Observers/HtmlCacheModelInvalidationObserver.php",
+            "src/Actions/ResolveCachedUrlsForModelAction.php",
+            "src/Actions/ClearCachedUrlsForModelAction.php",
+            "src/Actions/MarkCachedUrlsForModelStaleAction.php"
+        ]
+    },
+    {
+        "claim": "Refreshing happens at once or in batches every five minutes.",
+        "evidence": [
+            "config/capell-html-cache.php",
+            "src/Providers/HtmlCacheServiceProvider.php",
+            "src/Actions/ProcessStaleHtmlCacheAction.php",
+            "src/Actions/RefreshCachedUrlAtomicallyAction.php"
+        ]
+    },
+    {
+        "claim": "Switching a site off, publishing a page that was hidden or changing who can see a protected area clears every stored page.",
+        "evidence": [
+            "src/Observers/HtmlCacheModelInvalidationObserver.php",
+            "src/Actions/ClearAllHtmlCacheAction.php"
+        ]
+    },
+    {
+        "claim": "Creating or restoring a page, or changing a site's domain, does the same.",
+        "evidence": [
+            "src/Providers/HtmlCacheServiceProvider.php",
+            "src/Actions/ClearAllHtmlCacheAction.php"
+        ]
+    },
+    {
+        "claim": "Super Admins, and anyone you give the cache permissions to, get a Cached pages list.",
+        "evidence": [
+            "src/Filament/Resources/CachedModelUrls/CachedModelUrlResource.php",
+            "src/Enums/HtmlCachePermission.php",
+            "src/Actions/EnsureHtmlCachePermissionsAction.php"
+        ]
+    },
+    {
+        "claim": "It shows each address, its language and when it was stored, with a clear button for each.",
+        "evidence": [
+            "src/Filament/Resources/CachedModelUrls/Tables/CachedModelUrlsTable.php",
+            "resources/lang/en/admin.php"
+        ]
+    },
+    {
+        "claim": "A maintenance screen prepares holding pages for each site, ready to switch on while you work.",
+        "evidence": [
+            "src/Filament/Pages/MaintenanceCachePage.php",
+            "src/Actions/PrepareSiteMaintenanceCacheAction.php",
+            "src/Actions/EnableSiteMaintenanceOverrideAction.php",
+            "src/Actions/EnableGlobalMaintenanceAction.php",
+            "src/Support/Maintenance/MaintenanceCachePermissions.php"
+        ]
+    },
+    {
+        "claim": "Switch on the optional column in the pages list and it puts a tick beside each page that visitors get from a stored copy.",
+        "evidence": [
+            "src/Filament/Extenders/PageCachePageTableExtender.php",
+            "src/Filament/Components/Tables/Columns/PageCachedIconColumn.php"
+        ]
+    },
+    {
+        "claim": "Clicking the tick clears that page.",
+        "evidence": [
+            "src/Filament/Components/Tables/Columns/PageCachedIconColumn.php",
+            "src/Actions/DeletePageCacheAction.php",
+            "resources/lang/en/admin.php"
+        ]
+    }
+]

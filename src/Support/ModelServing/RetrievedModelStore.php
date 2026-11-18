@@ -11,6 +11,7 @@ use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Jobs\RegisterCachedModelUrlsJob;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\MissingAttributeException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphPivot;
 use Illuminate\Http\Request;
@@ -164,7 +165,14 @@ final class RetrievedModelStore implements CapturesRenderedModelIdentities
         }
 
         $modelType = $overrideModelType ?? $model->getMorphClass();
-        $modelKey = $model->getKey();
+
+        // A query that selects a few columns leaves the key unset, and strict models throw when
+        // it is read. Such a model cannot be identified, so it is not tracked.
+        try {
+            $modelKey = $model->getKey();
+        } catch (MissingAttributeException) {
+            return;
+        }
 
         if ($modelKey === null) {
             return;

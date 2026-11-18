@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use Capell\Admin\Contracts\Cache\StaticSiteGenerationDispatcher;
+use Capell\Admin\Filament\Pages\SiteHealthPage;
+use Capell\Core\Actions\VisitUrlAction;
 use Capell\Core\Contracts\Themes\ThemePreviewRendererInterface;
+use Capell\Core\Events\UrlVisitFailed;
 use Capell\Core\Exceptions\UrlVisitFailedException;
 use Capell\Core\Facades\CapellCore;
 use Capell\Core\Models\Blueprint;
@@ -57,7 +60,9 @@ use Capell\HtmlCache\Support\StaticSite\StaticSiteGenerator;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\HtmlCache\Tests\Support\PublishesHtmlCacheArtefacts;
 use Capell\HtmlCache\Tests\Support\PublishesStaticPages;
+use Capell\Tests\Fixtures\Models\User as CapellUser;
 use Capell\Tests\Support\Filament\AdminSurfaceAssertions;
+use Filament\Notifications\Notification;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
@@ -71,6 +76,7 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
@@ -371,10 +377,14 @@ it('sends a clear-cache notification when automatic cache clearing is disabled',
     ]);
 
     config(['capell-admin.auto_clear_cache' => false]);
+    $globalAdmin = CapellUser::factory()->create();
+    $globalAdmin->assignRole('super_admin');
+    test()->actingAs($globalAdmin);
 
     NotifyClearCachedPagesAction::run(collect([$page]));
 
     expect(CachedModelUrl::query()->where('cacheable_id', $page->getKey())->exists())->toBeTrue();
+    Notification::assertNotified(trans_choice('capell-admin::notification.detected_cached_pages', 1, ['count' => 1]));
 });
 
 it('resolves cached page rows for page urls and pageable records', function (): void {
@@ -466,6 +476,60 @@ it('marks internal static generation kernel requests as synthetic html cache ren
     }
 
     expect($syntheticRender)->toBeTrue();
+});
+
+it('names the page a static generation visit belongs to so a failed visit can be recorded against it', function (): void {
+    resolve(StaticSiteExtensionRegistry::class)->clear();
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('page-visit.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $pageUrl = PageUrl::factory()->page($page)->site($siteDomain->site)->language($siteDomain->language)->create(['url' => '/about']);
+    $visited = [];
+    config(['capell-html-cache.static_generation.internal_requests' => false]);
+
+    VisitUrlAction::mock()
+        ->shouldReceive('handle')
+        ->andReturnUsing(function (string $url, ?int $pageId = null) use (&$visited): void {
+            $visited[$url] = $pageId;
+        });
+
+    try {
+        new StaticSiteGenerator($siteDomain->site)->process();
+    } catch (RuntimeException) {
+        // No response was observed because the visit is mocked; only the page context matters here.
+    }
+
+    expect($visited)->toHaveKey($pageUrl->fresh()->full_url)
+        ->and($visited[$pageUrl->fresh()->full_url])->toBe($page->getKey());
+});
+
+it('reports an internally generated page that fails, naming the page', function (): void {
+    resolve(StaticSiteExtensionRegistry::class)->clear();
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('internal-gone.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    $pageUrl = PageUrl::factory()->page($page)->site($siteDomain->site)->language($siteDomain->language)->create(['url' => '/gone']);
+    config(['capell-html-cache.static_generation.internal_requests' => true]);
+    Route::get('/gone', fn (): Response => new Response('missing', Response::HTTP_NOT_FOUND));
+    Event::fake([UrlVisitFailed::class]);
+
+    expect(fn () => new StaticSiteGenerator($siteDomain->site)->process())->toThrow(RuntimeException::class);
+
+    Event::assertDispatched(UrlVisitFailed::class, static fn (UrlVisitFailed $event): bool => $event->url === $pageUrl->fresh()->full_url
+        && $event->statusCode === Response::HTTP_NOT_FOUND
+        && $event->pageId === $page->getKey());
+});
+
+it('does not report an internally generated redirect as a broken link', function (): void {
+    resolve(StaticSiteExtensionRegistry::class)->clear();
+    $siteDomain = htmlCacheResidualCoverageSiteDomain('internal-moved.test');
+    $page = htmlCacheResidualCoveragePage($siteDomain);
+    PageUrl::factory()->page($page)->site($siteDomain->site)->language($siteDomain->language)->create(['url' => '/moved']);
+    config(['capell-html-cache.static_generation.internal_requests' => true]);
+    Route::get('/moved', fn (): Response => new Response('', Response::HTTP_FOUND, ['Location' => '/elsewhere']));
+    Event::fake([UrlVisitFailed::class]);
+
+    expect(fn () => new StaticSiteGenerator($siteDomain->site)->process())->toThrow(RuntimeException::class);
+
+    Event::assertNotDispatched(UrlVisitFailed::class);
 });
 
 it('strips session cookies only from public cacheable responses', function (): void {
@@ -753,7 +817,11 @@ it('covers page cache notification trait and page table extension helpers', func
 
     $component->notifyPageCached($page);
     $component->notifyPageCached([$page, 'ignored']);
+    $globalAdmin = CapellUser::factory()->create();
+    $globalAdmin->assignRole('super_admin');
+    test()->actingAs($globalAdmin);
     $component->refreshPageCache();
+    auth()->forgetUser();
 
     $extender = new PageCachePageTableExtender;
 
@@ -993,7 +1061,7 @@ it('exposes maintenance cache page labels, manifest state, and access checks', f
 
     expect(MaintenanceCachePage::canAccess())->toBeFalse()
         ->and(MaintenanceCachePage::getNavigationLabel())->toBeString()->not->toBe('')
-        ->and(MaintenanceCachePage::getNavigationGroup())->toBeString()->not->toBe('')
+        ->and(MaintenanceCachePage::getNavigationGroup())->toBe(SiteHealthPage::getNavigationGroup())->not->toBe('')
         ->and($page->getTitle())->toBeString()->not->toBe('')
         ->and($page->sites())->toHaveCount(0)
         ->and($page->manifest())->toHaveKey('global_active');

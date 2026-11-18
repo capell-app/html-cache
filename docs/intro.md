@@ -1,0 +1,5 @@
+Visitors who are not signed in get a finished copy of each public page, kept on your server. A crowd arriving at once then does not make your site rebuild the same page again and again. It needs the site's scheduled tasks and background jobs running, which your developer or host sets up.
+
+Signed-in people always see the live page, so editors previewing a change never get a stale copy. Change the opening hours and only the pages that display hours are refreshed. Refreshing happens at once or in batches every five minutes. Switching a site off, publishing a page that was hidden or changing who can see a protected area clears every stored page. Creating or restoring a page, or changing a site's domain, does the same.
+
+Super Admins, and anyone you give the cache permissions to, get a Cached pages list. It shows each address, its language and when it was stored, with a clear button for each. A maintenance screen prepares holding pages for each site, ready to switch on while you work. Switch on the optional column in the pages list and it puts a tick beside each page that visitors get from a stored copy. Clicking the tick clears that page.

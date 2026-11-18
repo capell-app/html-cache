@@ -815,3 +815,24 @@ it('deduplicates a page URL already present in tracked cache URLs', function ():
 
     expect(ResolveCachedUrlsForModelAction::run($page)->all())->toBe([$pageUrl->fullUrl()]);
 });
+
+it('queues a full cache clear when a trashed page is restored', function (): void {
+    $siteDomain = SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'restored-page.test',
+        'path' => null,
+    ]);
+
+    $page = Page::factory()
+        ->recycle($siteDomain->site)
+        ->withTranslations()
+        ->create();
+
+    $page->delete();
+
+    Queue::fake();
+
+    $page->restore();
+
+    ClearAllHtmlCacheAction::assertPushed();
+});

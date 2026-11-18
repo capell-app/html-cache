@@ -2,27 +2,25 @@
 
 <!-- prettier-ignore-start -->
 
-## What It Does
+Visitors who are not signed in get a finished copy of each public page, kept on your server. A crowd arriving at once then does not make your site rebuild the same page again and again. It needs the site's scheduled tasks and background jobs running, which your developer or host sets up.
 
-Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees. It stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration.
+Signed-in people always see the live page, so editors previewing a change never get a stale copy. Change the opening hours and only the pages that display hours are refreshed. Refreshing happens at once or in batches every five minutes. Switching a site off, publishing a page that was hidden or changing who can see a protected area clears every stored page. Creating or restoring a page, or changing a site's domain, does the same.
+
+Super Admins, and anyone you give the cache permissions to, get a Cached pages list. It shows each address, its language and when it was stored, with a clear button for each. A maintenance screen prepares holding pages for each site, ready to switch on while you work. Switch on the optional column in the pages list and it puts a tick beside each page that visitors get from a stored copy. Clicking the tick clears that page.
 
 - **Price and availability:** Check current availability and price on the [Capell Marketplace listing](https://capell.app/extensions/html-cache).
 - **Licence:** Check the licence terms on the [Capell Marketplace listing](https://capell.app/extensions/html-cache).
 - **Requires:** `PHP ^8.4`, `capell-app/admin ^1.0.72`, `capell-app/core ^1.0.76`, `capell-app/discovery-foundation ^1.0`, `capell-app/frontend ^1.0.76`, `laravel/framework ^12.41.1|^13.0`, `lorisleiva/laravel-actions ^2.8`, `spatie/laravel-data ^4.5`, `spatie/laravel-package-tools ^1.14`.
 - **Install:** `composer require capell-app/html-cache`.
 
-Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.
-
-## Who It Is For
-
-**For developers:** Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behaviour explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.
-
-**For teams:** Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.
-
 ## Quick Start
 
 1. Install the package: `composer require capell-app/html-cache`.
 2. Open the package admin surface at `/admin/html-cache/maintenance-cache` and confirm HTML Cache is available.
+
+## For Developers
+
+Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behaviour explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.
 
 ## Configure
 
@@ -62,7 +60,7 @@ Administrators inspect coverage, dependency maps, and stale work, then clear, wa
 - Database changes: package migrations are declared.
 - Config: `config/capell-html-cache.php`.
 - Settings: no package settings declared.
-- Queues or schedules: scheduled commands `capell:html-cache:process-stale (package registered)`; queue jobs `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RefreshOriginStaleCachedUrlJob`, `RegisterCachedModelUrlsJob`.
+- Queues or schedules: scheduled commands `capell:html-cache:process-stale (package registered)`; queue jobs `ClearAuthorisedPageCacheJob`, `FlushHtmlCacheHitBatchJob`, `GenerateMaintenancePagesJob`, `RefreshOriginStaleCachedUrlJob`, `RegisterCachedModelUrlsJob`.
 - Cache tags: `html-cache`.
 - Commands: `capell:html-cache:clear`, `capell:html-cache:diagnose`, `capell:html-cache:edge-purge:verify`, `capell:html-cache:process-stale`, `capell:static-site`.
 
@@ -94,6 +92,6 @@ Read [CHANGELOG.md](CHANGELOG.md) before upgrading.
 - [Capell content language plan](../../docs/CONTENT_LANGUAGE_PLAN.md)
 - [Capell documentation design system](../../docs/DESIGN_SYSTEM.md)
 - [Capell and package ERD notes](../../docs/erd/capell-and-package-erds.md)
-- Related packages: [Discovery Core](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
+- Related packages: [Discovery Foundation](../discovery-foundation/README.md), [Site Discovery](../site-discovery/README.md).
 
 <!-- prettier-ignore-end -->

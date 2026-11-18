@@ -2,6 +2,12 @@
 
 <!-- prettier-ignore-start -->
 
+Visitors who are not signed in get a finished copy of each public page, kept on your server. A crowd arriving at once then does not make your site rebuild the same page again and again. It needs the site's scheduled tasks and background jobs running, which your developer or host sets up.
+
+Signed-in people always see the live page, so editors previewing a change never get a stale copy. Change the opening hours and only the pages that display hours are refreshed. Refreshing happens at once or in batches every five minutes. Switching a site off, publishing a page that was hidden or changing who can see a protected area clears every stored page. Creating or restoring a page, or changing a site's domain, does the same.
+
+Super Admins, and anyone you give the cache permissions to, get a Cached pages list. It shows each address, its language and when it was stored, with a clear button for each. A maintenance screen prepares holding pages for each site, ready to switch on while you work. Switch on the optional column in the pages list and it puts a tick beside each page that visitors get from a stored copy. Clicking the tick clears that page.
+
 ## What it does
 
 HTML Cache serves eligible public pages from generated HTML and tracks which Capell records each cached URL used. That dependency map lets content changes clear or refresh only the affected public URLs while keeping personalised, gated, signed, or authoring output out of the shared cache.
@@ -21,7 +27,7 @@ For Cloudflare, follow the production rule, purge-token, and `CF-Cache-Status` c
 - The Pages table can show whether a page is cached.
 - **Monitoring > Maintenance cache** generates and activates static maintenance pages separately from the normal page cache.
 
-Viewing cached URL details requires `capell-html-cache.view`; clearing a URL requires `capell-html-cache.clear`. Maintenance controls require `capell-html-cache.maintenance.manage` or global access. Records and site maintenance actions are limited to the operator's assigned sites; only a global operator can toggle global maintenance mode.
+Viewing cached URL details requires `capell-html-cache.view`; clearing a URL, from the cache map, the Pages list column or the prompt shown after saving, requires `capell-html-cache.clear` on that URL's site. Clearing every stored page from the admin needs global access. Where the built-in `editor` and `admin` roles already exist, a package migration gives them the view and clear permissions once, and later changes to those roles are kept. Anywhere else, grant the permissions from **Roles**. Maintenance controls require `capell-html-cache.maintenance.manage` or global access. Records and site maintenance actions are limited to the operator's assigned sites; only a global operator can toggle global maintenance mode.
 
 ## What can be cached
 

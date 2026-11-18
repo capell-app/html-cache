@@ -18,6 +18,7 @@ use Capell\HtmlCache\Actions\RefreshOriginStaleCachedUrlAction;
 use Capell\HtmlCache\Filament\Components\Tables\Columns\PageCachedIconColumn;
 use Capell\HtmlCache\Filament\Concerns\HasPageCacheNotification;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
+use Capell\HtmlCache\Jobs\ClearAuthorisedPageCacheJob;
 use Capell\HtmlCache\Jobs\RefreshOriginStaleCachedUrlJob;
 use Capell\HtmlCache\Models\CachedModelUrl;
 use Capell\HtmlCache\Models\HtmlCacheGenerationRun;
@@ -203,6 +204,9 @@ it('reports refresh notification failures without closing the retry notification
     $disk->shouldReceive('exists')->andReturnTrue();
     $disk->shouldReceive('delete')->andReturnFalse();
     app()->instance(HtmlCacheStore::class, failureReportingStore($disk));
+    $globalAdmin = User::factory()->create();
+    $globalAdmin->assignRole('super_admin');
+    test()->actingAs($globalAdmin);
     $component = new class
     {
         use HasPageCacheNotification;
@@ -233,6 +237,9 @@ it('does not report page deletion success when a URL cannot be cleared', functio
 });
 
 it('reports the page cache column clear as queued until the job executes', function (): void {
+    $globalAdmin = User::factory()->create();
+    $globalAdmin->assignRole('super_admin');
+    test()->actingAs($globalAdmin);
     $pageUrl = new PageUrl;
     $column = PageCachedIconColumn::make('cached');
     $column->record($pageUrl);
@@ -240,7 +247,7 @@ it('reports the page cache column clear as queued until the job executes', funct
     throw_unless($action instanceof Closure, RuntimeException::class, 'Expected a page cache clear callback.');
     $action($pageUrl);
 
-    DeletePageCacheAction::assertPushed();
+    Queue::assertPushed(ClearAuthorisedPageCacheJob::class);
     Notification::assertNotified(Notification::make()->title(__('capell-html-cache::admin.clear_queued'))->info());
 });
 

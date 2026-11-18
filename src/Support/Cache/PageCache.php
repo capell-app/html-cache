@@ -129,9 +129,11 @@ final class PageCache
 
         $publication = resolve(HtmlCachePublicationGuard::class);
         $token = $publication->token($laravelRequest);
+        $servesMinifiedContent = false;
 
         if ($response->getStatusCode() !== SymfonyResponse::HTTP_NOT_FOUND && $extension === 'html' && ! $fragmentCache instanceof RenderHookFragmentCacheData && config('capell-html-cache.minify_html', true) === true) {
             $content = resolve(HtmlMinifier::class)->minify($content);
+            $servesMinifiedContent = true;
         }
 
         $write = function (PublicArtefactPermit $permit) use ($laravelRequest, $response, $path, $filename, $extension, $content, $fragmentCache): bool {
@@ -222,6 +224,12 @@ final class PageCache
 
         if (! $published) {
             $laravelRequest->attributes->set(HtmlCachePublicationGuard::REJECTED_ATTRIBUTE, true);
+        }
+
+        if ($published && $servesMinifiedContent) {
+            // Serve the bytes that were stored, so the first (MISS) response is
+            // identical to every later hit and an edge cache keeps the small copy.
+            $response->setContent($content);
         }
 
         return $published;
@@ -387,11 +395,15 @@ final class PageCache
     {
         $directory = $this->getCachePath($path === null ? null : resolve(HtmlCachePathResolver::class)->directoryForPath($path));
 
-        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($directory): bool {
+        return resolve(HtmlCachePublicationGuard::class)->invalidate(function () use ($directory, $path): bool {
             $this->assertContainedPath($directory);
 
             if (! HtmlCacheFilesystem::directoryExists($directory)) {
                 return false;
+            }
+
+            if ($path === null) {
+                return $this->clearRootKeepingStaticArtefacts($directory);
             }
 
             if (! $this->files->deleteDirectory($directory, preserve: true)
@@ -402,6 +414,35 @@ final class PageCache
 
             return true;
         });
+    }
+
+    /**
+     * Empty the cache root except the Frontend-owned static error and
+     * maintenance trees; see HtmlCacheStore::STATIC_ARTEFACT_DIRECTORIES.
+     */
+    private function clearRootKeepingStaticArtefacts(string $root): bool
+    {
+        foreach ($this->files->directories($root) as $child) {
+            if (HtmlCacheStore::isStaticArtefactDirectory(basename($child))) {
+                continue;
+            }
+
+            $this->assertContainedPath($child);
+
+            if (! $this->files->deleteDirectory($child)) {
+                throw new RuntimeException(sprintf('Unable to delete HTML cache directory "%s".', $child));
+            }
+        }
+
+        foreach ($this->files->files($root, hidden: true) as $file) {
+            $this->assertContainedPath($file->getPathname());
+
+            if (! $this->files->delete($file->getPathname())) {
+                throw new RuntimeException(sprintf('Unable to delete HTML cache file "%s".', $file->getPathname()));
+            }
+        }
+
+        return true;
     }
 
     /** @return array<string, mixed> */

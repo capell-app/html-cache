@@ -6,7 +6,7 @@
     "kind": "package",
     "capellApiVersion": "^1.0",
     "version": "1.0.0",
-    "description": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees.",
+    "description": "Serve anonymous visitors a stored copy of each public page, refresh only what changed, and see what is cached from the Capell admin.",
     "product": {
         "group": "Capell Essentials",
         "tier": "free",
@@ -165,10 +165,10 @@
             ]
         },
         "publicOutput": {
+            "cacheSafe": true,
             "forbidAuthoringSurface": true,
             "forbidSecrets": true,
-            "forbidPublicBladeQueries": true,
-            "cacheSafe": true
+            "forbidPublicBladeQueries": true
         },
         "externalHttpClients": {
             "requiresTimeouts": true,
@@ -243,33 +243,38 @@
         "privateDocsRequested": false
     },
     "marketplace": {
-        "summary": "Serve Capell pages as static HTML for sub-millisecond responses, with automatic, dependency-aware invalidation that keeps cached pages fresh and never leaks gated or authoring content to anonymous visitors.",
-        "problem": "Repeated public page requests can leave a site rendering the same output again and again.",
-        "outcome": "A site has cached public HTML with dependencies tracked for invalidation.",
+        "summary": "Public pages served from stored copies, refreshed only where content changed, with a cached pages list and maintenance pages.",
+        "description": "Keep the public side of your site quick when visitors arrive in bursts. Anonymous visits are answered from stored page files, most saves refresh only the addresses they touch, and signed-in editors always see the live site. Your admin panel gains a cached pages list, an uncached pages report, dashboard cards and ready-made holding pages for planned maintenance.",
+        "problem": "Busy periods slow the site because every visit rebuilds the page.",
+        "outcome": "Visitors get stored pages and editors still see live ones.",
         "faq": [
             {
-                "question": "What happens when cached content changes?",
-                "answer": "The cache indexes model dependencies and supports immediate or scheduled stale regeneration."
+                "question": "Will editors see an old copy of a page they just changed?",
+                "answer": "No. Signed-in people always see the live page, so editors previewing a change never get a stale copy. Only visitors who are not signed in get the stored copy."
             },
             {
-                "question": "Can administrators inspect cached pages?",
-                "answer": "Yes. They can inspect coverage, dependency maps and stale work, then clear, warm or regenerate pages."
+                "question": "When I change something, how much of the cache is cleared?",
+                "answer": "Usually only the pages that show it, so changing opening hours refreshes the pages showing hours, at once or in batches every five minutes. Adding a page, changing a site's web address, switching a site off, publishing a hidden page or changing who can see a protected area clears every stored page."
             },
             {
-                "question": "Do cached responses contain authoring controls?",
-                "answer": "Anonymous visitors receive cached public HTML without authoring markers or session cookies."
+                "question": "What does my server need for HTML Cache to work?",
+                "answer": "The site's scheduled tasks and background jobs need to be running, which your developer or host sets up."
+            },
+            {
+                "question": "Can I clear a single page from the admin?",
+                "answer": "Yes. Super Admins, and anyone you give the cache permissions to, get a Cached pages list with a clear button for each address. The optional column in the pages list also puts a tick beside cached pages, and clicking it clears that page."
             }
         ],
         "screenshots": [
             {
                 "path": "docs/screenshots/html-cache-maintenance-cache-page.png",
-                "alt": "HTML Cache maintenance cache page",
-                "caption": "Authentic authenticated HTML Cache maintenance page rendered from the installed admin route."
+                "alt": "Maintenance cache page with an Off status, one site marked Not generated yet and Prepare and Prepare pages buttons",
+                "caption": "Prepare holding pages for each site so they are ready to switch on while you work."
             },
             {
                 "path": "docs/assets/marketplace/extension-card.jpg",
-                "alt": "HTML Cache extension preview image",
-                "caption": "HTML Cache extension preview"
+                "alt": "Marketplace card titled HTML Cache with maintenance and cached address screens beside a render, cache and purge diagram",
+                "caption": "The card that represents HTML Cache on its Marketplace listing."
             }
         ],
         "categories": ["admin", "foundation", "frontend"]

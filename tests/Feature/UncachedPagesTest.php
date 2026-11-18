@@ -230,7 +230,7 @@ it('renders a seeded uncached page with its blocking reason and excludes a cache
         expect($xpath->evaluate('normalize-space(td[' . $column . '])', $row))->toBe('');
     }
 
-    expect($disk->allFiles())->toBe([$path])
+    expect(htmlCachePageEntries($disk))->toBe([$path])
         ->and($disk->get($path))->toBe('<main>Cached</main>')
         ->and(StaleCachedUrl::query()->count())->toBe(0);
 });

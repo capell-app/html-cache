@@ -80,6 +80,7 @@ return [
     'open_url_aria_label' => 'Open cached URL :url in a new tab',
     'clear_url' => 'Clear URL',
     'clear_failed' => 'Unable to clear the cached pages. Please try again.',
+    'clear_not_allowed' => 'You do not have permission to clear the stored copy of this page. Ask an administrator for the HTML cache clear permission on this site.',
     'clear_queued' => 'Cache clear queued. Cached pages may still be served until it finishes.',
     'clear_url_aria_label' => 'Clear cached URL :url',
     'clear_url_confirmation_heading' => 'Clear cached URL?',

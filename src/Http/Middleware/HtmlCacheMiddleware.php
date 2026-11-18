@@ -141,6 +141,17 @@ final class HtmlCacheMiddleware
             return $this->applyCacheHeaders($request, $response);
         }
 
+        if ($this->requestsMarkdownRepresentation($request)) {
+            // Markdown negotiation serves a different representation from the same address. The store only holds
+            // the HTML one, so this client reaches the application, and its response must not retire the HTML entry
+            // that other clients are still served from.
+            $response = $next($request);
+
+            return $this->shouldBypassHttpCache($request, $response)
+                ? $this->privateNoStore($response, $request)
+                : $this->applyCacheHeaders($request, $response);
+        }
+
         $forceCacheReadBypass = $this->shouldForceCacheReadBypass($request);
 
         if (! $forceCacheReadBypass && $this->shouldBypassCacheRead($request)) {
@@ -445,6 +456,12 @@ final class HtmlCacheMiddleware
         }
 
         return ! resolve(PublicResponseCachePolicy::class)->isCacheable($response);
+    }
+
+    private function requestsMarkdownRepresentation(Request $request): bool
+    {
+        return ($request->isMethod('GET') || $request->isMethod('HEAD'))
+            && in_array('text/markdown', $request->getAcceptableContentTypes(), true);
     }
 
     private function shouldBypassCacheRead(Request $request): bool

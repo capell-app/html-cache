@@ -1,22 +1,4 @@
 {
-    "whatThisPluginAdds": {
-        "text": "Full-page static HTML cache for Capell with dependency-indexed invalidation, scheduled stale-regeneration, and public-output safety guarantees. It stores full public HTML responses, indexes their model dependencies, and supports immediate or scheduled stale regeneration.",
-        "evidence": [
-            "capell.json",
-            "src/Http/Middleware/HtmlCacheMiddleware.php",
-            "src/Models/CachedModelUrl.php",
-            "src/Models/StaleCachedUrl.php"
-        ]
-    },
-    "surfaceOutcome": {
-        "text": "Administrators inspect coverage, dependency maps, and stale work, then clear, warm, or regenerate cached pages. Anonymous visitors receive cached public HTML without authoring markers or session cookies.",
-        "evidence": [
-            "docs/overview.admin.md",
-            "docs/screenshots.json",
-            "src/Filament/Pages/MaintenanceCachePage.php",
-            "tests/Feature/HtmlCacheMiddlewareTest.php"
-        ]
-    },
     "whyItMatters": {
         "developers": {
             "text": "Middleware eligibility rules and dependency-indexed Actions keep cache writes, invalidation, stale claims, and atomic refresh behaviour explicit and testable. Private SiteSpec repair synchronously withdraws the entire HTML cache under its publication guard and awaits the configured edge purge; failures propagate so Core can retry before recording completion.",
@@ -27,17 +9,6 @@
                 "src/Actions/ClearAllHtmlCacheAction.php",
                 "src/Providers/HtmlCacheServiceProvider.php",
                 "tests/Feature/StaleCachedUrlsTest.php"
-            ]
-        },
-        "teams": {
-            "text": "Teams can see whether important URLs are cached, recover from stale output, and diagnose unsupported node-local multi-node deployments without weakening the rule that admin and authoring details stay out of public files.",
-            "evidence": [
-                "docs/admin-guide.md",
-                "docs/cache-invalidation.md",
-                "src/Health/HtmlCacheHealthCheck.php",
-                "src/Actions/BuildHtmlCacheEligibilityReportAction.php",
-                "src/Actions/BuildHtmlCachePublicOutputSafetyDiagnosticsAction.php",
-                "tests/Feature/ExtensionCacheSafetyTest.php"
             ]
         }
     }

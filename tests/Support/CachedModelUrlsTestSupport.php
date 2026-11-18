@@ -16,10 +16,28 @@ use Capell\HtmlCache\Enums\HtmlCacheEligibilityReason;
 use Capell\HtmlCache\Http\Middleware\HtmlCacheMiddleware;
 use Capell\HtmlCache\Livewire\SiteHealthCacheMap;
 use Capell\HtmlCache\Models\StaleCachedUrl;
+use Capell\HtmlCache\Support\Cache\HtmlCacheStore;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Symfony\Component\HttpFoundation\Response;
+
+/**
+ * The cached page entries on the page cache disk. The Frontend static error and maintenance
+ * trees are not page entries: a full clear deliberately keeps them, so they are left out here
+ * and every other file still counts.
+ *
+ * @return list<string>
+ */
+function htmlCachePageEntries(?Filesystem $disk = null): array
+{
+    return array_values(array_filter(
+        ($disk ?? Storage::disk('page_cache'))->allFiles(),
+        static fn (string $file): bool => ! HtmlCacheStore::isStaticArtefactDirectory(explode('/', $file, 2)[0]),
+    ));
+}
 
 function htmlCacheMapTestComponent(int $siteId, string $modelType): mixed
 {

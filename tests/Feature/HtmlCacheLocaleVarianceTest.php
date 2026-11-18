@@ -122,7 +122,7 @@ it('does not cache or cross-serve two locales negotiated on the same host and pa
     expect($englishResponse->getContent())->toBe('english about page')
         ->and($englishResponse->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $englishResponse->headers->get('Cache-Control'))->toContain('no-store')
-        ->and(Storage::disk('page_cache')->allFiles())->toBe([]);
+        ->and(htmlCachePageEntries())->toBe([]);
 
     $frenchRequest = Request::create('https://example.test/about?lang=fr', Symfony\Component\HttpFoundation\Request::METHOD_GET);
     app()->instance('request', $frenchRequest);
@@ -323,7 +323,7 @@ it('ignores accept language entirely for the cache key and the cached bytes', fu
         expect((string) $hitResponse->headers->get('Vary'))->not->toContain('Accept-Language');
     }
 
-    expect(Storage::disk('page_cache')->allFiles())->toBe([resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')]);
+    expect(htmlCachePageEntries())->toBe([resolve(HtmlCachePathResolver::class)->pathForRequestUrl('https://fr.example.test/about')]);
 })->skip(fn (): bool => ! localeVarianceTranslationsAvailable(), 'Frontend locale scope is not present in the resolved capell-app/frontend.');
 
 it('separates configured vary headers and invalidates every language variant', function (): void {

@@ -5,9 +5,9 @@
         "default": {
             "source": {
                 "ref": "HEAD",
-                "commit": "389f1fbac7b4fe1dcee2f98fc0573224ad6b08b0",
+                "commit": "c927ba95a88f5ed5eb15c4b5e8cdb466bf139d0a",
                 "providers": {
-                    "Providers/HtmlCacheServiceProvider.php": "2c0cae7abbe5178c5777a291f5b4bb0fbb9e36612e01c8e9ace8a2cab8258008",
+                    "Providers/HtmlCacheServiceProvider.php": "2c30b82fcedd4f4184765c2bae70f071e9f5d5287f41a60a1111e665e9288e87",
                     "Providers/MigrationMetadataServiceProvider.php": "55ac9b860b1e1c55f7618ef451ee6c41a1b0acaad9b149c87992152e733f16ce"
                 },
                 "configure": null
@@ -260,6 +260,17 @@
                             {
                                 "abstract": "Capell\\HtmlCache\\Support\\Extensions\\ExtensionCacheSafetyResolver",
                                 "concrete": "Capell\\HtmlCache\\Support\\Extensions\\ExtensionCacheSafetyResolver"
+                            }
+                        ],
+                        "shared": true
+                    },
+                    "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo": {
+                        "concrete": [
+                            "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
+                            "Illuminate\\Container\\Container( $container,  $parameters): bound=Illuminate\\Foundation\\Application",
+                            {
+                                "abstract": "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo",
+                                "concrete": "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo"
                             }
                         ],
                         "shared": true
@@ -724,6 +735,13 @@
                             []
                         ]
                     ],
+                    "eloquent.restored: Capell\\Core\\Models\\Page": [
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Illuminate\\Database\\Eloquent\\Model $model):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=cc5f57fc0cc5e603d1b3a29d192ff283",
+                            []
+                        ]
+                    ],
                     "eloquent.saved: Capell\\Core\\Models\\SiteDomain": [
                         [
                             "<package>/src/Providers/HtmlCacheServiceProvider.php",
@@ -824,6 +842,23 @@
                             "entry": [
                                 "<package>/src/Providers/HtmlCacheServiceProvider.php",
                                 "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Capell\\Core\\Models\\SiteDomain $siteDomain):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=8ce187e365fd5a934fbda0b6fe0b574b",
+                                []
+                            ]
+                        }
+                    ],
+                    "eloquent.restored: Capell\\Core\\Models\\Page": [
+                        {
+                            "after": null,
+                            "before": [
+                                "<vendor>/spatie/laravel-activitylog/src/Traits/LogsActivity.php",
+                                "Capell\\Core\\Models\\Page(Illuminate\\Database\\Eloquent\\Model $model):",
+                                {
+                                    "eventName": "restored"
+                                }
+                            ],
+                            "entry": [
+                                "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                                "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Illuminate\\Database\\Eloquent\\Model $model):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=cc5f57fc0cc5e603d1b3a29d192ff283",
                                 []
                             ]
                         }
@@ -2001,9 +2036,9 @@
         "cache-enabled": {
             "source": {
                 "ref": "HEAD",
-                "commit": "389f1fbac7b4fe1dcee2f98fc0573224ad6b08b0",
+                "commit": "c927ba95a88f5ed5eb15c4b5e8cdb466bf139d0a",
                 "providers": {
-                    "Providers/HtmlCacheServiceProvider.php": "2c0cae7abbe5178c5777a291f5b4bb0fbb9e36612e01c8e9ace8a2cab8258008",
+                    "Providers/HtmlCacheServiceProvider.php": "2c30b82fcedd4f4184765c2bae70f071e9f5d5287f41a60a1111e665e9288e87",
                     "Providers/MigrationMetadataServiceProvider.php": "55ac9b860b1e1c55f7618ef451ee6c41a1b0acaad9b149c87992152e733f16ce"
                 },
                 "configure": "packages/html-cache/tests/Integration/Providers/Fixtures/cache-enabled.php"
@@ -2255,6 +2290,17 @@
                             {
                                 "abstract": "Capell\\HtmlCache\\Support\\Extensions\\ExtensionCacheSafetyResolver",
                                 "concrete": "Capell\\HtmlCache\\Support\\Extensions\\ExtensionCacheSafetyResolver"
+                            }
+                        ],
+                        "shared": true
+                    },
+                    "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo": {
+                        "concrete": [
+                            "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
+                            "Illuminate\\Container\\Container( $container,  $parameters): bound=Illuminate\\Foundation\\Application",
+                            {
+                                "abstract": "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo",
+                                "concrete": "Capell\\HtmlCache\\Support\\HtmlCacheAuthorizationMemo"
                             }
                         ],
                         "shared": true
@@ -2715,6 +2761,13 @@
                             []
                         ]
                     ],
+                    "eloquent.restored: Capell\\Core\\Models\\Page": [
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Illuminate\\Database\\Eloquent\\Model $model):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=cc5f57fc0cc5e603d1b3a29d192ff283",
+                            []
+                        ]
+                    ],
                     "eloquent.saved: Capell\\Core\\Models\\SiteDomain": [
                         [
                             "<package>/src/Providers/HtmlCacheServiceProvider.php",
@@ -2815,6 +2868,23 @@
                             "entry": [
                                 "<package>/src/Providers/HtmlCacheServiceProvider.php",
                                 "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Capell\\Core\\Models\\SiteDomain $siteDomain):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=8ce187e365fd5a934fbda0b6fe0b574b",
+                                []
+                            ]
+                        }
+                    ],
+                    "eloquent.restored: Capell\\Core\\Models\\Page": [
+                        {
+                            "after": null,
+                            "before": [
+                                "<vendor>/spatie/laravel-activitylog/src/Traits/LogsActivity.php",
+                                "Capell\\Core\\Models\\Page(Illuminate\\Database\\Eloquent\\Model $model):",
+                                {
+                                    "eventName": "restored"
+                                }
+                            ],
+                            "entry": [
+                                "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                                "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider(Illuminate\\Database\\Eloquent\\Model $model):mixed bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=cc5f57fc0cc5e603d1b3a29d192ff283",
                                 []
                             ]
                         }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Support\TableName;
 use Capell\HtmlCache\Actions\ExpireOverdueStaleCachedUrlsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\PurgeEdgeCacheAction;
@@ -20,6 +21,7 @@ use Illuminate\Http\Request;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
 use Symfony\Component\HttpFoundation\Response;
@@ -394,3 +396,11 @@ function budgetFiberResponse(Fiber $fiber): Response
 
     return $response;
 }
+
+it('invalidates nothing without throwing when html-cache has not been migrated', function (): void {
+    Schema::dropIfExists(TableName::resolve('stale_cached_urls'));
+
+    (new HtmlFrontendOutputCacheInvalidator)->invalidateAll();
+
+    expect(Schema::hasTable(TableName::resolve('stale_cached_urls')))->toBeFalse();
+});

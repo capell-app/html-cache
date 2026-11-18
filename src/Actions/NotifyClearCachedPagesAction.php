@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Models\CachedModelUrl;
+use Capell\HtmlCache\Support\HtmlCacheAuthorization;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -51,8 +52,13 @@ final class NotifyClearCachedPagesAction
             return;
         }
 
+        // The prompt only offers a clear, so it is shown only to people allowed to run it.
+        if (! HtmlCacheAuthorization::canClearUrls(auth()->user(), $cachedUrls->all())) {
+            return;
+        }
+
         Notification::make('clear-page-cache')
-            ->title(__('capell-admin::notification.detected_cached_pages', ['count' => $cachedUrls->count()]))
+            ->title(trans_choice('capell-admin::notification.detected_cached_pages', $cachedUrls->count(), ['count' => $cachedUrls->count()]))
             ->body(fn (): HtmlString => new HtmlString(
                 $cachedUrls
                     ->slice(0, 3)

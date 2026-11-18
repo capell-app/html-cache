@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Filament\Resources\CachedModelUrls;
 
 use BackedEnum;
+use Capell\Admin\Enums\NavigationGroupEnum;
 use Capell\Admin\Filament\Pages\SiteHealthPage;
 use Capell\Admin\Support\SiteScope;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
@@ -87,9 +88,10 @@ final class CachedModelUrlResource extends Resource
     }
 
     #[Override]
-    public static function getNavigationGroup(): string
+    public static function getNavigationGroup(): NavigationGroupEnum
     {
-        return (string) __('capell-admin::navigation.group_monitoring');
+        // Site Health children must share its group to nest beneath it.
+        return SiteHealthPage::getNavigationGroup();
     }
 
     #[Override]

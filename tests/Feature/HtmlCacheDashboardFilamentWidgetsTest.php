@@ -112,8 +112,8 @@ it('renders HTML Cache dashboard widgets', function (string $widgetClass): void 
 it('builds HTML Cache overview and URL rows from scoped cache data', function (): void {
     $language = Language::factory()->create();
     $secondLanguage = Language::factory()->create();
-    $site = Site::factory()->language($language)->withTranslations($language)->create();
-    $hiddenSite = Site::factory()->language($language)->withTranslations($language)->create();
+    $site = Site::factory()->language($language)->create();
+    $hiddenSite = Site::factory()->language($language)->create();
     $cachedPage = Page::factory()->site($site)->withTranslations($language)->create();
     $secondLanguageCachedPage = Page::factory()->site($site)->withTranslations($secondLanguage)->create();
     $uncachedPage = Page::factory()->site($site)->withTranslations($language)->create();
@@ -203,8 +203,8 @@ it('builds HTML Cache overview and URL rows from scoped cache data', function ()
 });
 
 it('builds stale queue rows with translated states from scoped rows', function (): void {
-    $site = Site::factory()->withTranslations()->create();
-    $hiddenSite = Site::factory()->withTranslations()->create();
+    $site = Site::factory()->create();
+    $hiddenSite = Site::factory()->create();
 
     test()->actingAs(createHtmlCacheDashboardFilamentWidgetUser(collect([$site->getKey()])));
 

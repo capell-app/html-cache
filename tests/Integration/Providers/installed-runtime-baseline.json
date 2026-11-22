@@ -5,9 +5,9 @@
         "default": {
             "source": {
                 "ref": "HEAD",
-                "commit": "c927ba95a88f5ed5eb15c4b5e8cdb466bf139d0a",
+                "commit": "6191a1c9756a59a9efc540eed44d79e12df37c3d",
                 "providers": {
-                    "Providers/HtmlCacheServiceProvider.php": "2c30b82fcedd4f4184765c2bae70f071e9f5d5287f41a60a1111e665e9288e87",
+                    "Providers/HtmlCacheServiceProvider.php": "2ee24ce03b632aec5b056aa524805c71e0ef5085ba4afc3e465ff5a843878d2a",
                     "Providers/MigrationMetadataServiceProvider.php": "55ac9b860b1e1c55f7618ef451ee6c41a1b0acaad9b149c87992152e733f16ce"
                 },
                 "configure": null
@@ -15,8 +15,7 @@
             "disabledContributions": [
                 "Capell\\HtmlCache\\Models\\CachedModelUrl",
                 "Capell\\HtmlCache\\Models\\HtmlCacheGenerationRun",
-                "Capell\\HtmlCache\\Models\\StaleCachedUrl",
-                "capell:html-cache:process-stale"
+                "Capell\\HtmlCache\\Models\\StaleCachedUrl"
             ],
             "surfaces": {
                 "admin": [
@@ -302,17 +301,6 @@
                         ],
                         "shared": true
                     },
-                    "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource": {
-                        "concrete": [
-                            "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
-                            "Illuminate\\Container\\Container( $container,  $parameters): bound=Illuminate\\Foundation\\Application",
-                            {
-                                "abstract": "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource",
-                                "concrete": "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
-                            }
-                        ],
-                        "shared": true
-                    },
                     "Capell\\HtmlCache\\Support\\StaticSite\\StaticSiteExtensionRegistry": {
                         "concrete": [
                             "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
@@ -382,6 +370,7 @@
                         "http_cache.browser_max_age": 60,
                         "http_cache.shared_max_age": null,
                         "http_cache.stale_while_revalidate": 86400,
+                        "http_cache.unpurged_stale_while_revalidate": 60,
                         "internal_bypass.allow_query_in_production": false,
                         "internal_bypass.header": null,
                         "internal_bypass.query_parameter": "without_html_cache",
@@ -463,6 +452,7 @@
                         "request_coalescing.uncacheable_seconds": 5,
                         "request_coalescing.wait_seconds": 3,
                         "retention.generation_run_days": 30,
+                        "retention.lock_file_days": 7,
                         "retention.processed_stale_days": 7,
                         "site_health_cached_url_limit": 20,
                         "site_health_public_html_scan_limit": 100,
@@ -535,6 +525,7 @@
                     "capell-html-cache.http_cache.browser_max_age",
                     "capell-html-cache.http_cache.shared_max_age",
                     "capell-html-cache.http_cache.stale_while_revalidate",
+                    "capell-html-cache.http_cache.unpurged_stale_while_revalidate",
                     "capell-html-cache.internal_bypass",
                     "capell-html-cache.internal_bypass.allow_query_in_production",
                     "capell-html-cache.internal_bypass.header",
@@ -626,6 +617,7 @@
                     "capell-html-cache.request_coalescing.wait_seconds",
                     "capell-html-cache.retention",
                     "capell-html-cache.retention.generation_run_days",
+                    "capell-html-cache.retention.lock_file_days",
                     "capell-html-cache.retention.processed_stale_days",
                     "capell-html-cache.site_health_cached_url_limit",
                     "capell-html-cache.site_health_public_html_scan_limit",
@@ -686,6 +678,13 @@
                         [
                             "Capell\\HtmlCache\\Listeners\\RemediatePrivateSiteSpecHtmlCache",
                             "handle"
+                        ]
+                    ],
+                    "Illuminate\\Auth\\Events\\Authenticated": [
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():void bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=038a8d7603d5d44554e693cb500cbede",
+                            []
                         ]
                     ],
                     "Illuminate\\Http\\Client\\Events\\ResponseReceived": [
@@ -1187,6 +1186,13 @@
                 },
                 "schedule": [
                     [
+                        "'<php>' 'artisan' capell:html-cache:process-stale",
+                        "*/5 * * * *",
+                        null,
+                        true,
+                        null
+                    ],
+                    [
                         null,
                         "*/5 * * * *",
                         "capell-html-cache:expire-overdue-stale",
@@ -1205,6 +1211,17 @@
                         [
                             "<package>/src/Providers/HtmlCacheServiceProvider.php",
                             "static Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():int source=df8ea3930691f7079d79d178841105ac",
+                            []
+                        ]
+                    ],
+                    [
+                        null,
+                        "0 0 * * *",
+                        "capell-html-cache:prune-lock-files",
+                        true,
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "static Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():int source=bc56ad8f5e98b6109eba4208c6d9511e",
                             []
                         ]
                     ],
@@ -1232,9 +1249,6 @@
                     ],
                     "capell-admin:site-header-actions": [
                         "Capell\\HtmlCache\\Filament\\Extenders\\Site\\MaintenanceSiteHeaderActionExtender"
-                    ],
-                    "capell-site-discovery:generated-output-coverage-sources": [
-                        "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
                     ],
                     "capell.admin.cache_cleaner": [
                         "Capell\\HtmlCache\\Support\\Admin\\HtmlCacheAdminCacheCleaner"
@@ -1265,9 +1279,6 @@
                     ],
                     "capell-admin:site-header-actions": [
                         "Capell\\HtmlCache\\Filament\\Extenders\\Site\\MaintenanceSiteHeaderActionExtender"
-                    ],
-                    "capell-site-discovery:generated-output-coverage-sources": [
-                        "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
                     ],
                     "capell.admin.cache_cleaner": [
                         "Capell\\HtmlCache\\Support\\Admin\\HtmlCacheAdminCacheCleaner"
@@ -1496,6 +1507,7 @@
                         "http_cache.browser_max_age": 60,
                         "http_cache.shared_max_age": null,
                         "http_cache.stale_while_revalidate": 86400,
+                        "http_cache.unpurged_stale_while_revalidate": 60,
                         "internal_bypass.allow_query_in_production": false,
                         "internal_bypass.header": null,
                         "internal_bypass.query_parameter": "without_html_cache",
@@ -1577,6 +1589,7 @@
                         "request_coalescing.uncacheable_seconds": 5,
                         "request_coalescing.wait_seconds": 3,
                         "retention.generation_run_days": 30,
+                        "retention.lock_file_days": 7,
                         "retention.processed_stale_days": 7,
                         "site_health_cached_url_limit": 20,
                         "site_health_public_html_scan_limit": 100,
@@ -1649,6 +1662,7 @@
                     "capell-html-cache.http_cache.browser_max_age",
                     "capell-html-cache.http_cache.shared_max_age",
                     "capell-html-cache.http_cache.stale_while_revalidate",
+                    "capell-html-cache.http_cache.unpurged_stale_while_revalidate",
                     "capell-html-cache.internal_bypass",
                     "capell-html-cache.internal_bypass.allow_query_in_production",
                     "capell-html-cache.internal_bypass.header",
@@ -1740,6 +1754,7 @@
                     "capell-html-cache.request_coalescing.wait_seconds",
                     "capell-html-cache.retention",
                     "capell-html-cache.retention.generation_run_days",
+                    "capell-html-cache.retention.lock_file_days",
                     "capell-html-cache.retention.processed_stale_days",
                     "capell-html-cache.site_health_cached_url_limit",
                     "capell-html-cache.site_health_public_html_scan_limit",
@@ -2036,9 +2051,9 @@
         "cache-enabled": {
             "source": {
                 "ref": "HEAD",
-                "commit": "c927ba95a88f5ed5eb15c4b5e8cdb466bf139d0a",
+                "commit": "6191a1c9756a59a9efc540eed44d79e12df37c3d",
                 "providers": {
-                    "Providers/HtmlCacheServiceProvider.php": "2c30b82fcedd4f4184765c2bae70f071e9f5d5287f41a60a1111e665e9288e87",
+                    "Providers/HtmlCacheServiceProvider.php": "2ee24ce03b632aec5b056aa524805c71e0ef5085ba4afc3e465ff5a843878d2a",
                     "Providers/MigrationMetadataServiceProvider.php": "55ac9b860b1e1c55f7618ef451ee6c41a1b0acaad9b149c87992152e733f16ce"
                 },
                 "configure": "packages/html-cache/tests/Integration/Providers/Fixtures/cache-enabled.php"
@@ -2332,17 +2347,6 @@
                         ],
                         "shared": true
                     },
-                    "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource": {
-                        "concrete": [
-                            "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
-                            "Illuminate\\Container\\Container( $container,  $parameters): bound=Illuminate\\Foundation\\Application",
-                            {
-                                "abstract": "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource",
-                                "concrete": "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
-                            }
-                        ],
-                        "shared": true
-                    },
                     "Capell\\HtmlCache\\Support\\StaticSite\\StaticSiteExtensionRegistry": {
                         "concrete": [
                             "<vendor>/laravel/framework/src/Illuminate/Container/Container.php",
@@ -2412,6 +2416,7 @@
                         "http_cache.browser_max_age": 60,
                         "http_cache.shared_max_age": null,
                         "http_cache.stale_while_revalidate": 86400,
+                        "http_cache.unpurged_stale_while_revalidate": 60,
                         "internal_bypass.allow_query_in_production": false,
                         "internal_bypass.header": null,
                         "internal_bypass.query_parameter": "without_html_cache",
@@ -2493,6 +2498,7 @@
                         "request_coalescing.uncacheable_seconds": 5,
                         "request_coalescing.wait_seconds": 3,
                         "retention.generation_run_days": 30,
+                        "retention.lock_file_days": 7,
                         "retention.processed_stale_days": 7,
                         "site_health_cached_url_limit": 20,
                         "site_health_public_html_scan_limit": 100,
@@ -2563,6 +2569,7 @@
                     "capell-html-cache.http_cache.browser_max_age",
                     "capell-html-cache.http_cache.shared_max_age",
                     "capell-html-cache.http_cache.stale_while_revalidate",
+                    "capell-html-cache.http_cache.unpurged_stale_while_revalidate",
                     "capell-html-cache.internal_bypass",
                     "capell-html-cache.internal_bypass.allow_query_in_production",
                     "capell-html-cache.internal_bypass.header",
@@ -2652,6 +2659,7 @@
                     "capell-html-cache.request_coalescing.wait_seconds",
                     "capell-html-cache.retention",
                     "capell-html-cache.retention.generation_run_days",
+                    "capell-html-cache.retention.lock_file_days",
                     "capell-html-cache.retention.processed_stale_days",
                     "capell-html-cache.site_health_cached_url_limit",
                     "capell-html-cache.site_health_public_html_scan_limit",
@@ -2712,6 +2720,13 @@
                         [
                             "Capell\\HtmlCache\\Listeners\\RemediatePrivateSiteSpecHtmlCache",
                             "handle"
+                        ]
+                    ],
+                    "Illuminate\\Auth\\Events\\Authenticated": [
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():void bound=Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider source=038a8d7603d5d44554e693cb500cbede",
+                            []
                         ]
                     ],
                     "Illuminate\\Http\\Client\\Events\\ResponseReceived": [
@@ -3213,6 +3228,13 @@
                 },
                 "schedule": [
                     [
+                        "'<php>' 'artisan' capell:html-cache:process-stale",
+                        "*/5 * * * *",
+                        null,
+                        true,
+                        null
+                    ],
+                    [
                         null,
                         "*/5 * * * *",
                         "capell-html-cache:expire-overdue-stale",
@@ -3236,6 +3258,17 @@
                     ],
                     [
                         null,
+                        "0 0 * * *",
+                        "capell-html-cache:prune-lock-files",
+                        true,
+                        [
+                            "<package>/src/Providers/HtmlCacheServiceProvider.php",
+                            "static Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():int source=bc56ad8f5e98b6109eba4208c6d9511e",
+                            []
+                        ]
+                    ],
+                    [
+                        null,
                         "* * * * *",
                         "capell-html-cache:withdraw-opened-access-areas",
                         true,
@@ -3244,13 +3277,6 @@
                             "static Capell\\HtmlCache\\Providers\\HtmlCacheServiceProvider():int source=35d57da8b61fec9d454780912a4e03ca",
                             []
                         ]
-                    ],
-                    [
-                        "'<php>' 'artisan' capell:html-cache:process-stale",
-                        "*/5 * * * *",
-                        null,
-                        true,
-                        null
                     ]
                 ],
                 "tagged-consumers": {
@@ -3265,9 +3291,6 @@
                     ],
                     "capell-admin:site-header-actions": [
                         "Capell\\HtmlCache\\Filament\\Extenders\\Site\\MaintenanceSiteHeaderActionExtender"
-                    ],
-                    "capell-site-discovery:generated-output-coverage-sources": [
-                        "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
                     ],
                     "capell.admin.cache_cleaner": [
                         "Capell\\HtmlCache\\Support\\Admin\\HtmlCacheAdminCacheCleaner"
@@ -3298,9 +3321,6 @@
                     ],
                     "capell-admin:site-header-actions": [
                         "Capell\\HtmlCache\\Filament\\Extenders\\Site\\MaintenanceSiteHeaderActionExtender"
-                    ],
-                    "capell-site-discovery:generated-output-coverage-sources": [
-                        "Capell\\HtmlCache\\Support\\SiteDiscovery\\HtmlCacheGeneratedOutputCoverageSource"
                     ],
                     "capell.admin.cache_cleaner": [
                         "Capell\\HtmlCache\\Support\\Admin\\HtmlCacheAdminCacheCleaner"
@@ -3529,6 +3549,7 @@
                         "http_cache.browser_max_age": 60,
                         "http_cache.shared_max_age": null,
                         "http_cache.stale_while_revalidate": 86400,
+                        "http_cache.unpurged_stale_while_revalidate": 60,
                         "internal_bypass.allow_query_in_production": false,
                         "internal_bypass.header": null,
                         "internal_bypass.query_parameter": "without_html_cache",
@@ -3610,6 +3631,7 @@
                         "request_coalescing.uncacheable_seconds": 5,
                         "request_coalescing.wait_seconds": 3,
                         "retention.generation_run_days": 30,
+                        "retention.lock_file_days": 7,
                         "retention.processed_stale_days": 7,
                         "site_health_cached_url_limit": 20,
                         "site_health_public_html_scan_limit": 100,
@@ -3680,6 +3702,7 @@
                     "capell-html-cache.http_cache.browser_max_age",
                     "capell-html-cache.http_cache.shared_max_age",
                     "capell-html-cache.http_cache.stale_while_revalidate",
+                    "capell-html-cache.http_cache.unpurged_stale_while_revalidate",
                     "capell-html-cache.internal_bypass",
                     "capell-html-cache.internal_bypass.allow_query_in_production",
                     "capell-html-cache.internal_bypass.header",
@@ -3769,6 +3792,7 @@
                     "capell-html-cache.request_coalescing.wait_seconds",
                     "capell-html-cache.retention",
                     "capell-html-cache.retention.generation_run_days",
+                    "capell-html-cache.retention.lock_file_days",
                     "capell-html-cache.retention.processed_stale_days",
                     "capell-html-cache.site_health_cached_url_limit",
                     "capell-html-cache.site_health_public_html_scan_limit",

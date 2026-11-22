@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Enums\HtmlCacheRenderLockStatus;
+use Capell\HtmlCache\Support\Cache\HtmlCacheLockFile;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Closure;
 use Illuminate\Http\Request;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
-use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -28,39 +28,39 @@ final class RenderCoalescedHtmlCacheMissAction
         try {
             $path = resolve(HtmlCachePublicationGuard::class)->lockPath()
                 . '.render-' . hash('sha256', $request->fullUrl());
-            // capell-security-scan: local-stream reads a render lock file in application storage
-            $handle = fopen($path, 'c+b');
-
-            if ($handle === false) {
-                throw new RuntimeException('Unable to open the HTML cache render lock.');
-            }
+            $handle = $this->acquire($path);
         } catch (Throwable $throwable) {
             report($throwable);
 
             return HtmlCacheRenderLockStatus::Unavailable;
         }
 
-        // Unlike the cache lease, this lock survives slow renders and releases
-        // on process exit. Never unlink it: contenders must share the same inode.
+        if ($handle === null) {
+            return HtmlCacheRenderLockStatus::Contended;
+        }
+
+        // Unlike the cache lease, this lock survives slow renders and releases on process
+        // exit. Contenders must share one inode: only the unused-lock prune unlinks it, and a
+        // holder confirms its handle is still the file at the path.
         try {
-            try {
-                if (! flock($handle, LOCK_EX | LOCK_NB, $wouldBlock)) {
-                    if ($wouldBlock === 1) {
-                        return HtmlCacheRenderLockStatus::Contended;
-                    }
-
-                    throw new RuntimeException('Unable to acquire the HTML cache render lock.');
-                }
-            } catch (Throwable $throwable) {
-                report($throwable);
-
-                return HtmlCacheRenderLockStatus::Unavailable;
-            }
-
             return $render();
         } finally {
             flock($handle, LOCK_UN);
             fclose($handle);
         }
+    }
+
+    /** @return resource|null Null when another render holds the lock. */
+    private function acquire(string $path): mixed
+    {
+        $handle = HtmlCacheLockFile::lock($path, false, 'HTML cache render lock');
+
+        if ($handle !== null) {
+            // Records the last use, so the lock-file prune keeps locks of URLs still rendered.
+            // Only a hint: a failed touch must not make the lock unavailable.
+            @touch($path);
+        }
+
+        return $handle;
     }
 }

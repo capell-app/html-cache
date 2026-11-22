@@ -8,9 +8,11 @@ use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Providers\HtmlCacheServiceProvider;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
+use Capell\Tests\Fixtures\Models\User;
 use Capell\Tests\Support\InstalledRuntimeParity;
 use Capell\Tests\Support\InstalledRuntimeState;
 use Capell\Tests\Support\InstalledRuntimeTestCase;
+use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +20,7 @@ use Spatie\Permission\Models\Permission;
 
 uses(HtmlCacheTestCase::class);
 
-/** @param Closure(int): void $assertPermissions */
+/** @param Closure(int, int): void $assertPermissions */
 function activateHtmlCacheWithPermissionMarker(bool $synced, Closure $assertPermissions): void
 {
     InstalledRuntimeState::run(function () use ($synced, $assertPermissions): void {
@@ -39,13 +41,17 @@ function activateHtmlCacheWithPermissionMarker(bool $synced, Closure $assertPerm
 
         CapellCore::markPackageInstalled(HtmlCacheServiceProvider::$packageName);
         RefreshInstalledPackageRuntimeAction::run(CapellCore::getPackage(HtmlCacheServiceProvider::$packageName));
-        $assertPermissions($queryCount);
+        // The sync waits for the first signed-in user, never the activation itself.
+        $beforeLogin = $queryCount;
+        event(new Authenticated('web', new User));
+        $assertPermissions($queryCount, $beforeLogin);
     });
 }
 
-it('creates missing permissions and records the sync marker when the package becomes available', function (): void {
-    activateHtmlCacheWithPermissionMarker(false, function (int $queryCount): void {
-        expect($queryCount)->toBeGreaterThan(0)
+it('creates missing permissions and records the sync marker when the first user authenticates after the package becomes available', function (): void {
+    activateHtmlCacheWithPermissionMarker(false, function (int $queryCount, int $beforeLogin): void {
+        expect($beforeLogin)->toBe(0)
+            ->and($queryCount)->toBeGreaterThan(0)
             ->and(Cache::get('capell-html-cache.permissions-synced'))->toBeTrue();
 
         foreach (HtmlCachePermission::cases() as $permission) {
@@ -55,7 +61,7 @@ it('creates missing permissions and records the sync marker when the package bec
 });
 
 it('avoids permission database work when activation sees an existing sync marker', function (): void {
-    activateHtmlCacheWithPermissionMarker(true, function (int $queryCount): void {
+    activateHtmlCacheWithPermissionMarker(true, function (int $queryCount, int $beforeLogin): void {
         expect($queryCount)->toBe(0)
             ->and(Cache::get('capell-html-cache.permissions-synced'))->toBeTrue();
     });

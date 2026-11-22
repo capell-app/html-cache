@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Contracts\Rendering\RenderHookExtensionInterface;
+use Capell\Core\Data\Rendering\RenderHookContext;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Support\Database\RuntimeSchemaState;
 use Capell\Frontend\Actions\AssertPublicHtmlContainsNoAuthoringSurfaceAction;
 use Capell\Frontend\Contracts\CacheBypassResolver;
-use Capell\Frontend\Contracts\RenderHookExtensionInterface;
-use Capell\Frontend\Data\RenderHookContext;
 use Capell\Frontend\Data\RenderHookContributionData;
 use Capell\Frontend\Data\RenderHookFragmentCacheData;
 use Capell\Frontend\Enums\RenderHookLocation;
@@ -668,11 +668,12 @@ it('keeps explicit private state endpoints private when a shared shell wildcard 
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
 });
 
-it('uses configured public cache-control ages for cached responses', function (): void {
+it('uses configured public cache-control ages for cached responses', function (array $purge, int $expectedStaleWhileRevalidate): void {
     Storage::fake('page_cache');
     config()->set('capell-html-cache.http_cache.shared_max_age', 900);
     config()->set('capell-html-cache.http_cache.browser_max_age', 120);
     config()->set('capell-html-cache.http_cache.stale_while_revalidate', 3600);
+    config()->set('capell-html-cache.http_cache.unpurged_stale_while_revalidate', 45);
 
     $siteDomain = SiteDomain::factory()->create([
         'scheme' => 'https',
@@ -695,6 +696,9 @@ it('uses configured public cache-control ages for cached responses', function ()
         'last_seen_at' => now(),
     ]);
 
+    // Configured after the setup writes above, so their purges do not reach the endpoint.
+    config()->set('capell-html-cache.purge', [...(array) config('capell-html-cache.purge'), ...$purge]);
+
     $response = resolve(HtmlCacheMiddleware::class)->handle(
         $request,
         fn (): Response => response('fresh html', 200, ['Content-Type' => 'text/html']),
@@ -706,10 +710,16 @@ it('uses configured public cache-control ages for cached responses', function ()
         ->toContain('public')
         ->toContain('s-maxage=900')
         ->toContain('max-age=120')
-        ->toContain('stale-while-revalidate=3600')
+        ->toContain('stale-while-revalidate=' . $expectedStaleWhileRevalidate)
         ->and((string) $response->headers->get('Cache-Tag'))->toContain('host-example-test')
         ->and($response->headers->has('Surrogate-Key'))->toBeFalse();
-});
+})->with([
+    // A withdrawal purges the edge, so a long revalidation window cannot keep withdrawn pages live.
+    'ready edge purger' => [['driver' => 'http', 'endpoint' => 'https://purge.example.test/purge', 'token' => 'purge-token'], 3600],
+    // Nothing would purge a withdrawn page, so shared caches may only serve it briefly.
+    'no edge purger' => [['driver' => 'null'], 45],
+    'misconfigured edge purger' => [['driver' => 'http', 'endpoint' => 'http://insecure.example.test/purge', 'token' => 'purge-token'], 45],
+]);
 
 it('exposes Surrogate-Key only when the deployment opts in', function (): void {
     config(['capell-html-cache.expose_surrogate_key_header' => true]);
@@ -908,6 +918,36 @@ it('bypasses cached html for authenticated requests without a session cookie by 
     capell_expect($response->getContent())->toBe('fresh html')
         ->and($response->headers->get('X-Frontend-Cache'))->toBeNull()
         ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('keeps an authenticated render private when the route itself marks the response public', function (): void {
+    Storage::fake('page_cache');
+
+    SiteDomain::factory()->create([
+        'scheme' => 'https',
+        'domain' => 'example.test',
+        'path' => null,
+    ]);
+    // A remember-me cookie signs the visitor in without a session cookie on the request.
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->cookies->set('remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d', 'remembered');
+    app()->instance('request', $request);
+    $request->setUserResolver(fn (): User => User::factory()->create());
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('signed-in html', 200, [
+            'Content-Type' => 'text/html',
+            'Cache-Control' => 'public, max-age=300, s-maxage=300',
+        ]),
+    );
+
+    $cacheControl = (string) $response->headers->get('Cache-Control');
+
+    capell_expect($response->getContent())->toBe('signed-in html')
+        ->and($cacheControl)->toContain('private')
+        ->and($cacheControl)->toContain('no-store')
+        ->and($cacheControl)->not->toContain('public');
 });
 
 it('bypasses cached html for access gated protected requests', function (): void {
@@ -1569,4 +1609,54 @@ it('omits Vary when no cache variance is configured', function (): void {
     expect($response->headers->has('Vary'))->toBeFalse()
         ->and($response->headers->hasCacheControlDirective('public'))->toBeTrue()
         ->and(resolve(PageCache::class)->shouldCachePage($request, $response))->toBeTrue();
+});
+
+it('caps a route\'s own public stale-while-revalidate when no edge purge is ready', function (): void {
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.http_cache.unpurged_stale_while_revalidate', 60);
+    // With the page cache off the route's own header is what the CDN receives.
+    config()->set('capell-html-cache.enabled', false);
+    SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    app()->instance('request', $request);
+
+    // Without a purger nothing removes a withdrawn page from shared caches, so the route's day of staleness must shrink.
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('route html', 200, [
+            'Content-Type' => 'text/html',
+            'Cache-Control' => 'public, s-maxage=300, stale-while-revalidate=86400',
+        ]),
+    );
+
+    capell_expect($response->headers->getCacheControlDirective('stale-while-revalidate'))->toBe('60')
+        ->and($response->headers->getCacheControlDirective('public'))->toBeTrue()
+        ->and($response->headers->getCacheControlDirective('s-maxage'))->toBe('300');
+});
+
+it('keeps a signed-in render private when a custom cache-bypass binding skips the cache', function (): void {
+    Storage::fake('page_cache');
+    SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+    app()->instance(CacheBypassResolver::class, new class implements CacheBypassResolver
+    {
+        public function shouldBypass(): bool
+        {
+            return true;
+        }
+    });
+    $request = Request::create('https://example.test/about', Symfony\Component\HttpFoundation\Request::METHOD_GET);
+    $request->cookies->set('remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d', 'remembered');
+    app()->instance('request', $request);
+    $request->setUserResolver(fn (): User => User::factory()->create());
+
+    $response = resolve(HtmlCacheMiddleware::class)->handle(
+        $request,
+        fn (): Response => response('signed-in html', 200, [
+            'Content-Type' => 'text/html',
+            'Cache-Control' => 'public, max-age=300, s-maxage=300',
+        ]),
+    );
+
+    capell_expect((string) $response->headers->get('Cache-Control'))->toContain('private', 'no-store')
+        ->not->toContain('public');
 });

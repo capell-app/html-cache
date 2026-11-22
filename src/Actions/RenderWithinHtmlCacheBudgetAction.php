@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Actions;
 
 use Capell\HtmlCache\Enums\HtmlCacheRenderLockStatus;
+use Capell\HtmlCache\Support\Cache\HtmlCacheLockFile;
 use Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard;
 use Closure;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Sleep;
 use Lorisleiva\Actions\Concerns\AsFake;
 use Lorisleiva\Actions\Concerns\AsObject;
@@ -64,7 +65,7 @@ final class RenderWithinHtmlCacheBudgetAction
     {
         $prefix = resolve(HtmlCachePublicationGuard::class)->lockPath() . '.render-slot-';
         $slots = $this->positiveConfigInteger('capell-html-cache.render_budget.max_concurrent', 4);
-        $deadline = Carbon::now()->addSeconds($this->nonNegativeConfigInteger('capell-html-cache.render_budget.wait_seconds', 2));
+        $deadline = Date::now()->addSeconds($this->nonNegativeConfigInteger('capell-html-cache.render_budget.wait_seconds', 2));
 
         while (true) {
             for ($slot = 0; $slot < $slots; $slot++) {
@@ -76,13 +77,18 @@ final class RenderWithinHtmlCacheBudgetAction
                 }
 
                 if (flock($handle, LOCK_EX | LOCK_NB)) {
-                    return $handle;
+                    // A slot the lock-file prune just removed is shared with nobody; try the next.
+                    if (HtmlCacheLockFile::isCurrent($handle, $prefix . $slot)) {
+                        return $handle;
+                    }
+
+                    flock($handle, LOCK_UN);
                 }
 
                 fclose($handle);
             }
 
-            if (Carbon::now()->greaterThanOrEqualTo($deadline)) {
+            if (Date::now()->greaterThanOrEqualTo($deadline)) {
                 return null;
             }
 

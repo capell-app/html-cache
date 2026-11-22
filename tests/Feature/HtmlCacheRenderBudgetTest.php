@@ -17,9 +17,11 @@ use Capell\HtmlCache\Support\Cache\OriginRefreshLock;
 use Capell\HtmlCache\Support\Cache\RefreshWorkerHeartbeat;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Carbon\CarbonInterval;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -300,9 +302,17 @@ it('clears a stale copy that no refresh replaced within the maximum stale age an
     $this->travel(2)->seconds();
     expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
         ->and(Storage::disk('page_cache')->exists($path))->toBeFalse()
-        ->and(StaleCachedUrl::query()->sole()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
+        ->and(StaleCachedUrl::query()->sole()->only(['status', 'reason']))->toBe([
+            'status' => StaleCachedUrl::STATUS_PENDING,
+            'reason' => ExpireOverdueStaleCachedUrlsAction::REGENERATE_REASON,
+        ]);
     PurgeEdgeCacheAction::assertPushed(fn (): bool => true);
 });
+
+function budgetUpdatesStaleRows(QueryExecuted $query): bool
+{
+    return str_starts_with(strtolower($query->sql), 'update "stale_cached_urls"');
+}
 
 it('clears a batch only under the origin refresh lock, so a deployment cannot acquire mid-clear', function (): void {
     config()->set('capell-html-cache.invalidation.mode', 'instant');
@@ -312,9 +322,11 @@ it('clears a batch only under the origin refresh lock, so a deployment cannot ac
     $this->travel(901)->seconds();
     $lock = resolve(OriginRefreshLock::class);
     $acquiredMidClear = null;
-    StaleCachedUrl::saving(function () use ($lock, &$acquiredMidClear): void {
+    DB::listen(function (QueryExecuted $query) use ($lock, &$acquiredMidClear): void {
         // The barrier: a deployment tries to take the lock while the batch clears.
-        $acquiredMidClear ??= $lock->tryAcquireExclusive('deploy', 120, 1200);
+        if (budgetUpdatesStaleRows($query)) {
+            $acquiredMidClear ??= $lock->tryAcquireExclusive('deploy', 120, 1200);
+        }
     });
 
     expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
@@ -332,16 +344,16 @@ it('stops clearing a batch the moment it loses its lock', function (): void {
     $this->travel(901)->seconds();
     $lock = resolve(OriginRefreshLock::class);
     $saves = 0;
-    StaleCachedUrl::saving(function () use (&$saves): void {
+    DB::listen(function (QueryExecuted $query) use (&$saves): void {
         // After the first row the store loses the lock, as eviction would; a refresher may now own it.
-        if (++$saves === 1) {
+        if (budgetUpdatesStaleRows($query) && ++$saves === 1) {
             Cache::lock(OriginRefreshLock::KEY)->forceRelease();
             Cache::lock(OriginRefreshLock::KEY . ':slot:1')->forceRelease();
         }
     });
 
     expect(ExpireOverdueStaleCachedUrlsAction::run())->toBe(1)
-        ->and(StaleCachedUrl::query()->where('status', StaleCachedUrl::STATUS_NOT_APPLICABLE)->count())->toBe(1)
+        ->and(StaleCachedUrl::query()->where('reason', ExpireOverdueStaleCachedUrlsAction::REGENERATE_REASON)->count())->toBe(1)
         ->and($lock->isExclusiveHeld())->toBeFalse();
 });
 
@@ -374,7 +386,7 @@ it('clears nothing while a refresher holds the lock and enforces maximum age aga
 
     expect(fn (): int => ExpireOverdueStaleCachedUrlsAction::run())->toThrow(RuntimeException::class, 'wait elapsed')
         ->and(Storage::disk('page_cache')->exists($path))->toBeTrue()
-        ->and(StaleCachedUrl::query()->sole()->status)->not->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE);
+        ->and(StaleCachedUrl::query()->sole()->reason)->toBe('frontend_output_changed');
 
     Sleep::fake(syncWithCarbon: true);
 

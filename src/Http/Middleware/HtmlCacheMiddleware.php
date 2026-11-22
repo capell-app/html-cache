@@ -18,6 +18,7 @@ use Capell\Frontend\Support\Render\RenderHookRegistry;
 use Capell\Frontend\Support\Security\PublicHtmlSafetyInspector;
 use Capell\HtmlCache\Actions\BuildHtmlCacheEligibilityReportAction;
 use Capell\HtmlCache\Actions\BuildHtmlCacheOriginDecisionAction;
+use Capell\HtmlCache\Actions\InspectEdgeCachePurgeReadinessAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheHitAction;
 use Capell\HtmlCache\Actions\RecordHtmlCacheRequestObservationAction;
 use Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction;
@@ -126,8 +127,12 @@ final class HtmlCacheMiddleware
         }
 
         if (resolve(CacheBypassResolver::class)->shouldBypass()) {
-            // The retirement guard also excludes this request-specific bypass.
-            return $next($request);
+            // The retirement guard also excludes this request-specific bypass. A custom binding
+            // decides only whether the page cache is skipped: a signed-in render must still stay
+            // out of shared caches whatever header the route sends.
+            $response = $next($request);
+
+            return $this->isSignedInRequest($request) ? $this->privateNoStore($response, $request) : $response;
         }
 
         if (config('capell-html-cache.enabled', true) !== true) {
@@ -746,14 +751,13 @@ final class HtmlCacheMiddleware
 
         if (! $forcePublic && (
             (! $request->isMethod('GET') && ! $request->isMethod('HEAD'))
-            || $this->sessionCookieRequiresPrivateResponse($request)
-            || $request->headers->has('Authorization')
+            || $this->isSignedInRequest($request)
         )) {
             return $this->privateNoStore($response, $request);
         }
 
         if (! $forcePublic && str_contains((string) $response->headers->get('Cache-Control'), 'public')) {
-            return $response;
+            return $this->capRouteStaleWhileRevalidate($response);
         }
 
         if (! $forcePublic) {
@@ -914,9 +918,57 @@ final class HtmlCacheMiddleware
         return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.browser_max_age', 60);
     }
 
+    private function isSignedInRequest(Request $request): bool
+    {
+        // A remember-me cookie signs the visitor in without a session cookie on the request,
+        // so a route's own public header must not let a signed-in render reach a shared cache.
+        return $this->sessionCookieRequiresPrivateResponse($request)
+            || $request->headers->has('Authorization')
+            || $request->user() !== null;
+    }
+
+    /**
+     * A route that sends its own public header keeps its ages, but its stale window is held to
+     * the same bound as ours: without a ready edge purge nothing removes a withdrawn page.
+     */
+    private function capRouteStaleWhileRevalidate(Response $response): Response
+    {
+        $routeValue = $response->headers->getCacheControlDirective('stale-while-revalidate');
+
+        if (! is_string($routeValue) || ! ctype_digit($routeValue)) {
+            return $response;
+        }
+
+        $cap = $this->staleWhileRevalidateSeconds();
+
+        if ((int) $routeValue > $cap) {
+            $response->headers->addCacheControlDirective('stale-while-revalidate', (string) $cap);
+        }
+
+        return $response;
+    }
+
     private function staleWhileRevalidateSeconds(): int
     {
-        return $this->nonNegativeConfigInteger('capell-html-cache.http_cache.stale_while_revalidate', 86400);
+        $staleWhileRevalidate = $this->nonNegativeConfigInteger('capell-html-cache.http_cache.stale_while_revalidate', 86400);
+
+        if ($this->edgePurgeIsReady()) {
+            return $staleWhileRevalidate;
+        }
+
+        // Without a working edge purge nothing removes a withdrawn page from shared caches,
+        // so they may only keep serving it for this short window after it expires.
+        return min(
+            $staleWhileRevalidate,
+            $this->nonNegativeConfigInteger('capell-html-cache.http_cache.unpurged_stale_while_revalidate', 60),
+        );
+    }
+
+    private function edgePurgeIsReady(): bool
+    {
+        $readiness = InspectEdgeCachePurgeReadinessAction::run();
+
+        return $readiness->driver !== 'null' && $readiness->isReady();
     }
 
     private function nonNegativeConfigInteger(string $key, int $default): int

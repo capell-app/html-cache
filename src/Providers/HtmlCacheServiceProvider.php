@@ -43,10 +43,12 @@ use Capell\HtmlCache\Actions\ExpireOverdueStaleCachedUrlsAction;
 use Capell\HtmlCache\Actions\MarkAllCachedUrlsStaleAction;
 use Capell\HtmlCache\Actions\MarkCachedUrlStaleAction;
 use Capell\HtmlCache\Actions\PlanEditorHtmlCacheConsequencesAction;
+use Capell\HtmlCache\Actions\PruneHtmlCacheLockFilesAction;
 use Capell\HtmlCache\Actions\PruneHtmlCacheMetadataAction;
 use Capell\HtmlCache\Actions\WithdrawCachedHtmlForOpenedAccessAreasAction;
 use Capell\HtmlCache\Actions\WithdrawCachedUrlsForModelAction;
 use Capell\HtmlCache\Bridges\HtmlCacheAdminBridge;
+use Capell\HtmlCache\Bridges\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Console\Commands\ClearHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\DiagnoseHtmlCacheCommand;
 use Capell\HtmlCache\Console\Commands\ProcessStaleHtmlCacheCommand;
@@ -92,11 +94,11 @@ use Capell\HtmlCache\Support\HtmlCacheAuthorizationMemo;
 use Capell\HtmlCache\Support\Maintenance\HtmlCacheStaticMaintenancePageStore;
 use Capell\HtmlCache\Support\ModelServing\ModelEventRegistrar;
 use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
-use Capell\HtmlCache\Support\SiteDiscovery\HtmlCacheGeneratedOutputCoverageSource;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteRequestObserver;
 use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
 use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
+use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
@@ -405,7 +407,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function registerGeneratedOutputCoverage(): self
     {
-        if (! interface_exists(GeneratedOutputCoverageSource::class)) {
+        if (! CapellCore::isPackageAvailable('capell-app/site-discovery')) {
             return $this;
         }
 
@@ -614,8 +616,19 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
     private function ensurePermissions(): self
     {
+        // The permission rows are only read once someone is signed in, so the sync waits for
+        // the first authenticated user instead of probing the schema while the app boots.
+        Event::listen(Authenticated::class, function (): void {
+            $this->syncPermissions();
+        });
+
+        return $this;
+    }
+
+    private function syncPermissions(): void
+    {
         if (Cache::get(self::PERMISSIONS_SYNCED_CACHE_KEY) === true) {
-            return $this;
+            return;
         }
 
         $table = config('permission.table_names.permissions', 'permissions');
@@ -625,42 +638,10 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
             Cache::put(self::PERMISSIONS_SYNCED_CACHE_KEY, true, self::PERMISSIONS_SYNCED_CACHE_TTL_SECONDS);
         }
-
-        return $this;
     }
 
     private function registerScheduledInvalidation(): self
     {
-        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
-            $schedule
-                ->call(static fn (): int => ExpireOverdueStaleCachedUrlsAction::run())
-                ->name('capell-html-cache:expire-overdue-stale')
-                ->everyFiveMinutes()
-                ->withoutOverlapping()
-                ->onOneServer();
-
-            // Every mode records model withdrawals; process-stale only prunes in scheduled mode.
-            $schedule
-                ->call(static fn (): int => PruneHtmlCacheMetadataAction::run())
-                ->name('capell-html-cache:prune-metadata')
-                ->hourly()
-                ->withoutOverlapping()
-                ->onOneServer();
-        });
-
-        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
-            $schedule
-                ->call(static fn (): int => WithdrawCachedHtmlForOpenedAccessAreasAction::run())
-                ->name('capell-html-cache:withdraw-opened-access-areas')
-                ->everyMinute()
-                ->withoutOverlapping()
-                ->onOneServer();
-        });
-
-        if (! $this->usesScheduledInvalidation()) {
-            return $this;
-        }
-
         $frequency = config('capell-html-cache.invalidation.schedule', 'everyFiveMinutes');
 
         if (! is_string($frequency) || $frequency === '') {
@@ -669,6 +650,9 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
 
         $overlapExpiresAfterMinutes = $this->configuredSchedulerOverlapMinutes();
 
+        // Every mode: instant mode stale-marks site-wide output changes too, and only a request
+        // would otherwise refresh them, so a quiet page waited for expiry to clear it. Registered
+        // before expiry so a run refreshes what it can before maximum-age enforcement clears the rest.
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) use ($frequency, $overlapExpiresAfterMinutes): void {
             $event = $schedule
                 ->command('capell:html-cache:process-stale')
@@ -686,6 +670,38 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
                 'hourly' => $event->hourly(),
                 default => $event->everyFiveMinutes(),
             };
+        });
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $schedule
+                ->call(static fn (): int => ExpireOverdueStaleCachedUrlsAction::run())
+                ->name('capell-html-cache:expire-overdue-stale')
+                ->everyFiveMinutes()
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            $schedule
+                ->call(static fn (): int => PruneHtmlCacheMetadataAction::run())
+                ->name('capell-html-cache:prune-metadata')
+                ->hourly()
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            // Lock files live on each server's own storage, so every server prunes its own.
+            $schedule
+                ->call(static fn (): int => PruneHtmlCacheLockFilesAction::run())
+                ->name('capell-html-cache:prune-lock-files')
+                ->daily()
+                ->withoutOverlapping();
+        });
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $schedule
+                ->call(static fn (): int => WithdrawCachedHtmlForOpenedAccessAreasAction::run())
+                ->name('capell-html-cache:withdraw-opened-access-areas')
+                ->everyMinute()
+                ->withoutOverlapping()
+                ->onOneServer();
         });
 
         return $this;

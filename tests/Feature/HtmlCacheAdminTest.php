@@ -9,6 +9,7 @@ use Capell\Admin\Filament\Pages\SiteHealthPage;
 use Capell\Admin\Support\Bridges\AdminBridgeRegistrar;
 use Capell\Core\Models\Concerns\HasSitePermissions;
 use Capell\Core\Models\Page;
+use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\Core\Models\Translation;
 use Capell\HtmlCache\Actions\BuildCacheMapOverviewAction;
@@ -117,17 +118,13 @@ it('builds a cache map overview grouped by model and top resource impact', funct
 
     test()->actingAs($user);
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
+    $site = Site::factory()->create();
     $sharedPage = Page::factory()
-        ->recycle($siteDomain->site)
+        ->recycle($site)
         ->withTranslations()
         ->create(['name' => 'Shared page']);
     $secondaryPage = Page::factory()
-        ->recycle($siteDomain->site)
+        ->recycle($site)
         ->withTranslations()
         ->create(['name' => 'Secondary page']);
     $translation = $sharedPage->translations()->first();
@@ -144,9 +141,8 @@ it('builds a cache map overview grouped by model and top resource impact', funct
             'url' => $url,
             'url_hash' => CachedModelUrl::hashUrl($url),
             'path' => str_replace('https://example.test', '', $url),
-            'site_id' => $siteDomain->site_id,
-            'site_domain_id' => $siteDomain->getKey(),
-            'language_id' => $siteDomain->language_id,
+            'site_id' => $site->getKey(),
+            'language_id' => $site->language_id,
             'cacheable_type' => $cacheable->getMorphClass(),
             'cacheable_id' => $cacheable->getKey(),
             'cached_at' => now(),
@@ -154,7 +150,7 @@ it('builds a cache map overview grouped by model and top resource impact', funct
         ]);
     }
 
-    $overview = BuildCacheMapOverviewAction::run((int) $siteDomain->site_id);
+    $overview = BuildCacheMapOverviewAction::run((int) $site->getKey());
 
     expect($overview->totalUrls)->toBe(2)
         ->and($overview->totalDependencies)->toBe(4)
@@ -171,27 +167,19 @@ it('lists the top five cache map resources for the selected model and search', f
 
     test()->actingAs($user);
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $otherSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'other.test',
-        'path' => null,
-    ]);
+    $site = Site::factory()->create();
+    $otherSite = Site::factory()->create();
     $pages = collect(range(1, 6))
         ->map(fn (int $index): Page => Page::factory()
-            ->recycle($siteDomain->site)
+            ->recycle($site)
             ->withTranslations()
             ->create(['name' => $index === 6 ? 'Needle page' : 'Page ' . $index]));
     $otherSitePage = Page::factory()
-        ->recycle($otherSiteDomain->site)
+        ->recycle($otherSite)
         ->withTranslations()
         ->create(['name' => 'Other site page']);
 
-    $pages->each(function (Page $page, int $zeroBasedIndex) use ($siteDomain): void {
+    $pages->each(function (Page $page, int $zeroBasedIndex) use ($site): void {
         foreach (range(1, 6 - $zeroBasedIndex) as $urlIndex) {
             $url = sprintf('https://example.test/page-%s-%s', $page->getKey(), $urlIndex);
 
@@ -199,9 +187,8 @@ it('lists the top five cache map resources for the selected model and search', f
                 'url' => $url,
                 'url_hash' => CachedModelUrl::hashUrl($url),
                 'path' => str_replace('https://example.test', '', $url),
-                'site_id' => $siteDomain->site_id,
-                'site_domain_id' => $siteDomain->getKey(),
-                'language_id' => $siteDomain->language_id,
+                'site_id' => $site->getKey(),
+                'language_id' => $site->language_id,
                 'cacheable_type' => $page->getMorphClass(),
                 'cacheable_id' => $page->getKey(),
                 'cached_at' => now(),
@@ -214,9 +201,8 @@ it('lists the top five cache map resources for the selected model and search', f
         'url' => 'https://other.test/page',
         'url_hash' => CachedModelUrl::hashUrl('https://other.test/page'),
         'path' => '/page',
-        'site_id' => $otherSiteDomain->site_id,
-        'site_domain_id' => $otherSiteDomain->getKey(),
-        'language_id' => $otherSiteDomain->language_id,
+        'site_id' => $otherSite->getKey(),
+        'language_id' => $otherSite->language_id,
         'cacheable_type' => $otherSitePage->getMorphClass(),
         'cacheable_id' => $otherSitePage->getKey(),
         'cached_at' => now(),
@@ -227,8 +213,8 @@ it('lists the top five cache map resources for the selected model and search', f
 
     throw_unless($firstPage instanceof Page, RuntimeException::class, 'Expected cache map resource option test page to exist.');
 
-    $topOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $siteDomain->site_id);
-    $searchOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $siteDomain->site_id, 'Needle');
+    $topOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $site->getKey());
+    $searchOptions = ListCacheMapResourceOptionsAction::run($firstPage->getMorphClass(), (int) $site->getKey(), 'Needle');
 
     expect($topOptions)->toHaveCount(5)
         ->and(collect($topOptions)->pluck('label')->all())->not->toContain('Other site page')

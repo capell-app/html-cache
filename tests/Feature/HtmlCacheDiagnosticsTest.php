@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\Page;
+use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
 use Capell\HtmlCache\Actions\BuildCachedModelUrlDiagnosticsAction;
 use Capell\HtmlCache\Actions\BuildHtmlCachePublicOutputSafetyDiagnosticsAction;
@@ -156,9 +157,13 @@ it('does not inspect path-based cached public html outside the selected site', f
 it('installs html cache permissions', function (): void {
     EnsureHtmlCachePermissionsAction::run();
 
-    expect(Permission::query()
-        ->whereIn('name', HtmlCachePermission::names())
-        ->count())->toBe(count(HtmlCachePermission::cases()));
+    expect(Permission::query()->where('name', 'like', 'capell-html-cache.%')->pluck('name')->all())
+        ->toEqualCanonicalizing([
+            'capell-html-cache.view',
+            'capell-html-cache.clear',
+            'capell-html-cache.maintenance.manage',
+        ])
+        ->toEqualCanonicalizing(HtmlCachePermission::names());
 });
 
 it('reports unsafe unindexed cached public html files', function (): void {
@@ -190,22 +195,14 @@ it('reports cached model url diagnostics for the selected site only', function (
 
     test()->actingAs($user);
 
-    $firstSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'first.test',
-        'path' => null,
-    ]);
-    $secondSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'second.test',
-        'path' => null,
-    ]);
+    $firstSite = Site::factory()->create();
+    $secondSite = Site::factory()->create();
     $firstPage = Page::factory()
-        ->recycle($firstSiteDomain->site)
+        ->recycle($firstSite)
         ->withTranslations()
         ->create();
     $secondPage = Page::factory()
-        ->recycle($secondSiteDomain->site)
+        ->recycle($secondSite)
         ->withTranslations()
         ->create();
 
@@ -213,9 +210,8 @@ it('reports cached model url diagnostics for the selected site only', function (
         'url' => 'https://first.test/about',
         'url_hash' => CachedModelUrl::hashUrl('https://first.test/about'),
         'path' => '/about',
-        'site_id' => $firstSiteDomain->site_id,
-        'site_domain_id' => $firstSiteDomain->getKey(),
-        'language_id' => $firstSiteDomain->language_id,
+        'site_id' => $firstSite->getKey(),
+        'language_id' => $firstSite->language_id,
         'cacheable_type' => $firstPage->getMorphClass(),
         'cacheable_id' => $firstPage->getKey(),
         'cached_at' => now(),
@@ -225,16 +221,15 @@ it('reports cached model url diagnostics for the selected site only', function (
         'url' => 'https://second.test/about',
         'url_hash' => CachedModelUrl::hashUrl('https://second.test/about'),
         'path' => '/about',
-        'site_id' => $secondSiteDomain->site_id,
-        'site_domain_id' => $secondSiteDomain->getKey(),
-        'language_id' => $secondSiteDomain->language_id,
+        'site_id' => $secondSite->getKey(),
+        'language_id' => $secondSite->language_id,
         'cacheable_type' => $secondPage->getMorphClass(),
         'cacheable_id' => $secondPage->getKey(),
         'cached_at' => now(),
         'last_seen_at' => now(),
     ]);
 
-    $checks = BuildCachedModelUrlDiagnosticsAction::run((int) $firstSiteDomain->site_id);
+    $checks = BuildCachedModelUrlDiagnosticsAction::run((int) $firstSite->getKey());
 
     expect($checks)->toHaveCount(1)
         ->and($checks[0]->status)->toBe('green')

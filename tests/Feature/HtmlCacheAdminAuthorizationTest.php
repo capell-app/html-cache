@@ -22,7 +22,9 @@ use Capell\HtmlCache\Support\HtmlCacheAuthorization;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
 use Capell\Tests\Fixtures\Models\User;
 use Filament\Notifications\Notification;
+use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -472,4 +474,15 @@ it('does not let a stored row whose domain was deleted stop the rest of the page
 
     expect($own->fresh())->toBeNull()
         ->and($stale->fresh())->not->toBeNull();
+});
+
+it('syncs the HTML cache permissions when the first user authenticates, not while booting', function (): void {
+    // Bug caught: an admin could be left without the HTML cache permission rows if the sync
+    // that moved off boot never ran, or a schema probe at boot would need a live database.
+    Cache::forget('capell-html-cache.permissions-synced');
+    Permission::query()->where('name', HtmlCachePermission::cases()[0]->value)->delete();
+
+    event(new Authenticated('web', User::factory()->create()));
+
+    expect(Permission::query()->where('name', HtmlCachePermission::cases()[0]->value)->exists())->toBeTrue();
 });

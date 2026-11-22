@@ -437,42 +437,43 @@ final class HtmlCachePublicationGuard implements PublicArtefactFence
      */
     private function locked(Closure $operation): mixed
     {
-        // capell-security-scan: local-stream reads the publication lock file in application storage
-        $handle = fopen($this->lockPath(), 'c+b');
+        $lockPath = $this->lockPath();
 
-        if ($handle === false) {
-            throw new RuntimeException('Unable to open the HTML cache publication lock.');
-        }
-
-        $acquired = false;
         $identity = null;
-        try {
+        // The lock-file prune can remove an unused root's lock while this process waits on it;
+        // the handle then locks an inode nobody else shares, so it reopens, a bounded number of times.
+        $handle = HtmlCacheLockFile::lock($lockPath, true, 'HTML cache publication lock', static function (mixed $handle) use (&$identity): void {
             $metadata = fstat($handle);
+
             if ($metadata === false) {
                 throw new RuntimeException('Unable to identify the HTML cache publication lock.');
             }
 
             $identity = $metadata['dev'] . ':' . $metadata['ino'];
+
             // A second handle to our own locked inode blocks forever. Refuse
             // nested publication/invalidation, including across guard instances.
             if (isset(self::$heldLocks[$identity])) {
                 throw new RuntimeException('Cannot reacquire the HTML cache publication lock within the same operation.');
             }
+        });
 
-            if (! flock($handle, LOCK_EX)) {
-                throw new RuntimeException('Unable to acquire the HTML cache publication lock.');
+        if (! is_resource($handle) || ! is_string($identity)) {
+            if (is_resource($handle)) {
+                flock($handle, LOCK_UN);
+                fclose($handle);
             }
 
-            $acquired = true;
-            self::$heldLocks[$identity] = true;
+            throw new RuntimeException('Unable to acquire the HTML cache publication lock.');
+        }
 
+        self::$heldLocks[$identity] = true;
+
+        try {
             return $operation($handle);
         } finally {
-            if ($acquired && $identity !== null) {
-                unset(self::$heldLocks[$identity]);
-                flock($handle, LOCK_UN);
-            }
-
+            unset(self::$heldLocks[$identity]);
+            flock($handle, LOCK_UN);
             fclose($handle);
         }
     }

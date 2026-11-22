@@ -98,6 +98,7 @@ HTML Cache is an **Available** Capell package in the **Capell Essentials** produ
 - `ClearCachedUrlAction`
 - `ClearCachedUrlsForModelAction`
 - `ClearCachedUrlsForSurrogateKeysAction`
+- `ClearCurrentOriginHtmlCacheAction`
 - `BuildHtmlCacheDashboardStatsAction`
 - `BuildHtmlCacheStaleQueueRowsAction`
 - `BuildHtmlCacheUrlRowsAction`
@@ -127,6 +128,7 @@ HTML Cache is an **Available** Capell package in the **Capell Essentials** produ
 - `PrepareMaintenanceCacheAction`
 - `PrepareSiteMaintenanceCacheAction`
 - `ProcessStaleHtmlCacheAction`
+- `PruneHtmlCacheLockFilesAction`
 - `PruneHtmlCacheMetadataAction`
 - `PurgeEdgeCacheAction`
 - `QueueEdgeCachePurgeAction`

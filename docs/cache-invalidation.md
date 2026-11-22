@@ -46,6 +46,16 @@ Route/structure model creates and deletes still trigger broad invalidation becau
 
 Domain non-resolution is treated as an obsolete-domain policy, including preview-excluded domains and temporarily disabled sites. If a stale URL no longer resolves to an enabled site domain, the processor treats that as confirmation that the old public cache entry is obsolete. While caching and cache writes are enabled, it deletes the old cache files and removes matching `cached_model_urls` rows; otherwise it leaves the artefacts intact and the refresh retryable.
 
+## Clear One Origin Immediately
+
+Call `Capell\HtmlCache\Actions\ClearCurrentOriginHtmlCacheAction::run()` to
+clear the current HTTP request origin before returning. It clears cached pages
+and fragment metadata for that scheme, host and port under the publication fence.
+Static error and maintenance pages stay available. The action can clear dormant
+files while caching is disabled if the HTML Cache service provider has bound
+the page cache. It returns `false` when the binding or origin directory is
+absent. Filesystem failures propagate to the caller.
+
 ## Cache Root Layout
 
 An absent port, port 80 and port 443 retain the existing layout byte for byte,
@@ -367,43 +377,44 @@ RecordCachedModelUrlsAction::run($url, [
 
 ## Configuration
 
-| Key                                                         | Purpose                                                                                                                                                   |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `capell-html-cache.enabled`                                 | Turns HTML cache behaviour on or off.                                                                                                                     |
-| `capell-html-cache.write_enabled`                           | Allows cache writes. Disable this when investigating output safety.                                                                                       |
-| `capell-html-cache.minify_html`                             | Controls minification before writing cached HTML.                                                                                                         |
-| `capell-html-cache.cache_ttl`                               | Backward-compatible source for shared HTTP cache age when no explicit `shared_max_age` is configured.                                                     |
-| `capell-html-cache.filesystem_ttl_seconds`                  | Hard expiry backstop for filesystem entries; `0` disables time-based expiry.                                                                              |
-| `capell-html-cache.error_pages.max_files_per_host`          | Maximum cached `.404.html` files per host cache root; `0` disables cached 404 writes.                                                                     |
-| `capell-html-cache.error_pages.retain_after_prune`          | Number of newest cached 404 files retained when the per-host cap is reached.                                                                              |
-| `capell-html-cache.hit_recording.flush_delay_seconds`       | Delay used to batch cache-hit counters before one queued database update.                                                                                 |
-| `capell-html-cache.hit_recording.buffer_ttl_seconds`        | Safety TTL for pending cache-hit counters and their scheduled-flush marker.                                                                               |
-| `capell-html-cache.http_cache.shared_max_age`               | `s-maxage` value for public cached responses; defaults to `cache_ttl / 6` when unset.                                                                     |
-| `capell-html-cache.http_cache.browser_max_age`              | Browser `max-age` value for public cached responses.                                                                                                      |
-| `capell-html-cache.http_cache.stale_while_revalidate`       | CDN/browser `stale-while-revalidate` directive value.                                                                                                     |
-| `capell-html-cache.request_coalescing.*`                    | Short per-URL lock and wait values that collapse simultaneous origin cache misses into one render.                                                        |
-| `capell-html-cache.cache_skip_authenticated`                | Keeps authenticated responses out of the public cache.                                                                                                    |
-| `capell-html-cache.bypass.paths`                            | Wildcard path rules that bypass public cache reads and writes.                                                                                            |
-| `capell-html-cache.bypass.cookies`                          | Wildcard cookie-name rules that bypass public cache reads and writes. Use for personalization or variant cookies that are not encoded in the URL.         |
-| `capell-html-cache.bypass.headers`                          | Wildcard header-name rules that bypass public cache reads and writes. Use for shared-URL locale or segment negotiation headers such as `Accept-Language`. |
-| `capell-html-cache.access_gate.active_area_cache_seconds`   | Short TTL for the access-gate active-area lookup used by anonymous cache decisions. Set `0` to disable.                                                   |
-| `capell-html-cache.invalidation.mode`                       | `instant` or `scheduled`. Default `instant`.                                                                                                              |
-| `capell-html-cache.invalidation.schedule`                   | Scheduler frequency for stale processing. Default `everyFiveMinutes`.                                                                                     |
-| `capell-html-cache.invalidation.batch_size`                 | Default stale URL batch size.                                                                                                                             |
-| `capell-html-cache.invalidation.processing_timeout_minutes` | Minutes before a `processing` stale row may be claimed again.                                                                                             |
-| `capell-html-cache.invalidation.retry_backoff_minutes`      | Minutes before a failed stale row may be retried.                                                                                                         |
-| `capell-html-cache.invalidation.max_attempts`               | Maximum refresh attempts before a stale row becomes `exhausted`.                                                                                          |
-| `capell-html-cache.retention.processed_stale_days`          | Days to retain completed stale-refresh rows for diagnostics.                                                                                              |
-| `capell-html-cache.retention.generation_run_days`           | Days to retain completed or failed static-generation run records.                                                                                         |
-| `capell-html-cache.purge.driver`                            | Edge purge adapter: `null`, `http`, or `cloudflare`.                                                                                                      |
-| `capell-html-cache.purge.required`                          | Makes the null driver fail publication invalidation instead of succeeding as a local-only no-op.                                                          |
-| `capell-html-cache.purge.token`                             | Bearer token for the configured edge purge API.                                                                                                           |
-| `capell-html-cache.purge.cloudflare.zone_id`                | Cloudflare zone ID used by the native purge adapter.                                                                                                      |
-| `capell-html-cache.deployment.web_node_count`               | Number of web nodes that may serve public HTML; used by the deployment-topology health diagnostic.                                                        |
-| `capell-html-cache.deployment.shared_page_cache`            | Acknowledges that every web and queue node mounts the same POSIX `page_cache` directory.                                                                  |
-| `capell-html-cache.model_event_registration_mode`           | Controls model event registration timing; default is `deferred`.                                                                                          |
-| `capell-html-cache.static_generation.internal_requests`     | Renders static generation through the current Laravel kernel; enabled by default for reliable completion reporting.                                       |
-| `capell-html-cache.public_html_authoring_markers`           | Strings used by diagnostics to detect authoring leakage in public HTML.                                                                                   |
+| Key                                                            | Purpose                                                                                                                                                   |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capell-html-cache.enabled`                                    | Turns HTML cache behaviour on or off.                                                                                                                     |
+| `capell-html-cache.write_enabled`                              | Allows cache writes. Disable this when investigating output safety.                                                                                       |
+| `capell-html-cache.minify_html`                                | Controls minification before writing cached HTML.                                                                                                         |
+| `capell-html-cache.cache_ttl`                                  | Backward-compatible source for shared HTTP cache age when no explicit `shared_max_age` is configured.                                                     |
+| `capell-html-cache.filesystem_ttl_seconds`                     | Hard expiry backstop for filesystem entries; `0` disables time-based expiry.                                                                              |
+| `capell-html-cache.error_pages.max_files_per_host`             | Maximum cached `.404.html` files per host cache root; `0` disables cached 404 writes.                                                                     |
+| `capell-html-cache.error_pages.retain_after_prune`             | Number of newest cached 404 files retained when the per-host cap is reached.                                                                              |
+| `capell-html-cache.hit_recording.flush_delay_seconds`          | Delay used to batch cache-hit counters before one queued database update.                                                                                 |
+| `capell-html-cache.hit_recording.buffer_ttl_seconds`           | Safety TTL for pending cache-hit counters and their scheduled-flush marker.                                                                               |
+| `capell-html-cache.http_cache.shared_max_age`                  | `s-maxage` value for public cached responses; defaults to `cache_ttl / 6` when unset.                                                                     |
+| `capell-html-cache.http_cache.browser_max_age`                 | Browser `max-age` value for public cached responses.                                                                                                      |
+| `capell-html-cache.http_cache.stale_while_revalidate`          | CDN/browser `stale-while-revalidate` value while a ready edge purge driver removes withdrawn pages.                                                       |
+| `capell-html-cache.http_cache.unpurged_stale_while_revalidate` | Ceiling on `stale-while-revalidate` without a ready edge purge driver (default 60), so a withdrawn page leaves shared caches within `s-maxage` plus this. |
+| `capell-html-cache.request_coalescing.*`                       | Short per-URL lock and wait values that collapse simultaneous origin cache misses into one render.                                                        |
+| `capell-html-cache.cache_skip_authenticated`                   | Keeps authenticated responses out of the public cache.                                                                                                    |
+| `capell-html-cache.bypass.paths`                               | Wildcard path rules that bypass public cache reads and writes.                                                                                            |
+| `capell-html-cache.bypass.cookies`                             | Wildcard cookie-name rules that bypass public cache reads and writes. Use for personalization or variant cookies that are not encoded in the URL.         |
+| `capell-html-cache.bypass.headers`                             | Wildcard header-name rules that bypass public cache reads and writes. Use for shared-URL locale or segment negotiation headers such as `Accept-Language`. |
+| `capell-html-cache.access_gate.active_area_cache_seconds`      | Short TTL for the access-gate active-area lookup used by anonymous cache decisions. Set `0` to disable.                                                   |
+| `capell-html-cache.invalidation.mode`                          | `instant` or `scheduled`. Default `instant`.                                                                                                              |
+| `capell-html-cache.invalidation.schedule`                      | Scheduler frequency for stale processing. Default `everyFiveMinutes`.                                                                                     |
+| `capell-html-cache.invalidation.batch_size`                    | Default stale URL batch size.                                                                                                                             |
+| `capell-html-cache.invalidation.processing_timeout_minutes`    | Minutes before a `processing` stale row may be claimed again.                                                                                             |
+| `capell-html-cache.invalidation.retry_backoff_minutes`         | Minutes before a failed stale row may be retried.                                                                                                         |
+| `capell-html-cache.invalidation.max_attempts`                  | Maximum refresh attempts before a stale row becomes `exhausted`.                                                                                          |
+| `capell-html-cache.retention.processed_stale_days`             | Days to retain completed stale-refresh rows for diagnostics.                                                                                              |
+| `capell-html-cache.retention.generation_run_days`              | Days to retain completed or failed static-generation run records.                                                                                         |
+| `capell-html-cache.purge.driver`                               | Edge purge adapter: `null`, `http`, or `cloudflare`.                                                                                                      |
+| `capell-html-cache.purge.required`                             | Makes the null driver fail publication invalidation instead of succeeding as a local-only no-op.                                                          |
+| `capell-html-cache.purge.token`                                | Bearer token for the configured edge purge API.                                                                                                           |
+| `capell-html-cache.purge.cloudflare.zone_id`                   | Cloudflare zone ID used by the native purge adapter.                                                                                                      |
+| `capell-html-cache.deployment.web_node_count`                  | Number of web nodes that may serve public HTML; used by the deployment-topology health diagnostic.                                                        |
+| `capell-html-cache.deployment.shared_page_cache`               | Acknowledges that every web and queue node mounts the same POSIX `page_cache` directory.                                                                  |
+| `capell-html-cache.model_event_registration_mode`              | Controls model event registration timing; default is `deferred`.                                                                                          |
+| `capell-html-cache.static_generation.internal_requests`        | Renders static generation through the current Laravel kernel; enabled by default for reliable completion reporting.                                       |
+| `capell-html-cache.public_html_authoring_markers`              | Strings used by diagnostics to detect authoring leakage in public HTML.                                                                                   |
 
 Hit telemetry is operational metadata, not a durable event log. Pending counters and the scheduled-flush marker expire after `hit_recording.buffer_ttl_seconds`; if queue workers remain unavailable longer than that window, some hit and byte totals can be lost. This does not affect cached HTML correctness. Monitor queue workers and set the TTL longer than the longest outage for which telemetry must be retained.
 
@@ -418,7 +429,11 @@ capell:html-cache:edge-purge:verify {--driver=}
 capell:static-site {--site=} {--internal} {--refresh}
 ```
 
-`capell:html-cache:process-stale` is scheduled automatically when `capell-html-cache.invalidation.mode` is `scheduled`. `--limit` overrides the configured batch size for one run.
+`capell:html-cache:process-stale` is scheduled automatically in both invalidation modes, at `capell-html-cache.invalidation.schedule`. In `instant` mode it refreshes the stale copies that site-wide output changes leave behind, so a page nobody requests is refreshed rather than waiting for a visitor. `--limit` overrides the configured batch size for one run.
+
+Stale copies that no refresh replaced within `origin_stale_while_revalidate.max_stale_age_seconds` are cleared, so no old copy outlives that age. Each cleared URL is queued once more for the stale processor, which rebuilds it; if that rebuild also misses the maximum age it is abandoned without clearing again, so a copy a visitor published since the clear is kept.
+
+Render and publication lock files under `storage/framework/cache/html-cache-publication` are pruned daily on every server once unused for `capell-html-cache.retention.lock_file_days` (default 7). The live page cache root's publication lock and render slots are always kept, a lock held by a render is skipped, and one run removes at most 5,000 files.
 
 `capell:html-cache:clear` queues a full refresh; it does not regenerate HTML, so existing cached HTML continues to be served until the stale queue is processed. Use `capell:html-cache:clear --process` when an explicit CLI maintenance run should queue and process the refresh in one command. HTTP and deployment callers should omit `--process` and leave processing to the queue or scheduler.
 

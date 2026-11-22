@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Capell\Core\Data\Rendering\FrontendRuntimeManifestData;
+use Capell\Core\Enums\Rendering\RenderingStrategyEnum;
 use Capell\Core\Models\Layout;
 use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
@@ -11,9 +13,7 @@ use Capell\Frontend\Actions\InvalidateDueScheduledPublicationCachesAction;
 use Capell\Frontend\Contracts\RenderedModelTracker;
 use Capell\Frontend\Data\Assets\FrontendResourcePlanData;
 use Capell\Frontend\Data\FrontendRenderContextData;
-use Capell\Frontend\Data\FrontendRuntimeManifestData;
 use Capell\Frontend\Data\PublicPageRenderData;
-use Capell\Frontend\Enums\RenderingStrategyEnum;
 use Capell\Frontend\Support\Cache\PublicPageRenderDataCache;
 use Capell\HtmlCache\Actions\ClearAllHtmlCacheAction;
 use Capell\HtmlCache\Actions\PruneHtmlCacheMetadataAction;
@@ -489,17 +489,18 @@ it('records the page a listing shows when the listing is served from cached rend
         // Rendering the listing loads the page it shows.
         resolve(RenderedModelTracker::class)->track(Page::query()->findOrFail(targetedPageId($site['a'])));
 
-        return new PublicPageRenderData(
-            page: $context->page,
-            site: $context->site,
-            language: $context->language,
-            layout: $context->layout,
-            theme: $context->theme,
-            layoutGraph: null,
-            runtimeManifest: $runtime,
-            resourcePlan: new FrontendResourcePlanData([], [], [], [], [], [], [], hash('sha256', 'empty')),
-            surrogateKeys: [],
-        );
+        // Populate the fields supported by the installed Frontend data class.
+        return PublicPageRenderData::from([
+            'page' => $context->page,
+            'site' => $context->site,
+            'language' => $context->language,
+            'layout' => $context->layout,
+            'theme' => $context->theme,
+            'layoutGraph' => null,
+            'runtimeManifest' => $runtime,
+            'resourcePlan' => new FrontendResourcePlanData([], [], [], [], [], [], [], hash('sha256', 'empty')),
+            'surrogateKeys' => [],
+        ]);
     };
     $renderListing = function () use ($context, $render, $site): void {
         app()->forgetScopedInstances();

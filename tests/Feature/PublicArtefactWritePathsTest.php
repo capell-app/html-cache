@@ -40,6 +40,7 @@ const PUBLIC_ARTEFACT_NON_HTML_WRITES = [
     // The publication guard's own lock state, outside the page cache.
     'Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard::writeUrlCounters' => 'withdrawal counters beside the lock file',
     'Capell\HtmlCache\Support\Cache\HtmlCachePublicationGuard::rotate' => 'the generation token in the lock file',
+    'Capell\HtmlCache\Actions\RenderCoalescedHtmlCacheMissAction::acquire' => 'touches the render lock beside the guard lock file to record its last use',
     // Probes and bookkeeping that never hold rendered HTML.
     'Capell\HtmlCache\Health\HtmlCacheHealthCheck::isPageCacheDiskWritable' => 'a writability probe file, deleted at once',
     'Capell\HtmlCache\Support\Cache\EdgePurge\EdgePurgePendingQueue::*' => 'edge purge bookkeeping in the cache store',

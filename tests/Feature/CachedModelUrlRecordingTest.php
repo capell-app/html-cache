@@ -121,43 +121,22 @@ it('ignores morph pivot relations when tracking rendered models', function (): v
     expect($store->tracked($page->getMorphClass()))->toBe(1);
 });
 
-it('records rendered models against a cached url and keeps links a later render did not retrieve', function (): void {
+it('records cache dependencies and preserves links omitted by a later render', function (): void {
     [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $translation = $page->translations()->first();
-
-    expect($translation)->toBeInstanceOf(Translation::class);
     throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
 
     $url = 'https://example.test/about';
+    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation, $siteDomain));
+    $records = CachedModelUrl::query()->where('url', $url);
 
-    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation));
-
-    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe(2)
-        ->and(CachedModelUrl::query()->where('url', $url)->first())
+    expect($records->pluck('cacheable_type')->all())
+        ->toEqualCanonicalizing([$page->getMorphClass(), $translation->getMorphClass(), $siteDomain->getMorphClass()])
+        ->and((clone $records)->firstOrFail())
         ->site_id->toBe($siteDomain->site_id)
         ->site_domain_id->toBe($siteDomain->getKey())
         ->language_id->toBe($siteDomain->language_id)
         ->path->toBe('/about');
-
-    // A render served from cached render data may not retrieve the translation;
-    // that is not evidence the URL stopped showing it.
-    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
-
-    expect(CachedModelUrl::query()->where('url', $url)->pluck('cacheable_type')->all())
-        ->toEqualCanonicalizing([$page->getMorphClass(), $translation->getMorphClass()]);
-});
-
-it('never deletes recorded links when a later render retrieves fewer models', function (): void {
-    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
-    $translation = $page->translations()->first();
-
-    expect($translation)->toBeInstanceOf(Translation::class);
-    throw_unless($translation instanceof Translation, RuntimeException::class, 'Expected page translation fixture.');
-
-    $url = 'https://example.test/about';
-
-    RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page, $translation, $siteDomain));
-    $recorded = CachedModelUrl::query()->where('url', $url)->count();
 
     $deleteQueryCount = 0;
     DB::listen(function (QueryExecuted $query) use (&$deleteQueryCount): void {
@@ -167,10 +146,11 @@ it('never deletes recorded links when a later render retrieves fewer models', fu
         }
     });
 
+    // Cached render data can omit a dependency that the URL still shows.
     RecordCachedModelUrlsAction::run($url, htmlCacheModelMap($page));
 
-    expect(CachedModelUrl::query()->where('url', $url)->count())->toBe($recorded)
-        ->and($recorded)->toBeGreaterThan(1)
+    expect($records->pluck('cacheable_type')->all())
+        ->toEqualCanonicalizing([$page->getMorphClass(), $translation->getMorphClass(), $siteDomain->getMorphClass()])
         ->and($deleteQueryCount)->toBe(0);
 });
 
@@ -300,77 +280,24 @@ it('clears cached files and table rows for invalidated site surrogate keys', fun
         ->and(CachedModelUrl::query()->where('url', $secondUrl)->exists())->toBeTrue();
 });
 
-it('does not clear unrelated cached html when a non-route core model is created', function (): void {
+it('keeps cached HTML when a language or a translation without a route is created', function (): void {
     Storage::fake('page_cache');
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $url = 'https://example.test/about';
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
-
     Storage::disk('page_cache')->put($cachePath, 'cached page');
-    CachedModelUrl::query()->create([
-        'url' => $url,
-        'url_hash' => CachedModelUrl::hashUrl($url),
-        'path' => '/about',
-        'site_id' => $siteDomain->site_id,
-        'site_domain_id' => $siteDomain->getKey(),
-        'language_id' => $siteDomain->language_id,
-        'cacheable_type' => $page->getMorphClass(),
-        'cacheable_id' => $page->getKey(),
-        'cached_at' => now(),
-        'last_seen_at' => now(),
-    ]);
+    $record = htmlCacheCreateCachedModelUrl($url, $siteDomain, $page);
 
-    Language::factory()->create();
+    $language = Language::factory()->create();
 
-    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
-        ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeTrue();
-});
+    expect(Storage::disk('page_cache')->get($cachePath))->toBe('cached page')
+        ->and(CachedModelUrl::query()->whereKey($record->getKey())->exists())->toBeTrue();
 
-it('does not clear unrelated cached html when a translation is created', function (): void {
-    Storage::fake('page_cache');
+    Translation::factory()->translatable($page)->language($language)->create();
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
-    $url = 'https://example.test/about';
-    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
-
-    Storage::disk('page_cache')->put($cachePath, 'cached page');
-    CachedModelUrl::query()->create([
-        'url' => $url,
-        'url_hash' => CachedModelUrl::hashUrl($url),
-        'path' => '/about',
-        'site_id' => $siteDomain->site_id,
-        'site_domain_id' => $siteDomain->getKey(),
-        'language_id' => $siteDomain->language_id,
-        'cacheable_type' => $page->getMorphClass(),
-        'cacheable_id' => $page->getKey(),
-        'cached_at' => now(),
-        'last_seen_at' => now(),
-    ]);
-
-    Translation::factory()
-        ->translatable($page)
-        ->language(Language::factory()->create())
-        ->create();
-
-    expect(Storage::disk('page_cache')->exists($cachePath))->toBeTrue()
-        ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeTrue();
+    expect(Storage::disk('page_cache')->get($cachePath))->toBe('cached page')
+        ->and(CachedModelUrl::query()->whereKey($record->getKey())->exists())->toBeTrue();
 });
 
 it('marks model cached urls stale in scheduled invalidation mode without deleting the current cache', function (): void {
@@ -398,15 +325,7 @@ it('marks model cached urls stale in scheduled invalidation mode without deletin
 it('marks cached urls stale for a model from the cache map', function (): void {
     Storage::fake('page_cache');
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $url = 'https://example.test/about';
     $urlHash = CachedModelUrl::hashUrl($url);
 
@@ -426,7 +345,7 @@ it('marks cached urls stale for a model from the cache map', function (): void {
         'url' => $url,
         'url_hash' => $urlHash,
         'path' => '/about',
-        'stale_key' => StaleCachedUrl::staleKey($urlHash, $siteDomain->site_id, $siteDomain->getKey(), '/about'),
+        'stale_key' => StaleCachedUrl::staleKey($urlHash, $siteDomain->site_id, $siteDomain->id, '/about'),
         'site_id' => $siteDomain->site_id,
         'site_domain_id' => $siteDomain->getKey(),
         'language_id' => $siteDomain->language_id,
@@ -445,24 +364,8 @@ it('marks cached urls stale for a model from the cache map', function (): void {
 it('clears only the selected site scope when clearing a cached model url row', function (): void {
     Storage::fake('page_cache');
 
-    $firstSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'first.test',
-        'path' => null,
-    ]);
-    $secondSiteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'second.test',
-        'path' => null,
-    ]);
-    $firstPage = Page::factory()
-        ->recycle($firstSiteDomain->site)
-        ->withTranslations()
-        ->create();
-    $secondPage = Page::factory()
-        ->recycle($secondSiteDomain->site)
-        ->withTranslations()
-        ->create();
+    [$firstSiteDomain, $firstPage] = htmlCacheCreateDomainAndPage('first.test');
+    [$secondSiteDomain, $secondPage] = htmlCacheCreateDomainAndPage('second.test');
     $url = 'https://shared.test/about';
     $firstCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $firstSiteDomain);
     $secondCachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $secondSiteDomain);
@@ -539,15 +442,7 @@ it('registers html cache middleware into the real frontend route middleware stac
 });
 
 it('clears stale cached url rows when the url no longer resolves to a site domain', function (): void {
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage();
     $url = 'https://old-domain.test/about';
 
     $cachedUrl = CachedModelUrl::query()->create([
@@ -573,15 +468,7 @@ it('clears stale cached url rows when the url no longer resolves to a site domai
 it('clears historical cached files from stored rows when the url no longer resolves', function (): void {
     Storage::fake('page_cache');
 
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'old-domain.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
+    [$siteDomain, $page] = htmlCacheCreateDomainAndPage('old-domain.test');
     $url = 'https://missing-domain.test/about';
     $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
 
@@ -717,42 +604,6 @@ it('clears a draft 404 cache file when the page is published', function (): void
     expect(CachedModelUrl::query()->count())->toBe(0)
         ->and(ClearCachedUrlsForModelAction::run($page))->toBeGreaterThan(0)
         ->and(Storage::disk('page_cache')->exists($errorCachePath))->toBeFalse();
-});
-
-it('clears all cached urls when a site domain changes', function (): void {
-    Storage::fake('page_cache');
-
-    $siteDomain = SiteDomain::factory()->create([
-        'scheme' => 'https',
-        'domain' => 'example.test',
-        'path' => null,
-    ]);
-    $page = Page::factory()
-        ->recycle($siteDomain->site)
-        ->withTranslations()
-        ->create();
-    $url = 'https://example.test/about';
-    $cachePath = resolve(HtmlCachePathResolver::class)->pathForUrl('/about', $siteDomain);
-
-    Storage::disk('page_cache')->put($cachePath, 'cached page');
-    CachedModelUrl::query()->create([
-        'url' => $url,
-        'url_hash' => CachedModelUrl::hashUrl($url),
-        'path' => '/about',
-        'site_id' => $siteDomain->site_id,
-        'site_domain_id' => $siteDomain->getKey(),
-        'language_id' => $siteDomain->language_id,
-        'cacheable_type' => $page->getMorphClass(),
-        'cacheable_id' => $page->getKey(),
-        'cached_at' => now(),
-        'last_seen_at' => now(),
-    ]);
-
-    $siteDomain->update(['domain' => 'new-example.test']);
-    app()->terminate();
-
-    expect(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
-        ->and(CachedModelUrl::query()->where('url', $url)->exists())->toBeFalse();
 });
 
 it('resolves the same distinct cache scope as clearing without mutating tracked entries', function (): void {

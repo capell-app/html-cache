@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Capell\HtmlCache\Support\SiteDiscovery;
+namespace Capell\HtmlCache\Bridges\SiteDiscovery;
 
 use Capell\DiscoveryFoundation\Data\PublicUrlRegistryEntryData;
 use Capell\HtmlCache\Models\CachedModelUrl;

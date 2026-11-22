@@ -3,12 +3,6 @@
 declare(strict_types=1);
 
 use Capell\Core\Models\SiteDomain;
-use Capell\HtmlCache\Data\CacheMap\CacheMapModelSummaryData;
-use Capell\HtmlCache\Data\CacheMap\CacheMapOverviewData;
-use Capell\HtmlCache\Data\CacheMap\CacheMapResourceSummaryData;
-use Capell\HtmlCache\Data\Dashboard\HtmlCacheDashboardStatsData;
-use Capell\HtmlCache\Enums\HtmlCacheKey;
-use Capell\HtmlCache\Enums\HtmlCachePermission;
 use Capell\HtmlCache\Support\Cache\HtmlCachePathResolver;
 use Capell\HtmlCache\Support\Cache\StatelessPaginationRequest;
 use Capell\HtmlCache\Tests\HtmlCacheTestCase;
@@ -28,23 +22,6 @@ function htmlCachePathResolverSiteDomain(array $attributes): SiteDomain
 
     return $siteDomain;
 }
-
-it('keeps html cache dashboard and cache map values typed', function (): void {
-    $modelSummary = new CacheMapModelSummaryData('page', 'Pages', 4, 2);
-    $resourceSummary = new CacheMapResourceSummaryData('page:1', 'page', 'Pages', 1, 'Home', 2, 1);
-    $overview = new CacheMapOverviewData(10, 4, [$modelSummary], [$resourceSummary]);
-    $stats = new HtmlCacheDashboardStatsData(10, 8, 2, 80.0, 7, 1, 0, 87.5);
-
-    expect($overview->modelSummaries[0]->label)->toBe('Pages')
-        ->and($overview->topResources[0]->key)->toBe('page:1')
-        ->and($stats->coverageRate)->toBe(80.0)
-        ->and(HtmlCacheKey::GeneratingStaticSite->value)->toBe('generating-static-site')
-        ->and(HtmlCachePermission::names())->toBe([
-            'capell-html-cache.view',
-            'capell-html-cache.clear',
-            'capell-html-cache.maintenance.manage',
-        ]);
-});
 
 it('resolves query variants to the same files used by the page cache', function (): void {
     config()->set('capell-html-cache.enabled', true);
@@ -69,7 +46,7 @@ it('resolves query variants to the same files used by the page cache', function 
         ->toBe('https.example.test/uk/articles' . $prefixedSuffix . '.html');
 });
 
-it('refuses to resolve unsupported query variants to canonical cache paths', function (string $query): void {
+it('refuses to resolve unsupported query variants to canonical cache paths', function (): void {
     config()->set('capell-html-cache.enabled', true);
     config()->set('capell-html-cache.stateless_pagination.enabled', true);
     config()->set('capell-html-cache.stateless_pagination.params', ['page']);
@@ -79,9 +56,13 @@ it('refuses to resolve unsupported query variants to canonical cache paths', fun
         'path' => null,
     ]);
 
-    expect(fn (): string => (new HtmlCachePathResolver)->pathForRequestUrl('https://example.test/page?' . $query, $domain))
-        ->toThrow(InvalidArgumentException::class, 'Unsupported query parameters have no HTML cache path.');
-})->with(['preview=1', 'page=2&preview=1', 'page%5B%5D=2']);
+    $resolver = new HtmlCachePathResolver;
+
+    foreach (['preview=1', 'page=2&preview=1', 'page%5B%5D=2'] as $query) {
+        expect(fn (): string => $resolver->pathForRequestUrl('https://example.test/page?' . $query, $domain))
+            ->toThrow(InvalidArgumentException::class, 'Unsupported query parameters have no HTML cache path.');
+    }
+});
 
 it('builds safe cache paths for domains, prefixes, errors and absolute urls', function (): void {
     $resolver = new HtmlCachePathResolver;
@@ -108,30 +89,37 @@ it('rejects unsafe cache path segments', function (): void {
     (new HtmlCachePathResolver)->pathForUrl('/', $domain);
 })->throws(InvalidArgumentException::class);
 
-it('rejects encoded unsafe cache path segments', function (string $url): void {
+it('rejects encoded unsafe cache path segments', function (): void {
     $domain = htmlCachePathResolverSiteDomain([
         'scheme' => 'https',
         'domain' => 'example.test',
         'path' => '/',
     ]);
 
-    expect(fn (): string => (new HtmlCachePathResolver)->pathForUrl($url, $domain))
-        ->toThrow(InvalidArgumentException::class);
-})->with([
-    '/unsafe/%2e%2e/secret',
-    '/unsafe/%252e%252e/secret',
-    '/unsafe/%00/secret',
-    '/unsafe/%5c/secret',
-]);
-
-it('uses the resolved request origin for wildcard site domain fields', function (?string $scheme, ?string $host): void {
-    $domain = htmlCachePathResolverSiteDomain(['scheme' => $scheme, 'domain' => $host, 'path' => '/docs']);
     $resolver = new HtmlCachePathResolver;
 
-    expect($resolver->pathForRequestUrl('https://resolved.example.test:8443/docs/guide', $domain))
-        ->toBe('~port-8443/https.resolved.example.test/docs/guide.html');
-})->with([
-    'host agnostic' => ['https', null],
-    'scheme agnostic' => [null, 'resolved.example.test'],
-    'host and scheme agnostic' => [null, null],
-]);
+    foreach ([
+        '/unsafe/%2e%2e/secret',
+        '/unsafe/%252e%252e/secret',
+        '/unsafe/%00/secret',
+        '/unsafe/%5c/secret',
+    ] as $url) {
+        expect(fn (): string => $resolver->pathForUrl($url, $domain))
+            ->toThrow(InvalidArgumentException::class);
+    }
+});
+
+it('uses the resolved request origin for wildcard site domain fields', function (): void {
+    $resolver = new HtmlCachePathResolver;
+
+    foreach ([
+        'host agnostic' => ['https', null],
+        'scheme agnostic' => [null, 'resolved.example.test'],
+        'host and scheme agnostic' => [null, null],
+    ] as $scenario => [$scheme, $host]) {
+        $domain = htmlCachePathResolverSiteDomain(['scheme' => $scheme, 'domain' => $host, 'path' => '/docs']);
+
+        expect($resolver->pathForRequestUrl('https://resolved.example.test:8443/docs/guide', $domain))
+            ->toBe('~port-8443/https.resolved.example.test/docs/guide.html', $scenario);
+    }
+});

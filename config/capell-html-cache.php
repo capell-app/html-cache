@@ -49,7 +49,11 @@ return [
         */
         'shared_max_age' => Env::get('CAPELL_HTML_CACHE_SHARED_MAX_AGE'),
         'browser_max_age' => (int) Env::get('CAPELL_HTML_CACHE_BROWSER_MAX_AGE', 60),
+        // Applies only while a ready edge purge driver removes withdrawn pages.
         'stale_while_revalidate' => (int) Env::get('CAPELL_HTML_CACHE_STALE_WHILE_REVALIDATE', 86400),
+        // Ceiling without a ready edge purge: a withdrawn page may stay in shared caches for
+        // s-maxage plus this many seconds, because nothing purges it.
+        'unpurged_stale_while_revalidate' => $integerEnv('CAPELL_HTML_CACHE_UNPURGED_STALE_WHILE_REVALIDATE', 60),
     ],
     'origin_stale_while_revalidate' => [
         'enabled' => Env::get('CAPELL_HTML_CACHE_ORIGIN_SWR', true),
@@ -280,6 +284,8 @@ return [
     'retention' => [
         'processed_stale_days' => $integerEnv('CAPELL_HTML_CACHE_PROCESSED_STALE_RETENTION_DAYS', 7),
         'generation_run_days' => $integerEnv('CAPELL_HTML_CACHE_GENERATION_RUN_RETENTION_DAYS', 30),
+        // Render and publication lock files unused for this long are pruned daily.
+        'lock_file_days' => $integerEnv('CAPELL_HTML_CACHE_LOCK_FILE_RETENTION_DAYS', 7),
     ],
     'model_event_registration_mode' => Env::get('CAPELL_MODEL_EVENT_REGISTRATION_MODE', 'deferred'),
     'static_generation' => [

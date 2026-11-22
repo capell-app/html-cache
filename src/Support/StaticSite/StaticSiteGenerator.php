@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Capell\HtmlCache\Support\StaticSite;
 
 use Capell\Core\Actions\SiteDomains\ResolveSiteDomainUrlAction;
+use Capell\Core\Actions\Translations\ResolveLanguageFallbackChainAction;
 use Capell\Core\Actions\VisitUrlAction;
+use Capell\Core\Enums\UrlTypeEnum;
 use Capell\Core\Events\UrlVisitFailed;
 use Capell\Core\Exceptions\UrlVisitFailedException;
 use Capell\Core\Facades\CapellCore;
@@ -13,6 +15,7 @@ use Capell\Core\Models\Page;
 use Capell\Core\Models\PageUrl;
 use Capell\Core\Models\Site;
 use Capell\Core\Models\SiteDomain;
+use Capell\Core\Models\Translation;
 use Capell\HtmlCache\Actions\DeleteCachedUrlArtefactsAction;
 use Capell\HtmlCache\Actions\RetireCachedUrlAction;
 use Capell\HtmlCache\Data\HtmlCacheOriginDecisionData;
@@ -22,6 +25,7 @@ use Closure;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -76,7 +80,7 @@ final class StaticSiteGenerator
             ),
         ]);
 
-        return (int) $siteDomain->page_urls_count;
+        return (int) $siteDomain->page_urls_count + count($this->fallbackPageUrls($siteDomain));
     }
 
     private function processExtensionHandlers(SiteDomain $siteDomain, ?Closure $checkpoint): int
@@ -139,6 +143,79 @@ final class StaticSiteGenerator
                 $this->visitUrl($url, $pageUrl->pageable_type === (new Page)->getMorphClass() ? $pageUrl->pageable_id : null);
                 $checkpoint?->__invoke($url);
             });
+
+        foreach ($this->fallbackPageUrls($siteDomain) as $pageUrl) {
+            // Served at this domain under the fallback language path, so key the artefact by this domain.
+            $url = ResolveSiteDomainUrlAction::run($siteDomain, $pageUrl->url);
+            $pageUrl->setRelation('siteDomain', $siteDomain);
+
+            $this->refreshPageCache($pageUrl, $siteDomain);
+            $this->visitUrl($url, $pageUrl->pageable_type === (new Page)->getMorphClass() ? $pageUrl->pageable_id : null);
+            $checkpoint?->__invoke($url);
+        }
+    }
+
+    /**
+     * A domain whose language has a fallback also answers the fallback language's URL
+     * for a page with no translation of its own (Core ResolvePublicPageByUrlAction), so
+     * static output must hold those addresses too. The first language in the chain wins
+     * a path, and a path the domain's own language already uses is never shadowed.
+     *
+     * @return list<PageUrl>
+     */
+    private function fallbackPageUrls(SiteDomain $siteDomain): array
+    {
+        if ($siteDomain->language_id === null) {
+            return [];
+        }
+
+        $fallbackLanguageIds = array_slice(ResolveLanguageFallbackChainAction::run((int) $siteDomain->language_id), 1);
+
+        if ($fallbackLanguageIds === []) {
+            return [];
+        }
+
+        $claimed = PageUrl::query()
+            ->where('site_id', $siteDomain->site_id)
+            ->where('language_id', $siteDomain->language_id)
+            ->pluck('url')
+            ->flip()
+            ->all();
+        $selected = [];
+
+        foreach ($fallbackLanguageIds as $languageId) {
+            $candidates = PageUrl::query()
+                ->whereHas(
+                    'pageable',
+                    fn (BuilderContract $query): BuilderContract => $query->whereHas(
+                        'blueprint',
+                        fn (BuilderContract $query): BuilderContract => $query->enabled()->accessible(),
+                    ),
+                )
+                ->where('site_id', $siteDomain->site_id)
+                ->where('language_id', $languageId)
+                ->enabled()
+                ->where(fn (BuilderContract $query): BuilderContract => $query->whereNull('type')->orWhere('type', '!=', UrlTypeEnum::Redirect))
+                ->whereNotExists(fn (QueryBuilder $query): QueryBuilder => $query
+                    ->selectRaw('1')
+                    ->from((new Translation)->getTable())
+                    ->whereColumn('translatable_type', (new PageUrl)->qualifyColumn('pageable_type'))
+                    ->whereColumn('translatable_id', (new PageUrl)->qualifyColumn('pageable_id'))
+                    ->where('language_id', $siteDomain->language_id))
+                ->orderBy('id')
+                ->get();
+
+            foreach ($candidates as $pageUrl) {
+                if (isset($claimed[$pageUrl->url])) {
+                    continue;
+                }
+
+                $claimed[$pageUrl->url] = true;
+                $selected[] = $pageUrl;
+            }
+        }
+
+        return $selected;
     }
 
     /** @param int|null $pageId the page the URL belongs to, so a failed visit is recorded against it */

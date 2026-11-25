@@ -389,12 +389,29 @@ final class RefreshCachedUrlAtomicallyAction
         }
     }
 
+    /**
+     * A row that never had an owning site domain (a URL whose host or scheme matches
+     * none) has no domain path prefix, so its cache key is exactly the domain-less path
+     * of the URL itself. Every stale producer leaves those paths empty, and without them
+     * eviction refuses and the row fails on every run until maximum-age expiry. A row
+     * that recorded a domain which no longer exists keeps the refusal: its historical
+     * prefix is unknown.
+     */
     private function deleteConfirmedObsoleteCache(StaleCachedUrl $staleCachedUrl, bool $suppressInlineEdgePurge): void
     {
+        $cachePath = $staleCachedUrl->cache_path;
+        $errorCachePath = $staleCachedUrl->error_cache_path;
+
+        if ($staleCachedUrl->site_id === null && $staleCachedUrl->site_domain_id === null) {
+            $paths = resolve(HtmlCachePathResolver::class);
+            $cachePath = is_string($cachePath) && $cachePath !== '' ? $cachePath : $paths->pathForRequestUrl($staleCachedUrl->url);
+            $errorCachePath = is_string($errorCachePath) && $errorCachePath !== '' ? $errorCachePath : $paths->pathForRequestUrl($staleCachedUrl->url, error: true);
+        }
+
         resolve(RetireCachedUrlAction::class)->evict(
             $staleCachedUrl->url,
-            $staleCachedUrl->cache_path,
-            $staleCachedUrl->error_cache_path,
+            $cachePath,
+            $errorCachePath,
             $staleCachedUrl->site_id,
             $staleCachedUrl->site_domain_id,
             $suppressInlineEdgePurge,

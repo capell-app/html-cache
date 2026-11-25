@@ -474,6 +474,8 @@ it('records the page a listing shows when the listing is served from cached rend
     config()->set('capell-frontend.public_render_data_cache', true);
     config()->set('capell-html-cache.model_event_registration_mode', 'sync');
     $listing = Model::withoutEvents(fn (): Page => Page::factory()->site($site['domain']->site)->withTranslations($site['domain']->language)->create(['visible_from' => now()->subDay()]));
+    // The page loader resolves a page with its type; a page without it is treated as never cached.
+    $listing->load('blueprint');
     $runtime = FrontendRuntimeManifestData::forRenderingStrategy(RenderingStrategyEnum::BladeOnly);
     $context = new FrontendRenderContextData(
         page: $listing,

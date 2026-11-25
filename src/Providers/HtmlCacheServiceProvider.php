@@ -97,7 +97,6 @@ use Capell\HtmlCache\Support\ModelServing\RetrievedModelStore;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteExtensionRegistry;
 use Capell\HtmlCache\Support\StaticSite\StaticSiteRequestObserver;
 use Capell\HtmlCache\Support\Telemetry\HtmlCacheHitBuffer;
-use Capell\SiteDiscovery\Contracts\GeneratedOutputCoverageSource;
 use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
@@ -411,8 +410,7 @@ final class HtmlCacheServiceProvider extends AbstractPackageServiceProvider
             return $this;
         }
 
-        $this->app->singleton(HtmlCacheGeneratedOutputCoverageSource::class);
-        $this->app->tag([HtmlCacheGeneratedOutputCoverageSource::class], GeneratedOutputCoverageSource::TAG);
+        HtmlCacheGeneratedOutputCoverageSource::register($this->app);
 
         return $this;
     }

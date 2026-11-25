@@ -769,6 +769,43 @@ it('deletes obsolete stale cache files and indexed urls when the domain no longe
     }
 })->with(['default purge' => false, 'suppressed purge' => true]);
 
+it('retires a domain-less stale url whose row carries no cache paths instead of failing every run', function (): void {
+    // Live 2026-11-22: an http:// URL of an https-only site domain was marked stale with no
+    // owner and no paths, so every scheduled run failed it until maximum-age expiry.
+    Storage::fake('page_cache');
+    config()->set('capell-html-cache.enabled', true);
+    Queue::fake();
+    SiteDomain::factory()->create(['scheme' => 'https', 'domain' => 'example.test', 'path' => null]);
+
+    $page = Page::factory()->withTranslations()->create();
+    $url = 'http://example.test/marketplace/extensions/studio';
+    $urlHash = CachedModelUrl::hashUrl($url);
+    $cachePath = resolve(HtmlCachePathResolver::class)->pathForRequestUrl($url);
+    Storage::disk('page_cache')->put($cachePath, 'old cached page');
+    Storage::disk('page_cache')->put('https.example.test/marketplace/extensions/studio.html', 'canonical page');
+    CachedModelUrl::query()->create([
+        'url' => $url, 'url_hash' => $urlHash, 'path' => '/marketplace/extensions/studio',
+        'site_id' => null, 'site_domain_id' => null, 'language_id' => null,
+        'cacheable_type' => $page->getMorphClass(), 'cacheable_id' => $page->getKey(),
+        'cached_at' => now(), 'last_seen_at' => now(),
+    ]);
+    $row = StaleCachedUrl::query()->create([
+        'url' => $url, 'url_hash' => $urlHash, 'path' => '/marketplace/extensions/studio',
+        'stale_key' => StaleCachedUrl::staleKey($urlHash, null, null, '/marketplace/extensions/studio'),
+        'site_id' => null, 'site_domain_id' => null, 'language_id' => null,
+        'cache_path' => null, 'error_cache_path' => null,
+        'reason' => 'frontend_output_changed', 'status' => StaleCachedUrl::STATUS_PENDING,
+    ]);
+
+    $result = ProcessStaleHtmlCacheAction::run(1);
+
+    expect($result)->toHaveProperties(['attempted' => 1, 'succeeded' => 1, 'failed' => 0])
+        ->and($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_PROCESSED)
+        ->and(Storage::disk('page_cache')->exists($cachePath))->toBeFalse()
+        ->and(Storage::disk('page_cache')->get('https.example.test/marketplace/extensions/studio.html'))->toBe('canonical page')
+        ->and(CachedModelUrl::query()->where('url_hash', $urlHash)->exists())->toBeFalse();
+});
+
 it('refreshes missing pages into the error cache', function (): void {
     Storage::fake('page_cache');
 
@@ -823,6 +860,7 @@ it('removes every artefact of the previous status when a refresh changes status'
     $errorCachePath = $historicalRow ? substr($historicalPath, 0, -5) . '.404.html' : $currentErrorPath;
     $fragmentRequest = Request::create($url);
     $fragmentRequest->headers->set(StatelessPaginationRequest::FRAGMENT_HEADER, 'hero');
+
     $fragmentPath = $paths->pathForRequestUrl($fragmentRequest, $siteDomain);
     $fragmentErrorPath = $paths->pathForRequestUrl($fragmentRequest, $siteDomain, error: true);
 
@@ -833,6 +871,7 @@ it('removes every artefact of the previous status when a refresh changes status'
     foreach ($stale as $file) {
         Storage::disk('page_cache')->put($file, 'previous status');
     }
+
     staleCacheOriginRoute('/index', fn (): mixed => response($fresh, $status, ['Content-Type' => 'text/html']));
 
     $staleCachedUrl = StaleCachedUrl::query()->create([
@@ -1718,6 +1757,7 @@ it('keeps status precedence and evicts every accepted retirement across refresh 
         } else {
             expect($row->last_error)->toContain('response status was ' . $status);
         }
+
         if ($blocker === 'package' && ! $permanent) {
             expect(HtmlCacheEligibilityReason::PackageCacheBlocking->isDeterministicForStaleRefresh($status))->toBeFalse();
         }
@@ -1740,6 +1780,7 @@ it('evicts all retired package artefacts before the next anonymous request on ev
     foreach ($artefacts as $artefact) {
         Storage::disk('page_cache')->put($artefact, 'previous public output');
     }
+
     $index = CachedModelUrl::query()->create([
         'url' => $row->url, 'url_hash' => $row->url_hash, 'path' => $row->path,
         'site_id' => $domain->site_id, 'site_domain_id' => $domain->getKey(), 'language_id' => $domain->language_id,
@@ -1771,7 +1812,7 @@ it('evicts all retired package artefacts before the next anonymous request on ev
             $visit($row->url);
         });
         app()->instance(StaticSiteExtensionRegistry::class, $registry);
-        (new StaticSiteGenerator($domain->site))->process();
+        new StaticSiteGenerator($domain->site)->process();
     } elseif ($path === 'queued') {
         RefreshOriginStaleCachedUrlAction::run($row->url);
     } else {
@@ -1781,11 +1822,13 @@ it('evicts all retired package artefacts before the next anonymous request on ev
     foreach ($artefacts as $artefact) {
         expect(Storage::disk('page_cache')->exists($artefact))->toBeFalse();
     }
+
     expect(CachedModelUrl::query()->whereKey($index->getKey())->exists())->toBeFalse();
     if ($path !== 'static') {
         expect($row->refresh()->status)->toBe(StaleCachedUrl::STATUS_NOT_APPLICABLE)
             ->and($row->last_error)->toContain($sensitive ? 'Reason: package_sensitive_output' : 'Reason: package_cache_blocking');
     }
+
     $request = Request::create($row->url);
     app()->instance('request', $request);
     $response = resolve(HtmlCacheMiddleware::class)->handle($request, function () use (&$originCalls): Response {
@@ -1810,6 +1853,7 @@ it('evicts retired filesystem artefacts before tracking migrations are installed
     foreach ($artefacts as $artefact) {
         Storage::disk('page_cache')->put($artefact, 'previous public output');
     }
+
     Schema::drop((new CachedModelUrl)->getTable());
     $request = Request::create($url);
     app()->instance('request', $request);
@@ -1819,6 +1863,7 @@ it('evicts retired filesystem artefacts before tracking migrations are installed
     foreach ($artefacts as $artefact) {
         expect(Storage::disk('page_cache')->exists($artefact))->toBeFalse();
     }
+
     expect(Schema::hasTable((new CachedModelUrl)->getTable()))->toBeFalse();
 });
 
@@ -1841,6 +1886,7 @@ it('retires a non-html response from a route outside the cache middleware and ev
         Storage::disk('page_cache')->put($artefact, 'stale artefact');
         Storage::disk('page_cache')->put($artefact . PageCache::FRAGMENT_METADATA_EXTENSION, '{}');
     }
+
     $cachedUrl = CachedModelUrl::query()->create([
         'url' => $row->url,
         'url_hash' => $row->url_hash,
@@ -1944,7 +1990,7 @@ it('purges the edge for a url once its refresh replaces the copy a live-worker s
     Queue::fake();
     config()->set('capell-html-cache.invalidation.mode', 'instant');
     config()->set('capell-html-cache.origin_stale_while_revalidate.enabled', true);
-    config()->set('capell-html-cache.origin_stale_while_revalidate.connection', null);
+    config()->set('capell-html-cache.origin_stale_while_revalidate.connection');
 
     $siteDomain = existingStaleCacheDomain();
     $page = Page::factory()->recycle($siteDomain->site)->withTranslations()->create();
@@ -1969,6 +2015,7 @@ it('purges the edge for a url once its refresh replaces the copy a live-worker s
     // Durable-queue detection only; set after the fixtures so their observers keep the test queue.
     config()->set('queue.default', 'edge-refresh-test');
     config()->set('queue.connections.edge-refresh-test', ['driver' => 'database']);
+
     resolve(RefreshWorkerHeartbeat::class)->touch('edge-refresh-test');
 
     (new HtmlFrontendOutputCacheInvalidator)->invalidateAll();
@@ -2066,6 +2113,7 @@ it('rebuilds a page whose refresh missed the maximum stale age', function (): vo
     Queue::fake();
     config()->set('capell-html-cache.invalidation.mode', 'instant');
     config()->set('capell-html-cache.origin_stale_while_revalidate.max_stale_age_seconds', 900);
+
     $siteDomain = existingStaleCacheDomain();
     bindHtmlCacheFrontendContext(Page::factory()->recycle($siteDomain->site)->withTranslations()->create());
     $cachePath = quietPricingPage($siteDomain, 'pricing before the release');
@@ -2097,6 +2145,7 @@ it('keeps a copy published after the clear when the rebuild misses the maximum s
     Queue::fake();
     config()->set('capell-html-cache.invalidation.mode', 'instant');
     config()->set('capell-html-cache.origin_stale_while_revalidate.max_stale_age_seconds', 900);
+
     $siteDomain = existingStaleCacheDomain();
     bindHtmlCacheFrontendContext(Page::factory()->recycle($siteDomain->site)->withTranslations()->create());
     $cachePath = quietPricingPage($siteDomain, 'pricing before the release');
